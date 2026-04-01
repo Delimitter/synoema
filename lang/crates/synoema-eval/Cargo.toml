@@ -1,0 +1,13 @@
+[package]
+name = "synoema-eval"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+synoema-parser = { path = "../synoema-parser" }
+synoema-lexer = { path = "../synoema-lexer" }
+synoema-types = { path = "../synoema-types" }
+
+[dev-dependencies]
+pretty_assertions = "1"

@@ -1,0 +1,213 @@
+//! Core IR for Synoema — a simplified System F-like representation.
+//!
+//! All surface syntax is desugared into a small set of core constructs:
+//! - `Var`, `Lit`, `App`, `Lam`, `Let`, `Case`, `Con`, `PrimOp`
+//!
+//! This IR is the input for:
+//! - The LLVM code generator (Phase 7)
+//! - Future optimizations (inlining, constant folding, dead code elimination)
+
+use synoema_parser::{Lit, BinOp};
+
+/// A unique identifier for variables (may be renamed to avoid shadowing)
+pub type Name = String;
+
+/// Core expression — the heart of the IR
+#[derive(Debug, Clone, PartialEq)]
+pub enum CoreExpr {
+    /// Variable reference
+    Var(Name),
+
+    /// Literal value
+    Lit(Lit),
+
+    /// Function application: `f x`
+    App(Box<CoreExpr>, Box<CoreExpr>),
+
+    /// Lambda abstraction: `\x -> body`
+    Lam(Name, Box<CoreExpr>),
+
+    /// Let binding: `let x = val in body`
+    Let(Name, Box<CoreExpr>, Box<CoreExpr>),
+
+    /// Recursive let: `let rec f = val in body`
+    LetRec(Name, Box<CoreExpr>, Box<CoreExpr>),
+
+    /// Case analysis (pattern matching):
+    /// ```text
+    /// case scrutinee of
+    ///   pat1 -> expr1
+    ///   pat2 -> expr2
+    /// ```
+    Case(Box<CoreExpr>, Vec<Alt>),
+
+    /// Data constructor: `Just`, `Cons`, etc.
+    Con(Name),
+
+    /// Primitive operation: `add#`, `mul#`, `eq#`, etc.
+    PrimOp(PrimOp),
+
+    /// List literal (desugared to Cons/Nil chain in later pass)
+    MkList(Vec<CoreExpr>),
+}
+
+/// A case alternative: `pattern -> expression`
+#[derive(Debug, Clone, PartialEq)]
+pub struct Alt {
+    pub pat: CorePat,
+    pub body: CoreExpr,
+}
+
+/// Core pattern — simplified from surface patterns
+#[derive(Debug, Clone, PartialEq)]
+pub enum CorePat {
+    /// Wildcard `_`
+    Wildcard,
+    /// Variable binding
+    Var(Name),
+    /// Literal match
+    Lit(Lit),
+    /// Constructor pattern: `Con name [sub-patterns]`
+    Con(Name, Vec<CorePat>),
+}
+
+/// Primitive operations (mapped from surface BinOp and builtins)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrimOp {
+    // Arithmetic
+    Add, Sub, Mul, Div, Mod, Neg,
+    // Comparison
+    Eq, Neq, Lt, Gt, Lte, Gte,
+    // Logic
+    And, Or, Not,
+    // List
+    Concat, Cons,
+    // Conversion
+    Show,
+    // IO
+    Print,
+    // Range
+    Range,
+}
+
+impl PrimOp {
+    /// Convert from surface BinOp
+    pub fn from_binop(op: &BinOp) -> Self {
+        match op {
+            BinOp::Add => PrimOp::Add,
+            BinOp::Sub => PrimOp::Sub,
+            BinOp::Mul => PrimOp::Mul,
+            BinOp::Div => PrimOp::Div,
+            BinOp::Mod => PrimOp::Mod,
+            BinOp::Eq => PrimOp::Eq,
+            BinOp::Neq => PrimOp::Neq,
+            BinOp::Lt => PrimOp::Lt,
+            BinOp::Gt => PrimOp::Gt,
+            BinOp::Lte => PrimOp::Lte,
+            BinOp::Gte => PrimOp::Gte,
+            BinOp::And => PrimOp::And,
+            BinOp::Or => PrimOp::Or,
+            BinOp::Concat => PrimOp::Concat,
+            BinOp::Cons => PrimOp::Cons,
+            BinOp::Pipe | BinOp::Compose => {
+                unreachable!("Pipe and Compose are desugared before PrimOp conversion")
+            }
+        }
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            PrimOp::Add => "add#", PrimOp::Sub => "sub#",
+            PrimOp::Mul => "mul#", PrimOp::Div => "div#",
+            PrimOp::Mod => "mod#", PrimOp::Neg => "neg#",
+            PrimOp::Eq => "eq#",   PrimOp::Neq => "neq#",
+            PrimOp::Lt => "lt#",   PrimOp::Gt => "gt#",
+            PrimOp::Lte => "lte#", PrimOp::Gte => "gte#",
+            PrimOp::And => "and#", PrimOp::Or => "or#",
+            PrimOp::Not => "not#",
+            PrimOp::Concat => "concat#", PrimOp::Cons => "cons#",
+            PrimOp::Show => "show#", PrimOp::Print => "print#",
+            PrimOp::Range => "range#",
+        }
+    }
+}
+
+/// A top-level definition in Core IR
+#[derive(Debug, Clone, PartialEq)]
+pub struct CoreDef {
+    pub name: Name,
+    pub body: CoreExpr,
+}
+
+/// A complete Core program
+#[derive(Debug, Clone, PartialEq)]
+pub struct CoreProgram {
+    pub defs: Vec<CoreDef>,
+}
+
+// ── Display ─────────────────────────────────────────────────
+
+impl std::fmt::Display for CoreExpr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CoreExpr::Var(n) => write!(f, "{}", n),
+            CoreExpr::Lit(lit) => write!(f, "{}", format_lit(lit)),
+            CoreExpr::App(func, arg) => {
+                write!(f, "({} {})", func, arg)
+            }
+            CoreExpr::Lam(param, body) => {
+                write!(f, "(\\{} -> {})", param, body)
+            }
+            CoreExpr::Let(name, val, body) => {
+                write!(f, "(let {} = {} in {})", name, val, body)
+            }
+            CoreExpr::LetRec(name, val, body) => {
+                write!(f, "(letrec {} = {} in {})", name, val, body)
+            }
+            CoreExpr::Case(scrut, alts) => {
+                write!(f, "(case {} of", scrut)?;
+                for alt in alts {
+                    write!(f, " {} -> {};", alt.pat, alt.body)?;
+                }
+                write!(f, ")")
+            }
+            CoreExpr::Con(name) => write!(f, "{}", name),
+            CoreExpr::PrimOp(op) => write!(f, "{}", op.name()),
+            CoreExpr::MkList(elems) => {
+                write!(f, "[")?;
+                for (i, e) in elems.iter().enumerate() {
+                    if i > 0 { write!(f, " ")?; }
+                    write!(f, "{}", e)?;
+                }
+                write!(f, "]")
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for CorePat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CorePat::Wildcard => write!(f, "_"),
+            CorePat::Var(n) => write!(f, "{}", n),
+            CorePat::Lit(lit) => write!(f, "{}", format_lit(lit)),
+            CorePat::Con(name, pats) => {
+                write!(f, "{}", name)?;
+                for p in pats {
+                    write!(f, " {}", p)?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+fn format_lit(lit: &Lit) -> String {
+    match lit {
+        Lit::Int(n) => format!("{}", n),
+        Lit::Float(n) => format!("{}", n),
+        Lit::Str(s) => format!("\"{}\"", s),
+        Lit::Char(c) => format!("'{}'", c),
+        Lit::Bool(b) => format!("{}", b),
+    }
+}

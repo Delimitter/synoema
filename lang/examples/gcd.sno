@@ -1,0 +1,4 @@
+-- Greatest Common Divisor (Euclidean algorithm)
+gcd a 0 = a
+gcd a b = gcd b (a % b)
+main = gcd 252 105

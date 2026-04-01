@@ -1,0 +1,5 @@
+qsort [] = []
+qsort (p:xs) = qsort lo ++ [p] ++ qsort hi
+  lo = [x | x <- xs , x <= p]
+  hi = [x | x <- xs , x > p]
+main = qsort [5 3 8 1 9 2 7 4 6]

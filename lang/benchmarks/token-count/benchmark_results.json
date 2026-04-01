@@ -1,0 +1,109 @@
+{
+  "benchmarks": [
+    {
+      "name": "Factorial",
+      "synoema": 16,
+      "python": 29,
+      "haskell": 16,
+      "vs_python": 44.8,
+      "vs_haskell": 0.0
+    },
+    {
+      "name": "Map",
+      "synoema": 20,
+      "python": 42,
+      "haskell": 23,
+      "vs_python": 52.4,
+      "vs_haskell": 13.0
+    },
+    {
+      "name": "QuickSort",
+      "synoema": 51,
+      "python": 83,
+      "haskell": 54,
+      "vs_python": 38.6,
+      "vs_haskell": 5.6
+    },
+    {
+      "name": "FizzBuzz",
+      "synoema": 44,
+      "python": 64,
+      "haskell": 49,
+      "vs_python": 31.2,
+      "vs_haskell": 10.2
+    },
+    {
+      "name": "Filter",
+      "synoema": 27,
+      "python": 67,
+      "haskell": 36,
+      "vs_python": 59.7,
+      "vs_haskell": 25.0
+    },
+    {
+      "name": "Fibonacci",
+      "synoema": 26,
+      "python": 46,
+      "haskell": 26,
+      "vs_python": 43.5,
+      "vs_haskell": 0.0
+    },
+    {
+      "name": "Sum List",
+      "synoema": 16,
+      "python": 33,
+      "haskell": 19,
+      "vs_python": 51.5,
+      "vs_haskell": 15.8
+    },
+    {
+      "name": "Length",
+      "synoema": 16,
+      "python": 30,
+      "haskell": 19,
+      "vs_python": 46.7,
+      "vs_haskell": 15.8
+    },
+    {
+      "name": "Reverse",
+      "synoema": 18,
+      "python": 35,
+      "haskell": 18,
+      "vs_python": 48.6,
+      "vs_haskell": 0.0
+    },
+    {
+      "name": "Compose & Apply",
+      "synoema": 38,
+      "python": 75,
+      "haskell": 39,
+      "vs_python": 49.3,
+      "vs_haskell": 2.6
+    },
+    {
+      "name": "Maximum",
+      "synoema": 28,
+      "python": 58,
+      "haskell": 37,
+      "vs_python": 51.7,
+      "vs_haskell": 24.3
+    },
+    {
+      "name": "Zip",
+      "synoema": 32,
+      "python": 53,
+      "haskell": 37,
+      "vs_python": 39.6,
+      "vs_haskell": 13.5
+    }
+  ],
+  "totals": {
+    "synoema": 332,
+    "python": 615,
+    "haskell": 373
+  },
+  "vs_python_pct": 46.0,
+  "vs_haskell_pct": 11.0,
+  "programs_count": 12,
+  "note": "Conservative manual BPE counter (overestimates ~5-10%)"
+}

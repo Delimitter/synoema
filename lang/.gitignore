@@ -1,0 +1,11 @@
+/target
+**/*.rs.bk
+*.swp
+*.swo
+*~
+.DS_Store
+Cargo.lock
+*.o
+*.a
+*.so
+*.dylib

@@ -1,0 +1,11 @@
+[package]
+name = "synoema-parser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+synoema-lexer = { path = "../synoema-lexer" }
+
+[dev-dependencies]
+pretty_assertions = "1"

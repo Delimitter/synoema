@@ -1,0 +1,19 @@
+[package]
+name = "synoema-repl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "synoema"
+path = "src/main.rs"
+
+[dependencies]
+synoema-lexer = { path = "../synoema-lexer" }
+synoema-parser = { path = "../synoema-parser" }
+synoema-types = { path = "../synoema-types" }
+synoema-eval = { path = "../synoema-eval" }
+synoema-codegen = { path = "../synoema-codegen" }
+
+[dev-dependencies]
+pretty_assertions = "1"

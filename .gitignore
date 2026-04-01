@@ -1,0 +1,19 @@
+# Rust build artifacts
+lang/target/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Midscene artifacts
+midscene_run/
+
+# Plans (local work in progress)
+plans/

@@ -1,0 +1,20 @@
+[package]
+name = "synoema-codegen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+synoema-lexer = { path = "../synoema-lexer" }
+synoema-parser = { path = "../synoema-parser" }
+synoema-core = { path = "../synoema-core" }
+cranelift-codegen = "0.104"
+cranelift-frontend = "0.104"
+cranelift-module = "0.104"
+cranelift-object = "0.104"
+cranelift-jit = "0.104"
+cranelift-native = "0.104"
+target-lexicon = "0.12"
+
+[dev-dependencies]
+pretty_assertions = "1"

@@ -1,0 +1,145 @@
+# Synoema Grammar in GBNF Format
+# Compatible with: llama.cpp, XGrammar (SGLang/vLLM/TensorRT-LLM), Outlines
+#
+# This grammar guarantees 100% syntactic correctness of LLM-generated Synoema code.
+# All operators are single BPE tokens in cl100k_base / Llama tokenizers.
+#
+# Usage with SGLang:
+#   curl http://localhost:30000/generate \
+#     -H "Content-Type: application/json" \
+#     -d '{"text": "Write a factorial function in Synoema:", "extra_body": {"ebnf": "<grammar>"}}'
+#
+# Usage with llama.cpp:
+#   ./main -m model.gguf --grammar-file synoema.gbnf -p "Write quicksort in Synoema:"
+
+# ── Top Level ────────────────────────────────────────────
+
+root ::= program
+
+program ::= (decl newline)* decl newline?
+
+decl ::= func-def | type-sig | type-def
+
+# ── Function Definition ──────────────────────────────────
+
+func-def ::= lower-id ws (pattern ws)* "=" ws expr
+
+type-sig ::= lower-id ws ":" ws type
+
+# ── Type Definitions (ADT) ───────────────────────────────
+
+type-def ::= upper-id (ws lower-id)* ws "=" ws variants
+
+variants ::= variant (ws "|" ws variant)*
+
+variant ::= upper-id (ws type-atom)*
+
+# ── Expressions (precedence climbing) ────────────────────
+
+expr ::= cond-expr | pipe-expr
+
+cond-expr ::= "?" ws expr ws "->" ws expr ws ":" ws expr
+
+pipe-expr ::= or-expr (ws "|>" ws or-expr)*
+
+or-expr ::= and-expr (ws "||" ws and-expr)*
+
+and-expr ::= cmp-expr (ws "&&" ws cmp-expr)*
+
+cmp-expr ::= concat-expr (ws cmp-op ws concat-expr)?
+
+cmp-op ::= "==" | "!=" | "<=" | ">=" | "<" | ">"
+
+concat-expr ::= add-expr (ws "++" ws add-expr)*
+
+add-expr ::= mul-expr (ws ("+" | "-") ws mul-expr)*
+
+mul-expr ::= compose-expr (ws ("*" | "/" | "%") ws compose-expr)*
+
+compose-expr ::= unary-expr (ws ">>" ws unary-expr)*
+
+unary-expr ::= "-" ws access-expr | access-expr
+
+access-expr ::= app-expr ("." lower-id)*
+
+app-expr ::= atom (ws atom)*
+
+# ── Atoms ────────────────────────────────────────────────
+
+atom ::= lower-id
+       | upper-id
+       | int-lit
+       | float-lit
+       | string-lit
+       | char-lit
+       | bool-lit
+       | "(" ws expr ws ")"
+       | list-expr
+       | lambda-expr
+
+lambda-expr ::= "\\" ws (pattern ws)+ "->" ws expr
+
+list-expr ::= "[" ws "]"
+            | "[" ws expr (ws expr)* ws "]"
+            | "[" ws expr ws "|" ws generators ws "]"
+            | "[" ws expr ws ".." ws expr ws "]"
+
+generators ::= generator (ws "," ws generator)*
+
+generator ::= lower-id ws "<-" ws expr
+            | expr
+
+# ── Patterns ─────────────────────────────────────────────
+
+pattern ::= "_"
+          | lower-id
+          | int-lit
+          | string-lit
+          | bool-lit
+          | upper-id (ws pattern)*
+          | "(" ws pattern ws ":" ws pattern ws ")"
+          | "(" ws pattern ws ")"
+          | "[" ws "]"
+
+# ── Types ────────────────────────────────────────────────
+
+type ::= type-atom (ws "->" ws type)?
+
+type-atom ::= upper-id
+            | lower-id
+            | "(" ws type ws ")"
+            | "[" ws type ws "]"
+
+# ── Literals ─────────────────────────────────────────────
+
+int-lit ::= "0" | [1-9] [0-9]*
+
+float-lit ::= int-lit "." [0-9]+
+
+string-lit ::= "\"" string-char* "\""
+
+string-char ::= [^"\\\n] | "\\" [nrt\\"0]
+
+char-lit ::= "'" ([^'\\\n] | "\\" [nrt\\'0]) "'"
+
+bool-lit ::= "true" | "false"
+
+# ── Identifiers ──────────────────────────────────────────
+
+lower-id ::= [a-z] [a-zA-Z0-9_]*
+
+upper-id ::= [A-Z] [a-zA-Z0-9]*
+
+# ── Keywords (reserved) ─────────────────────────────────
+# mod, use, trait, impl, true, false, lazy
+# These are handled by the identifier rules above
+
+# ── Whitespace & Structure ───────────────────────────────
+
+ws ::= [ \t]*
+
+newline ::= "\n" [ \t]*
+
+# ── Comments (optional - LLM may or may not generate) ────
+
+comment ::= "--" [^\n]*

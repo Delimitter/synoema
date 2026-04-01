@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/synoema-lexer",
+    "crates/synoema-parser",
+    "crates/synoema-types",
+    "crates/synoema-core",
+    "crates/synoema-eval",
+    "crates/synoema-codegen",
+    "crates/synoema-repl",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"

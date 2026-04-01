@@ -1,0 +1,4 @@
+map f [] = []
+map f (x:xs) = f x : map f xs
+double x = x * 2
+main = map double [1 2 3 4 5]
