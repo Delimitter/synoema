@@ -20,3 +20,6 @@ plans/
 
 # Claude Code local config
 .claude/
+
+# Cursor local config (contains API keys)
+.cursor/

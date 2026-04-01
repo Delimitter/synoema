@@ -89,14 +89,15 @@ No `def`. No `return`. No commas in lists. No `if`/`else`. Every operator is a s
 ### Build
 
 ```bash
-git clone https://github.com/synoema/synoema
-cd synoema
+cd lang
 cargo build
 ```
 
 ### Run
 
 ```bash
+cd lang
+
 # Interpreter — supports all language features
 cargo run -p synoema-repl -- run examples/quicksort.sno
 
@@ -117,12 +118,14 @@ cargo build --release -p synoema-repl
 ### Test
 
 ```bash
+cd lang
 cargo test        # 264 tests across all crates
 ```
 
 ### Try the examples
 
 ```bash
+cd lang
 cargo run -p synoema-repl -- run examples/quicksort.sno    # [1 2 3 4 5 6 7 8 9]
 cargo run -p synoema-repl -- jit examples/factorial.sno    # 3628800
 cargo run -p synoema-repl -- run examples/fizzbuzz.sno     # FizzBuzz
@@ -204,14 +207,14 @@ Synoema includes a GBNF grammar for constrained decoding. Any LLM can generate *
 response = client.chat.completions.create(
     model="default",
     messages=[{"role": "user", "content": "Write factorial in Synoema"}],
-    extra_body={"ebnf": open("tools/constrained/synoema.gbnf").read()},
+    extra_body={"ebnf": open("lang/tools/constrained/synoema.gbnf").read()},
 )
 # Output is 100% syntactically valid Synoema — guaranteed by grammar
 ```
 
 ```bash
 # llama.cpp
-./main -m model.gguf --grammar-file tools/constrained/synoema.gbnf \
+./main -m model.gguf --grammar-file lang/tools/constrained/synoema.gbnf \
   -p "-- Quicksort in Synoema" -n 128
 ```
 
@@ -228,7 +231,7 @@ Synoema's design is grounded in peer-reviewed research:
 - **BPE misalignment degrades accuracy** — Beurer-Kellner et al. (2024), ICML
 - **Deterministic CFG enables zero-overhead constrained decoding** — Tian et al. (2024), CoLM
 
-Full bibliography: [docs/research/scientific_foundations.md](../docs/research/scientific_foundations.md)
+Full bibliography: [docs/research/scientific_foundations.md](docs/research/scientific_foundations.md)
 
 ## Roadmap
 
