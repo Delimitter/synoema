@@ -17,3 +17,6 @@ midscene_run/
 
 # Plans (local work in progress)
 plans/
+
+# Claude Code local config
+.claude/
