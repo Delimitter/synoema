@@ -3,13 +3,13 @@
 ## Quick Reference
 
 Synoema — programming language for LLM code generation.
-~10000 lines Rust, 386 tests, 7 crates, Cranelift JIT backend.
+~11000 lines Rust, 433 tests, 7 crates, Cranelift JIT backend.
 
 ## Commands
 
 ```bash
 cargo build                     # Build all
-cargo test                      # Run 386 tests
+cargo test                      # Run 433 tests
 cargo run -p synoema-repl -- run examples/quicksort.sno  # Interpreter
 cargo run -p synoema-repl -- jit examples/factorial.sno   # JIT compile
 cargo run -p synoema-repl -- eval "6 * 7"                 # Eval expression
@@ -50,15 +50,18 @@ Source (.sno) → Lexer → Parser → Types (HM) → Core IR → Optimizer → 
 - **Phase 11.5** ✅ String literal patterns in JIT (top-level + sub-patterns inside constructors, 5 tests)
 - **Phase 12a** ✅ Float in JIT (FloatNode heap-alloc, tag=0x04, 10 tests: arithmetic + comparisons + cond)
 - **Phase 12b** ✅ Record patterns in JIT (CorePat::Record in compile_case + bind_sub_pat, 5 tests)
+- **Phase 13** ✅ Float Eq/Ord/Show in interpreter + 19 tests (float ==, <, >, show, ADT+float)
+- **`**` operator** ✅ Power operator + float math builtins (sqrt, floor, ceil, abs, round) — interpreter + JIT, 28 tests
+- **VS Code extension** ✅ TextMate grammar for .sno files (`tools/vscode-extension/`)
 
 ## Current Priorities
 
 1. Publication: GitHub + Habr articles + HN launch
-2. Phase 13: Type classes (`trait`, `impl`)
+2. Phase 14: IO / Effects (`@io` marker, print, readline)
 
 ## Known Bugs
 
-- 0 warnings, 0 known bugs (386/386 tests passing)
+- 0 warnings, 0 known bugs (433/433 tests passing)
 
 Note: the "Ackermann JIT bug" was a false positive. `ack 3 4 = 125` is correct (2^7 − 3).
 
