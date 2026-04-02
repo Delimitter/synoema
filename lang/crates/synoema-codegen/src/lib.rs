@@ -994,4 +994,52 @@ main = check (Just \"fail\")
         // show can be used in string concatenation
         assert_eq!(jit_str(r#"main = "len=" ++ show (length [1 2 3])"#), "len=3");
     }
+
+    // ── Phase 15c: show for ADTs and Records ────────────────
+
+    #[test]
+    fn jit_show_adt_none() {
+        let src = "Maybe a = Just a | None\nmain = show None";
+        assert_eq!(jit_str(src), "None");
+    }
+
+    #[test]
+    fn jit_show_adt_just_int() {
+        let src = "Maybe a = Just a | None\nmain = show (Just 42)";
+        assert_eq!(jit_str(src), "Just 42");
+    }
+
+    #[test]
+    fn jit_show_adt_two_fields() {
+        let src = "Shape = Rect Int Int\nmain = show (Rect 3 4)";
+        assert_eq!(jit_str(src), "Rect 3 4");
+    }
+
+    #[test]
+    fn jit_show_adt_nested() {
+        // Nested constructor: Just (Just 7) → "Just (Just 7)"
+        let src = "Maybe a = Just a | None\nmain = show (Just (Just 7))";
+        assert_eq!(jit_str(src), "Just (Just 7)");
+    }
+
+    #[test]
+    fn jit_show_record_two_fields() {
+        assert_eq!(jit_str("main = show {x = 3, y = 4}"), "{x = 3, y = 4}");
+    }
+
+    #[test]
+    fn jit_show_record_single_field() {
+        assert_eq!(jit_str("main = show {n = 42}"), "{n = 42}");
+    }
+
+    #[test]
+    fn jit_show_adt_in_concat() {
+        let src = "Maybe a = Just a | None\nmain = \"val=\" ++ show (Just 99)";
+        assert_eq!(jit_str(src), "val=Just 99");
+    }
+
+    #[test]
+    fn jit_show_record_float_field() {
+        assert_eq!(jit_str("main = show {pi = 3.14}"), "{pi = 3.14}");
+    }
 }

@@ -95,6 +95,16 @@ pub fn is_str(v: i64) -> bool { v & STR_TAG == STR_TAG }
 
 const FLOAT_TAG: i64 = 4; // bit 2
 
+// ConNode tag: bit 0 set, bits 1-2 clear → no conflict with STR(bit1) or FLOAT(bit2)
+const CON_TAG: i64 = 1;
+// RecordNode tag: bits 0+2 set (= 5) → no conflict with STR(2) or FLOAT(4) or CON(1)
+const RECORD_TAG: i64 = 5;
+
+#[inline]
+pub fn is_con(v: i64) -> bool { (v as u64) >= 0x10000 && v & 7 == CON_TAG }
+#[inline]
+pub fn is_record(v: i64) -> bool { (v as u64) >= 0x10000 && v & 7 == RECORD_TAG }
+
 #[repr(C)]
 struct FloatNode {
     bits: i64, // f64 bits stored as i64
@@ -500,9 +510,11 @@ fn print_list(list: i64) {
     print!("]");
 }
 
-/// Heuristic: does this i64 look like a list heap pointer (not a string)?
+/// Heuristic: does this i64 look like a list heap pointer?
+/// Lists are raw 8-byte-aligned heap pointers with ALL low 3 bits clear.
+/// Strings set bit 1, floats set bit 2, cons set bit 0, records set bits 0+2.
 fn is_likely_list_ptr(val: i64) -> bool {
-    val > 100_000 && !is_str(val) && val % 8 == 0 // list nodes are 8-byte aligned, not string-tagged
+    val > 100_000 && val & 7 == 0
 }
 
 // ── String Support ──────────────────────────────────────
@@ -594,6 +606,9 @@ pub extern "C" fn synoema_val_eq(a: i64, b: i64) -> i64 {
         } else {
             0
         }
+    } else if is_con(a) || is_con(b) || is_record(a) || is_record(b) {
+        // Con/Record equality: pointer identity (structural eq not supported yet)
+        if a == b { 1 } else { 0 }
     } else if is_likely_list_ptr(a) || is_likely_list_ptr(b) {
         synoema_list_eq(a, b)
     } else {
@@ -612,6 +627,26 @@ fn format_val(val: i64) -> String {
     } else if is_float(val) && is_heap {
         let f = synoema_float_get(val);
         if f.fract() == 0.0 && f.abs() < 1e15 { format!("{:.1}", f) } else { format!("{}", f) }
+    } else if is_con(val) {
+        // Decode ConNode name for nested show
+        let base = (val & !CON_TAG) as *const i64;
+        let arity    = unsafe { *base.add(1) } as usize;
+        let name_ptr = unsafe { *base.add(2) } as *const u8;
+        let name_len = unsafe { *base.add(3) } as usize;
+        let name_str = if name_len == 0 || name_ptr.is_null() { "Con".to_string() } else {
+            let bytes = unsafe { std::slice::from_raw_parts(name_ptr, name_len) };
+            std::str::from_utf8(bytes).unwrap_or("Con").to_string()
+        };
+        if arity == 0 { return name_str; }
+        let mut s = name_str;
+        for i in 0..arity {
+            let field = unsafe { *base.add(4 + i) };
+            s.push(' ');
+            let fs = format_val(field);
+            if fs.contains(' ') { s.push('('); s.push_str(&fs); s.push(')'); }
+            else { s.push_str(&fs); }
+        }
+        s
     } else if is_likely_list_ptr(val) {
         format_list(val)
     } else {
@@ -655,16 +690,22 @@ fn alloc_str(s: &str) -> i64 {
 /// - float → decimal representation
 /// - string → identity (already a string)
 /// - list → "[a b c]" format
+/// - Con → "Name field0 field1 ..."
+/// - Record → "{...}" (field names not stored at runtime)
 pub extern "C" fn synoema_show_any(val: i64) -> i64 {
     let is_heap = (val as u64) >= 0x10000;
     if is_str(val) && is_heap {
         val // already a string, return as-is
     } else if is_float(val) && is_heap {
         alloc_str(&format_val(val))
+    } else if is_con(val) {
+        synoema_show_con(val)
+    } else if is_record(val) {
+        alloc_str("{..}") // field names not available at runtime
     } else if is_likely_list_ptr(val) {
         alloc_str(&format_list(val))
     } else {
-        // Plain int (including 0=nil/false, 1=true — indistinguishable at runtime)
+        // Plain int (including 0=nil/false — indistinguishable at runtime)
         synoema_show_int(val)
     }
 }
@@ -793,7 +834,8 @@ pub fn field_name_hash(name: &str) -> i64 {
     h as i64
 }
 
-/// Allocate a RecordNode for `len` fields. Returns raw pointer as i64.
+/// Allocate a RecordNode for `len` fields. Returns RECORD_TAG-tagged pointer.
+/// Layout: [len: i64][(hash: i64, val: i64) × len]
 #[unsafe(no_mangle)]
 pub extern "C" fn synoema_record_new(len: i64) -> i64 {
     // 1 word for len + 2 words per field
@@ -806,15 +848,14 @@ pub extern "C" fn synoema_record_new(len: i64) -> i64 {
     unsafe {
         std::ptr::write_bytes(ptr, 0, total_words);
         *ptr = len; // store len at offset 0
-        ptr as i64
+        (ptr as i64) | RECORD_TAG
     }
 }
 
-/// Store a field into a RecordNode at position `idx`.
-/// rec[1 + idx*2] = hash, rec[1 + idx*2 + 1] = val
+/// Store a field into a RecordNode at position `idx`. Strips RECORD_TAG.
 #[unsafe(no_mangle)]
 pub extern "C" fn synoema_record_set(rec: i64, idx: i64, hash: i64, val: i64) {
-    let base = rec as *mut i64;
+    let base = (rec & !RECORD_TAG) as *mut i64;
     let offset = (1 + idx * 2) as usize;
     unsafe {
         *base.add(offset) = hash;
@@ -823,10 +864,10 @@ pub extern "C" fn synoema_record_set(rec: i64, idx: i64, hash: i64, val: i64) {
 }
 
 /// Linear scan to find the field matching `hash`. Returns its value.
-/// Panics if hash is not found.
+/// Strips RECORD_TAG before use. Panics if hash is not found.
 #[unsafe(no_mangle)]
 pub extern "C" fn synoema_record_get(rec: i64, hash: i64) -> i64 {
-    let base = rec as *const i64;
+    let base = (rec & !RECORD_TAG) as *const i64;
     let len = unsafe { *base } as usize;
     for i in 0..len {
         let slot = unsafe { *base.add(1 + i * 2) };
@@ -839,16 +880,20 @@ pub extern "C" fn synoema_record_get(rec: i64, hash: i64) -> i64 {
 
 // ── Algebraic Data Types ─────────────────────────────────
 
-/// ConNode memory layout: [tag: i64][field_0: i64]...[field_{arity-1}: i64]
-/// - tag = constructor index (0-based within its ADT definition)
-/// - arity fields follow immediately
-/// No pointer tagging needed: type system prevents confusion with lists/strings.
+/// ConNode memory layout (pointer tagged with CON_TAG=1):
+/// [tag: i64][arity: i64][name_ptr: i64][name_len: i64][field_0: i64]...[field_{arity-1}: i64]
+/// - tag      = constructor index (0-based within its ADT definition)
+/// - arity    = number of payload fields (for show/runtime inspection)
+/// - name_ptr = raw pointer to constructor name bytes (static data section)
+/// - name_len = byte length of constructor name
+/// - fields follow at slot 4+idx
+/// Returned pointer has CON_TAG=1 set in bit 0.
 
-/// Allocate a new ConNode with `arity` payload slots.
-/// Initializes tag, zeroes all fields. Returns raw pointer as i64.
+/// Allocate a new ConNode. `name_ptr`/`name_len` point to static name bytes.
+/// Returns a CON_TAG-tagged pointer.
 #[unsafe(no_mangle)]
-pub extern "C" fn synoema_make_con(tag: i64, arity: i64) -> i64 {
-    let n = 1 + arity as usize;
+pub extern "C" fn synoema_make_con(tag: i64, arity: i64, name_ptr: i64, name_len: i64) -> i64 {
+    let n = 4 + arity as usize; // tag + arity + name_ptr + name_len + fields
     let ptr = arena_alloc(
         n * std::mem::size_of::<i64>(),
         std::mem::align_of::<i64>(),
@@ -856,28 +901,57 @@ pub extern "C" fn synoema_make_con(tag: i64, arity: i64) -> i64 {
     if ptr.is_null() { panic!("synoema_make_con: allocation failed"); }
     unsafe {
         *ptr = tag;
-        std::ptr::write_bytes(ptr.add(1), 0, arity as usize);
-        ptr as i64
+        *ptr.add(1) = arity;
+        *ptr.add(2) = name_ptr;
+        *ptr.add(3) = name_len;
+        std::ptr::write_bytes(ptr.add(4), 0, arity as usize);
+        (ptr as i64) | CON_TAG
     }
 }
 
-/// Set payload field `idx` of a ConNode to `val`.
+/// Set payload field `idx` of a ConNode to `val`. Strips CON_TAG.
 #[unsafe(no_mangle)]
 pub extern "C" fn synoema_con_set(ptr: i64, idx: i64, val: i64) {
-    let base = ptr as *mut i64;
-    unsafe { *base.add(1 + idx as usize) = val; }
+    let base = (ptr & !CON_TAG) as *mut i64;
+    unsafe { *base.add(4 + idx as usize) = val; }
 }
 
-/// Load the tag word of a ConNode (first i64).
+/// Load the numeric tag word of a ConNode (slot 0). Strips CON_TAG.
 #[unsafe(no_mangle)]
 pub extern "C" fn synoema_con_get_tag(ptr: i64) -> i64 {
-    unsafe { *(ptr as *const i64) }
+    unsafe { *((ptr & !CON_TAG) as *const i64) }
 }
 
-/// Load payload field `idx` from a ConNode.
+/// Load payload field `idx` from a ConNode (slot 4+idx). Strips CON_TAG.
 #[unsafe(no_mangle)]
 pub extern "C" fn synoema_con_get_field(ptr: i64, idx: i64) -> i64 {
-    unsafe { *((ptr as *const i64).add(1 + idx as usize)) }
+    unsafe { *((ptr & !CON_TAG) as *const i64).add(4 + idx as usize) }
+}
+
+/// Format a ConNode as "Name field0 field1 ...". Returns a tagged string.
+pub extern "C" fn synoema_show_con(ptr: i64) -> i64 {
+    let base = (ptr & !CON_TAG) as *const i64;
+    let arity    = unsafe { *base.add(1) } as usize;
+    let name_ptr = unsafe { *base.add(2) } as *const u8;
+    let name_len = unsafe { *base.add(3) } as usize;
+    let name_str = if name_len == 0 || name_ptr.is_null() {
+        "Con".to_string()
+    } else {
+        let bytes = unsafe { std::slice::from_raw_parts(name_ptr, name_len) };
+        std::str::from_utf8(bytes).unwrap_or("Con").to_string()
+    };
+    let mut s = name_str;
+    for i in 0..arity {
+        let field = unsafe { *base.add(4 + i) };
+        s.push(' ');
+        let fs = format_val(field);
+        if fs.contains(' ') {
+            s.push('('); s.push_str(&fs); s.push(')');
+        } else {
+            s.push_str(&fs);
+        }
+    }
+    alloc_str(&s)
 }
 
 /// concatMap: apply a closure to each list element, concat resulting lists.

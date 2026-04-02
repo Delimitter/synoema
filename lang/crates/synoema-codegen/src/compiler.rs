@@ -101,6 +101,7 @@ impl Compiler {
         builder.symbol("synoema_readline", runtime::synoema_readline as *const u8);
         builder.symbol("synoema_show_any", runtime::synoema_show_any as *const u8);
         builder.symbol("synoema_show_list", runtime::synoema_show_list as *const u8);
+        builder.symbol("synoema_show_con", runtime::synoema_show_con as *const u8);
         builder.symbol("synoema_list_eq", runtime::synoema_list_eq as *const u8);
         builder.symbol("synoema_range", runtime::synoema_range as *const u8);
 
@@ -145,6 +146,16 @@ impl Compiler {
             s.params.push(AbiParam::new(types::I64));
             s.params.push(AbiParam::new(types::I64));
             // no return value — declared without a return
+            s
+        };
+        // Helper: declare fn(i64, i64, i64, i64) -> i64 (make_con: 4 params, 1 return)
+        let sig4_ret = {
+            let mut s = self.module.make_signature();
+            s.params.push(AbiParam::new(types::I64));
+            s.params.push(AbiParam::new(types::I64));
+            s.params.push(AbiParam::new(types::I64));
+            s.params.push(AbiParam::new(types::I64));
+            s.returns.push(AbiParam::new(types::I64));
             s
         };
         // Helper: declare fn(i64, i64, i64) -> void (con_set)
@@ -208,7 +219,8 @@ impl Compiler {
         // Range: fn(i64, i64) -> i64  ([from..to] → list)
         decl(self, "synoema_range", "synoema_range", &sig2)?;
         // ADT ConNode functions
-        decl(self, "synoema_make_con", "synoema_make_con", &sig2)?;   // fn(i64,i64)->i64
+        decl(self, "synoema_make_con", "synoema_make_con", &sig4_ret)?; // fn(i64,i64,i64,i64)->i64
+        decl(self, "synoema_show_con", "synoema_show_con", &sig1)?;
         decl(self, "synoema_con_get_tag", "synoema_con_get_tag", &sig1)?;  // fn(i64)->i64
         decl(self, "synoema_con_get_field", "synoema_con_get_field", &sig2)?; // fn(i64,i64)->i64
         decl(self, "synoema_con_set", "synoema_con_set", &sig3_void)?; // fn(i64,i64,i64)->void
@@ -513,13 +525,24 @@ fn compile_expr(
             // Check for ADT constructor application: App(App(Con("Just"), ...), x)
             if let Some((ctor_name, args)) = flatten_con_app(func, arg, ctor_tags) {
                 let &(tag, arity) = ctor_tags.get(&ctor_name).unwrap();
-                // Allocate ConNode: synoema_make_con(tag, arity) -> ptr
+                // Embed constructor name as a static data section
+                let name_bytes = ctor_name.as_bytes();
+                let mut name_desc = cranelift_module::DataDescription::new();
+                name_desc.define(name_bytes.to_vec().into_boxed_slice());
+                let name_id = module.declare_anonymous_data(false, false)
+                    .map_err(|e| cerr(format!("con name data: {}", e)))?;
+                module.define_data(name_id, &name_desc)
+                    .map_err(|e| cerr(format!("con name define: {}", e)))?;
+                let name_ref = module.declare_data_in_func(name_id, builder.func);
+                let name_ptr = builder.ins().global_value(types::I64, name_ref);
+                let name_len = builder.ins().iconst(types::I64, name_bytes.len() as i64);
+                // Allocate ConNode: synoema_make_con(tag, arity, name_ptr, name_len) -> tagged ptr
                 let tag_val = builder.ins().iconst(types::I64, tag);
                 let arity_val = builder.ins().iconst(types::I64, arity as i64);
                 let make_con_id = *funcs.get("synoema_make_con")
                     .ok_or_else(|| cerr("synoema_make_con not declared"))?;
                 let make_con_ref = module.declare_func_in_func(make_con_id, builder.func);
-                let make_call = builder.ins().call(make_con_ref, &[tag_val, arity_val]);
+                let make_call = builder.ins().call(make_con_ref, &[tag_val, arity_val, name_ptr, name_len]);
                 let con_ptr = builder.inst_results(make_call)[0];
                 // Set each payload field
                 let con_set_id = *funcs.get("synoema_con_set")
@@ -627,30 +650,17 @@ fn compile_expr(
                 let a = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg)?;
                 return compile_unop(builder, *op, a);
             }
-            // Special case: show (Bool literal) → compile-time string constant
-            // (runtime can't distinguish bool 0/1 from int 0/1 or nil)
+            // Special case: show (Bool/Record literal) → compile-time expansion
             if let CoreExpr::Var(name) = func.as_ref() {
                 if name == "show" {
+                    // Bool: runtime can't distinguish 0/1 from int — fold at compile time
                     if let CoreExpr::Lit(synoema_parser::Lit::Bool(b)) = arg.as_ref() {
                         let s = if *b { "true" } else { "false" };
-                        let bytes = s.as_bytes();
-                        let len = bytes.len();
-                        // Allocate a data object in the module for the string bytes
-                        use cranelift_module::DataDescription;
-                        let mut desc = DataDescription::new();
-                        desc.define(bytes.to_vec().into_boxed_slice());
-                        let data_id = module.declare_anonymous_data(false, false)
-                            .map_err(|e| cerr(format!("data decl: {}", e)))?;
-                        module.define_data(data_id, &desc)
-                            .map_err(|e| cerr(format!("data def: {}", e)))?;
-                        let data_ref = module.declare_data_in_func(data_id, builder.func);
-                        // Call synoema_str_new(data_ptr, len) to build a tagged string
-                        let data_ptr = builder.ins().global_value(types::I64, data_ref);
-                        let len_val = builder.ins().iconst(types::I64, len as i64);
-                        let str_new = *funcs.get("synoema_str_new").ok_or_else(|| cerr("synoema_str_new"))?;
-                        let str_new_ref = module.declare_func_in_func(str_new, builder.func);
-                        let call = builder.ins().call(str_new_ref, &[data_ptr, len_val]);
-                        return Ok(builder.inst_results(call)[0]);
+                        return compile_str_literal(s, builder, funcs, module);
+                    }
+                    // Record literal: field names available at compile time → "{f = v, ...}"
+                    if let CoreExpr::Record(fields) = arg.as_ref() {
+                        return compile_show_record(builder, vars, vc, funcs, module, ctor_tags, fields);
                     }
                 }
             }
@@ -723,12 +733,22 @@ fn compile_expr(
         CoreExpr::Con(name) if ctor_tags.contains_key(name) => {
             // User-defined 0-arity constructor: allocate ConNode with no fields
             let &(tag, arity) = ctor_tags.get(name).unwrap();
+            let name_bytes = name.as_bytes();
+            let mut name_desc = cranelift_module::DataDescription::new();
+            name_desc.define(name_bytes.to_vec().into_boxed_slice());
+            let name_id = module.declare_anonymous_data(false, false)
+                .map_err(|e| cerr(format!("con0 name data: {}", e)))?;
+            module.define_data(name_id, &name_desc)
+                .map_err(|e| cerr(format!("con0 name define: {}", e)))?;
+            let name_ref = module.declare_data_in_func(name_id, builder.func);
+            let name_ptr = builder.ins().global_value(types::I64, name_ref);
+            let name_len = builder.ins().iconst(types::I64, name_bytes.len() as i64);
             let tag_val = builder.ins().iconst(types::I64, tag);
             let arity_val = builder.ins().iconst(types::I64, arity as i64);
             let make_con_id = *funcs.get("synoema_make_con")
                 .ok_or_else(|| cerr("synoema_make_con not declared"))?;
             let make_con_ref = module.declare_func_in_func(make_con_id, builder.func);
-            let make_call = builder.ins().call(make_con_ref, &[tag_val, arity_val]);
+            let make_call = builder.ins().call(make_con_ref, &[tag_val, arity_val, name_ptr, name_len]);
             Ok(builder.inst_results(make_call)[0])
         }
 
@@ -1477,6 +1497,68 @@ fn collect_free_vars_inner(
         }
         _ => {} // Lit, Con, PrimOp
     }
+}
+
+/// Emit a static string literal as a tagged string pointer via synoema_str_new.
+fn compile_str_literal(
+    s: &str,
+    builder: &mut FunctionBuilder,
+    funcs: &HashMap<String, cranelift_module::FuncId>,
+    module: &mut JITModule,
+) -> CResult<cranelift_codegen::ir::Value> {
+    let bytes = s.as_bytes();
+    let mut desc = cranelift_module::DataDescription::new();
+    desc.define(bytes.to_vec().into_boxed_slice());
+    let data_id = module.declare_anonymous_data(false, false)
+        .map_err(|e| cerr(format!("str_lit data: {}", e)))?;
+    module.define_data(data_id, &desc)
+        .map_err(|e| cerr(format!("str_lit define: {}", e)))?;
+    let data_ref = module.declare_data_in_func(data_id, builder.func);
+    let data_ptr = builder.ins().global_value(types::I64, data_ref);
+    let len_val  = builder.ins().iconst(types::I64, bytes.len() as i64);
+    let str_new  = *funcs.get("synoema_str_new").ok_or_else(|| cerr("synoema_str_new"))?;
+    let str_ref  = module.declare_func_in_func(str_new, builder.func);
+    let call = builder.ins().call(str_ref, &[data_ptr, len_val]);
+    Ok(builder.inst_results(call)[0])
+}
+
+/// Compile-time expansion of show {f1=v1, f2=v2, ...} → "{f1 = v1, f2 = v2}"
+fn compile_show_record(
+    builder: &mut FunctionBuilder,
+    vars: &mut HashMap<String, Variable>,
+    vc: &mut u32,
+    funcs: &HashMap<String, cranelift_module::FuncId>,
+    module: &mut JITModule,
+    ctor_tags: &HashMap<String, (i64, usize)>,
+    fields: &[(String, CoreExpr)],
+) -> CResult<cranelift_codegen::ir::Value> {
+    // Build "{f1 = v1, f2 = v2}" by concatenating string pieces
+    let str_concat = *funcs.get("synoema_str_concat").ok_or_else(|| cerr("synoema_str_concat"))?;
+    let show_fn    = *funcs.get("synoema_show_any").ok_or_else(|| cerr("synoema_show_any"))?;
+
+    let mut acc = compile_str_literal("{", builder, funcs, module)?;
+    for (i, (fname, fexpr)) in fields.iter().enumerate() {
+        if i > 0 {
+            let sep = compile_str_literal(", ", builder, funcs, module)?;
+            let r = module.declare_func_in_func(str_concat, builder.func);
+            let c = builder.ins().call(r, &[acc, sep]); acc = builder.inst_results(c)[0];
+        }
+        // "fname = "
+        let label = compile_str_literal(&format!("{} = ", fname), builder, funcs, module)?;
+        let r = module.declare_func_in_func(str_concat, builder.func);
+        let c = builder.ins().call(r, &[acc, label]); acc = builder.inst_results(c)[0];
+        // show(value)
+        let fval = compile_expr(builder, vars, vc, funcs, module, ctor_tags, fexpr)?;
+        let show_ref = module.declare_func_in_func(show_fn, builder.func);
+        let show_call = builder.ins().call(show_ref, &[fval]);
+        let shown = builder.inst_results(show_call)[0];
+        let r = module.declare_func_in_func(str_concat, builder.func);
+        let c = builder.ins().call(r, &[acc, shown]); acc = builder.inst_results(c)[0];
+    }
+    let close = compile_str_literal("}", builder, funcs, module)?;
+    let r = module.declare_func_in_func(str_concat, builder.func);
+    let c = builder.ins().call(r, &[acc, close]); acc = builder.inst_results(c)[0];
+    Ok(acc)
 }
 
 /// Add all variables bound by a pattern into `bound`.
