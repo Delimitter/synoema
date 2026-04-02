@@ -420,6 +420,36 @@ mod tests {
     }
 
     #[test]
+    fn record_pattern_multi_field_get_x() {
+        // Record pattern with two fields: one var, one wildcard
+        let result = run_jit("
+get_x {x = v, y = _} = v
+main = get_x {x = 42, y = 99}
+").unwrap();
+        assert_eq!(result, 42);
+    }
+
+    #[test]
+    fn record_pattern_dist_sq() {
+        // Record pattern binding both fields and using them in arithmetic
+        let result = run_jit("
+dist_sq {x = px, y = py} = px * px + py * py
+main = dist_sq {x = 3, y = 4}
+").unwrap();
+        assert_eq!(result, 25);
+    }
+
+    #[test]
+    fn record_pattern_three_fields() {
+        // Record pattern with three fields, only bind first
+        let result = run_jit("
+get_first {x = v, y = _, z = _} = v
+main = get_first {x = 7, y = 0, z = 0}
+").unwrap();
+        assert_eq!(result, 7);
+    }
+
+    #[test]
     fn str_neq_different() {
         assert_eq!(jit("main = ? \"hello\" != \"world\" -> 1 : 0"), 1);
     }
@@ -660,5 +690,76 @@ check _ = 0
 main = check (Just \"fail\")
 ").unwrap();
         assert_eq!(result, 0);
+    }
+
+    // ── Float JIT Tests ──────────────────────────────────
+
+    /// Helper: compile program, extract tagged float result as f64.
+    fn run_float(src: &str) -> f64 {
+        let v = compile_and_run(src)
+            .unwrap_or_else(|e| panic!("Compile failed for:\n{}\nError: {}", src, e));
+        runtime::decode_float(v)
+            .unwrap_or_else(|| panic!("Expected float result, got i64={}", v))
+    }
+
+    #[test]
+    fn float_literal() {
+        let f = run_float("main = 3.14");
+        assert!((f - 3.14).abs() < 1e-10, "Expected 3.14, got {}", f);
+    }
+
+    #[test]
+    fn float_add() {
+        let f = run_float("main = 1.5 + 2.5");
+        assert!((f - 4.0).abs() < 1e-10, "Expected 4.0, got {}", f);
+    }
+
+    #[test]
+    fn float_sub() {
+        let f = run_float("main = 5.0 - 1.5");
+        assert!((f - 3.5).abs() < 1e-10, "Expected 3.5, got {}", f);
+    }
+
+    #[test]
+    fn float_mul() {
+        let f = run_float("main = 2.0 * 3.0");
+        assert!((f - 6.0).abs() < 1e-10, "Expected 6.0, got {}", f);
+    }
+
+    #[test]
+    fn float_div() {
+        let f = run_float("main = 7.0 / 2.0");
+        assert!((f - 3.5).abs() < 1e-10, "Expected 3.5, got {}", f);
+    }
+
+    #[test]
+    fn float_comparison_gt_true() {
+        // 1.5 > 1.0 is true → return 1
+        assert_eq!(jit("main = ? 1.5 > 1.0 -> 1 : 0"), 1);
+    }
+
+    #[test]
+    fn float_comparison_gt_false() {
+        // 0.5 > 1.0 is false → return 0
+        assert_eq!(jit("main = ? 0.5 > 1.0 -> 1 : 0"), 0);
+    }
+
+    #[test]
+    fn float_comparison_lt() {
+        assert_eq!(jit("main = ? 1.0 < 2.0 -> 42 : 0"), 42);
+    }
+
+    #[test]
+    fn float_cond_string_result() {
+        // ? 1.5 > 1.0 -> "yes" : "no" → "yes"
+        let result = compile_and_display("main = ? 1.5 > 1.0 -> \"yes\" : \"no\"").unwrap();
+        assert_eq!(result, "yes");
+    }
+
+    #[test]
+    fn float_in_function() {
+        // half x = x / 2.0 ; main = half 9.0
+        let f = run_float("half x = x / 2.0\nmain = half 9.0");
+        assert!((f - 4.5).abs() < 1e-10, "Expected 4.5, got {}", f);
     }
 }

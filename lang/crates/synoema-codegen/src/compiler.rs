@@ -77,6 +77,17 @@ impl Compiler {
         builder.symbol("synoema_con_set", runtime::synoema_con_set as *const u8);
         builder.symbol("synoema_con_get_tag", runtime::synoema_con_get_tag as *const u8);
         builder.symbol("synoema_con_get_field", runtime::synoema_con_get_field as *const u8);
+        // Float runtime functions
+        builder.symbol("synoema_float_new", runtime::synoema_float_new as *const u8);
+        builder.symbol("synoema_float_add", runtime::synoema_float_add as *const u8);
+        builder.symbol("synoema_float_sub", runtime::synoema_float_sub as *const u8);
+        builder.symbol("synoema_float_mul", runtime::synoema_float_mul as *const u8);
+        builder.symbol("synoema_float_div", runtime::synoema_float_div as *const u8);
+        builder.symbol("synoema_float_lt",  runtime::synoema_float_lt  as *const u8);
+        builder.symbol("synoema_float_gt",  runtime::synoema_float_gt  as *const u8);
+        builder.symbol("synoema_float_lte", runtime::synoema_float_lte as *const u8);
+        builder.symbol("synoema_float_gte", runtime::synoema_float_gte as *const u8);
+        builder.symbol("synoema_float_eq",  runtime::synoema_float_eq  as *const u8);
 
         let module = JITModule::new(builder);
 
@@ -179,6 +190,18 @@ impl Compiler {
         decl(self, "synoema_con_get_tag", "synoema_con_get_tag", &sig1)?;  // fn(i64)->i64
         decl(self, "synoema_con_get_field", "synoema_con_get_field", &sig2)?; // fn(i64,i64)->i64
         decl(self, "synoema_con_set", "synoema_con_set", &sig3_void)?; // fn(i64,i64,i64)->void
+        // Float functions: fn(i64) -> i64
+        decl(self, "synoema_float_new", "synoema_float_new", &sig1)?;
+        // Float arithmetic: fn(i64, i64) -> i64
+        decl(self, "synoema_float_add", "synoema_float_add", &sig2)?;
+        decl(self, "synoema_float_sub", "synoema_float_sub", &sig2)?;
+        decl(self, "synoema_float_mul", "synoema_float_mul", &sig2)?;
+        decl(self, "synoema_float_div", "synoema_float_div", &sig2)?;
+        decl(self, "synoema_float_lt",  "synoema_float_lt",  &sig2)?;
+        decl(self, "synoema_float_gt",  "synoema_float_gt",  &sig2)?;
+        decl(self, "synoema_float_lte", "synoema_float_lte", &sig2)?;
+        decl(self, "synoema_float_gte", "synoema_float_gte", &sig2)?;
+        decl(self, "synoema_float_eq",  "synoema_float_eq",  &sig2)?;
 
         Ok(())
     }
@@ -403,7 +426,18 @@ fn compile_expr(
             let call = builder.ins().call(fref, &[data_ptr_val, len_val]);
             Ok(builder.inst_results(call)[0])
         }
-        CoreExpr::Lit(_) => Err(cerr("Only Int/Bool/Str literals supported in codegen")),
+        CoreExpr::Lit(Lit::Float(f)) => {
+            // Allocate a FloatNode at JIT runtime via synoema_float_new(bits).
+            // The bits are computed at compile time and embedded as an iconst.
+            let bits = f.to_bits() as i64;
+            let bits_val = builder.ins().iconst(types::I64, bits);
+            let float_new_id = *funcs.get("synoema_float_new")
+                .ok_or_else(|| cerr("synoema_float_new not declared"))?;
+            let fref = module.declare_func_in_func(float_new_id, builder.func);
+            let call = builder.ins().call(fref, &[bits_val]);
+            Ok(builder.inst_results(call)[0])
+        }
+        CoreExpr::Lit(_) => Err(cerr("Only Int/Bool/Str/Float literals supported in codegen")),
 
         CoreExpr::Var(name) => {
             if let Some(&var) = vars.get(name) {
@@ -496,6 +530,28 @@ fn compile_expr(
                             let eq_val = builder.inst_results(call)[0];
                             let one = builder.ins().iconst(types::I64, 1);
                             return Ok(builder.ins().isub(one, eq_val));
+                        }
+                        // Float arithmetic and comparison: call float runtime functions
+                        PrimOp::FAdd | PrimOp::FSub | PrimOp::FMul | PrimOp::FDiv
+                        | PrimOp::FLt | PrimOp::FGt | PrimOp::FLte | PrimOp::FGte | PrimOp::FEq => {
+                            let l = compile_expr(builder, vars, vc, funcs, module, ctor_tags, lhs)?;
+                            let r = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg)?;
+                            let fn_name = match op {
+                                PrimOp::FAdd  => "synoema_float_add",
+                                PrimOp::FSub  => "synoema_float_sub",
+                                PrimOp::FMul  => "synoema_float_mul",
+                                PrimOp::FDiv  => "synoema_float_div",
+                                PrimOp::FLt   => "synoema_float_lt",
+                                PrimOp::FGt   => "synoema_float_gt",
+                                PrimOp::FLte  => "synoema_float_lte",
+                                PrimOp::FGte  => "synoema_float_gte",
+                                PrimOp::FEq   => "synoema_float_eq",
+                                _ => unreachable!(),
+                            };
+                            let fid = *funcs.get(fn_name).ok_or_else(|| cerr(format!("{} not declared", fn_name)))?;
+                            let fref = module.declare_func_in_func(fid, builder.func);
+                            let call = builder.ins().call(fref, &[l, r]);
+                            return Ok(builder.inst_results(call)[0]);
                         }
                         _ => {
                             let l = compile_expr(builder, vars, vc, funcs, module, ctor_tags, lhs)?;
@@ -934,25 +990,42 @@ fn compile_case(
 
         CorePat::Record(field_pats) => {
             // Record pattern: always matches (no tag check needed).
-            // Bind each field variable via synoema_record_get.
+            // For each field, extract the value via synoema_record_get and bind via bind_sub_pat.
+            // We need an else_b for sub-pattern failures (e.g., literal sub-patterns).
+            let else_b = builder.create_block();
+            let merge_b = builder.create_block();
+            let rv = Variable::from_u32(*vc); *vc += 1;
+            builder.declare_var(rv, types::I64);
+
             let rec_get_id = *funcs.get("synoema_record_get")
                 .ok_or_else(|| cerr("synoema_record_get not declared"))?;
             for (field_name, field_pat) in field_pats {
-                if let CorePat::Var(bound) = field_pat {
-                    let hash = crate::runtime::field_name_hash(field_name);
-                    let hash_val = builder.ins().iconst(types::I64, hash);
-                    let rec_get_ref = module.declare_func_in_func(rec_get_id, builder.func);
-                    let call = builder.ins().call(rec_get_ref, &[scrut, hash_val]);
-                    let field_val = builder.inst_results(call)[0];
-                    let var = Variable::from_u32(*vc);
-                    *vc += 1;
-                    builder.declare_var(var, types::I64);
-                    builder.def_var(var, field_val);
-                    vars.insert(bound.clone(), var);
-                }
-                // Wildcard sub-patterns: no binding needed
+                let hash = crate::runtime::field_name_hash(field_name);
+                let hash_val = builder.ins().iconst(types::I64, hash);
+                let rec_get_ref = module.declare_func_in_func(rec_get_id, builder.func);
+                let call = builder.ins().call(rec_get_ref, &[scrut, hash_val]);
+                let field_val = builder.inst_results(call)[0];
+                bind_sub_pat(builder, vars, vc, funcs, module, ctor_tags, field_val, field_pat, else_b)?;
             }
-            compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body)
+
+            let tv = compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body)?;
+            builder.def_var(rv, tv);
+            builder.ins().jump(merge_b, &[]);
+
+            // Else branch: try next alternative
+            builder.switch_to_block(else_b);
+            builder.seal_block(else_b);
+            let ev = if idx + 1 < alts.len() {
+                compile_case(builder, vars, vc, funcs, module, ctor_tags, scrut, alts, idx + 1)?
+            } else {
+                builder.ins().iconst(types::I64, 0) // non-exhaustive fallback
+            };
+            builder.def_var(rv, ev);
+            builder.ins().jump(merge_b, &[]);
+
+            builder.switch_to_block(merge_b);
+            builder.seal_block(merge_b);
+            Ok(builder.use_var(rv))
         }
 
         CorePat::Con(name, sub_pats) if ctor_tags.contains_key(name) => {
@@ -1107,6 +1180,21 @@ fn bind_sub_pat(
                 let fc = builder.ins().call(gf_ref, &[val, idx_val]);
                 let fv = builder.inst_results(fc)[0];
                 bind_sub_pat(builder, vars, vc, funcs, module, ctor_tags, fv, sub_sub, else_b)?;
+            }
+            Ok(())
+        }
+
+        CorePat::Record(field_pats) => {
+            // Nested record sub-pattern: extract each field and recursively bind.
+            let rec_get_id = *funcs.get("synoema_record_get")
+                .ok_or_else(|| cerr("synoema_record_get not declared"))?;
+            for (field_name, field_pat) in field_pats {
+                let hash = crate::runtime::field_name_hash(field_name);
+                let hash_val = builder.ins().iconst(types::I64, hash);
+                let rec_get_ref = module.declare_func_in_func(rec_get_id, builder.func);
+                let call = builder.ins().call(rec_get_ref, &[val, hash_val]);
+                let field_val = builder.inst_results(call)[0];
+                bind_sub_pat(builder, vars, vc, funcs, module, ctor_tags, field_val, field_pat, else_b)?;
             }
             Ok(())
         }
@@ -1309,6 +1397,9 @@ fn collect_pat_vars(pat: &CorePat, bound: &mut std::collections::HashSet<String>
         CorePat::Var(n) => { bound.insert(n.clone()); }
         CorePat::Con(_, sub_pats) => {
             for p in sub_pats { collect_pat_vars(p, bound); }
+        }
+        CorePat::Record(field_pats) => {
+            for (_, p) in field_pats { collect_pat_vars(p, bound); }
         }
         _ => {}
     }

@@ -374,9 +374,16 @@ fn desugar_expr(fresh: &mut Fresh, expr: &Expr) -> CoreExpr {
 
         ExprKind::BinOp(op, lhs, rhs) => {
             // op l r  →  App(App(PrimOp(op), l), r)
+            // If either operand is a float literal, use float-specific PrimOp.
+            let is_float_lit = |e: &Expr| matches!(&e.kind, ExprKind::Lit(Lit::Float(_)));
+            let primop = if is_float_lit(lhs) || is_float_lit(rhs) {
+                float_binop(op)
+            } else {
+                PrimOp::from_binop(op)
+            };
             CoreExpr::App(
                 Box::new(CoreExpr::App(
-                    Box::new(CoreExpr::PrimOp(PrimOp::from_binop(op))),
+                    Box::new(CoreExpr::PrimOp(primop)),
                     Box::new(desugar_expr(fresh, lhs)),
                 )),
                 Box::new(desugar_expr(fresh, rhs)),
@@ -501,6 +508,25 @@ fn desugar_list_comp(
                 ],
             )
         }
+    }
+}
+
+/// Map a BinOp to the corresponding float PrimOp.
+/// Falls back to the integer PrimOp for operators that have no float variant
+/// (e.g. comparison operators reuse the same PrimOp but dispatch at runtime).
+fn float_binop(op: &BinOp) -> PrimOp {
+    match op {
+        BinOp::Add => PrimOp::FAdd,
+        BinOp::Sub => PrimOp::FSub,
+        BinOp::Mul => PrimOp::FMul,
+        BinOp::Div => PrimOp::FDiv,
+        BinOp::Lt  => PrimOp::FLt,
+        BinOp::Gt  => PrimOp::FGt,
+        BinOp::Lte => PrimOp::FLte,
+        BinOp::Gte => PrimOp::FGte,
+        BinOp::Eq  => PrimOp::FEq,
+        // All other operators fall back to integer PrimOp
+        other => PrimOp::from_binop(other),
     }
 }
 

@@ -87,10 +87,14 @@ pub enum CorePat {
 /// Primitive operations (mapped from surface BinOp and builtins)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrimOp {
-    // Arithmetic
+    // Arithmetic (integer)
     Add, Sub, Mul, Div, Mod, Neg,
+    // Arithmetic (float)
+    FAdd, FSub, FMul, FDiv,
     // Comparison
     Eq, Neq, Lt, Gt, Lte, Gte,
+    // Float comparison
+    FLt, FGt, FLte, FGte, FEq,
     // Logic
     And, Or, Not,
     // List
@@ -133,9 +137,14 @@ impl PrimOp {
             PrimOp::Add => "add#", PrimOp::Sub => "sub#",
             PrimOp::Mul => "mul#", PrimOp::Div => "div#",
             PrimOp::Mod => "mod#", PrimOp::Neg => "neg#",
+            PrimOp::FAdd => "fadd#", PrimOp::FSub => "fsub#",
+            PrimOp::FMul => "fmul#", PrimOp::FDiv => "fdiv#",
             PrimOp::Eq => "eq#",   PrimOp::Neq => "neq#",
             PrimOp::Lt => "lt#",   PrimOp::Gt => "gt#",
             PrimOp::Lte => "lte#", PrimOp::Gte => "gte#",
+            PrimOp::FLt => "flt#", PrimOp::FGt => "fgt#",
+            PrimOp::FLte => "flte#", PrimOp::FGte => "fgte#",
+            PrimOp::FEq => "feq#",
             PrimOp::And => "and#", PrimOp::Or => "or#",
             PrimOp::Not => "not#",
             PrimOp::Concat => "concat#", PrimOp::Cons => "cons#",

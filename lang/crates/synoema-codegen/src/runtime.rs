@@ -87,6 +87,129 @@ const STR_TAG: i64 = 2; // bit 1
 #[inline]
 pub fn is_str(v: i64) -> bool { v & STR_TAG == STR_TAG }
 
+// ── Float Tag ────────────────────────────────────────────
+//
+// Floats are heap-boxed: a FloatNode { bits: i64 } holds the f64 bits.
+// Tagged pointer: bit 2 set, bits 0 and 1 clear (so no conflict with strings).
+// Detection: (v & 7) == 4  (bits 0,1,2 form the tag nibble; 4 = 0b100).
+
+const FLOAT_TAG: i64 = 4; // bit 2
+
+#[repr(C)]
+struct FloatNode {
+    bits: i64, // f64 bits stored as i64
+}
+
+#[inline]
+pub fn is_float(v: i64) -> bool { v & 7 == FLOAT_TAG }
+
+#[inline]
+fn float_ptr(v: i64) -> *const FloatNode { (v & !FLOAT_TAG) as *const FloatNode }
+
+/// Allocate a FloatNode and return a tagged float pointer.
+/// `bits` is the result of `f64::to_bits() as i64`.
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_float_new(bits: i64) -> i64 {
+    let ptr = arena_alloc(
+        std::mem::size_of::<FloatNode>(),
+        std::mem::align_of::<FloatNode>(),
+    ) as *mut FloatNode;
+    if ptr.is_null() { panic!("synoema_float_new: allocation failed"); }
+    unsafe {
+        (*ptr).bits = bits;
+        (ptr as i64) | FLOAT_TAG
+    }
+}
+
+/// Extract the f64 value from a tagged float pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_float_get(tagged: i64) -> f64 {
+    let p = float_ptr(tagged);
+    f64::from_bits(unsafe { (*p).bits } as u64)
+}
+
+/// Add two tagged floats; returns a new tagged float.
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_float_add(a: i64, b: i64) -> i64 {
+    let fa = synoema_float_get(a);
+    let fb = synoema_float_get(b);
+    synoema_float_new((fa + fb).to_bits() as i64)
+}
+
+/// Subtract two tagged floats; returns a new tagged float.
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_float_sub(a: i64, b: i64) -> i64 {
+    let fa = synoema_float_get(a);
+    let fb = synoema_float_get(b);
+    synoema_float_new((fa - fb).to_bits() as i64)
+}
+
+/// Multiply two tagged floats; returns a new tagged float.
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_float_mul(a: i64, b: i64) -> i64 {
+    let fa = synoema_float_get(a);
+    let fb = synoema_float_get(b);
+    synoema_float_new((fa * fb).to_bits() as i64)
+}
+
+/// Divide two tagged floats; returns a new tagged float.
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_float_div(a: i64, b: i64) -> i64 {
+    let fa = synoema_float_get(a);
+    let fb = synoema_float_get(b);
+    synoema_float_new((fa / fb).to_bits() as i64)
+}
+
+/// Compare two tagged floats: a < b. Returns 0 or 1 as i64.
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_float_lt(a: i64, b: i64) -> i64 {
+    let fa = synoema_float_get(a);
+    let fb = synoema_float_get(b);
+    if fa < fb { 1 } else { 0 }
+}
+
+/// Compare two tagged floats: a > b. Returns 0 or 1 as i64.
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_float_gt(a: i64, b: i64) -> i64 {
+    let fa = synoema_float_get(a);
+    let fb = synoema_float_get(b);
+    if fa > fb { 1 } else { 0 }
+}
+
+/// Compare two tagged floats: a <= b. Returns 0 or 1 as i64.
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_float_lte(a: i64, b: i64) -> i64 {
+    let fa = synoema_float_get(a);
+    let fb = synoema_float_get(b);
+    if fa <= fb { 1 } else { 0 }
+}
+
+/// Compare two tagged floats: a >= b. Returns 0 or 1 as i64.
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_float_gte(a: i64, b: i64) -> i64 {
+    let fa = synoema_float_get(a);
+    let fb = synoema_float_get(b);
+    if fa >= fb { 1 } else { 0 }
+}
+
+/// Compare two tagged floats for equality. Returns 0 or 1 as i64.
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_float_eq(a: i64, b: i64) -> i64 {
+    let fa = synoema_float_get(a);
+    let fb = synoema_float_get(b);
+    if fa == fb { 1 } else { 0 }
+}
+
+/// Decode a tagged float pointer to f64 (for testing/display).
+pub fn decode_float(v: i64) -> Option<f64> {
+    if !is_float(v) { return None; }
+    let raw = (v & !FLOAT_TAG) as usize;
+    if raw < 0x1000 || raw % std::mem::align_of::<FloatNode>() != 0 {
+        return None;
+    }
+    Some(synoema_float_get(v))
+}
+
 #[inline]
 fn str_ptr(v: i64) -> *const StrNode { (v & !STR_TAG) as *const StrNode }
 
@@ -216,13 +339,15 @@ pub extern "C" fn synoema_env_alloc(size: i64) -> i64 {
 
 // ── Display ─────────────────────────────────────────────
 
-/// Print a value (integer, string, or list). Returns the value.
+/// Print a value (integer, float, string, or list). Returns the value.
 pub extern "C" fn synoema_show_val(val: i64) -> i64 {
     if is_str(val) {
         let p = str_ptr(val);
         let len = unsafe { (*p).len } as usize;
         let data = unsafe { std::slice::from_raw_parts(p.add(1) as *const u8, len) };
         print!("{}", std::str::from_utf8(data).unwrap_or("<invalid utf8>"));
+    } else if is_float(val) {
+        print!("{}", synoema_float_get(val));
     } else if is_likely_list_ptr(val) {
         print_list(val);
     } else {
@@ -344,8 +469,8 @@ pub extern "C" fn synoema_str_eq(a: i64, b: i64) -> i64 {
     if sa == sb { 1 } else { 0 }
 }
 
-/// Universal equality: dispatches on string tag at runtime.
-/// Returns 1 if equal, 0 otherwise. Works for ints, bools, and strings.
+/// Universal equality: dispatches on string/float tag at runtime.
+/// Returns 1 if equal, 0 otherwise. Works for ints, bools, strings, and floats.
 #[unsafe(no_mangle)]
 pub extern "C" fn synoema_val_eq(a: i64, b: i64) -> i64 {
     if is_str(a) || is_str(b) {
@@ -354,6 +479,12 @@ pub extern "C" fn synoema_val_eq(a: i64, b: i64) -> i64 {
             synoema_str_eq(a, b)
         } else {
             0 // string vs non-string is never equal
+        }
+    } else if is_float(a) || is_float(b) {
+        if is_float(a) && is_float(b) {
+            synoema_float_eq(a, b)
+        } else {
+            0 // float vs non-float is never equal
         }
     } else {
         if a == b { 1 } else { 0 }
@@ -385,6 +516,8 @@ pub fn decode_str(v: i64) -> Option<String> {
 pub fn display_value(v: i64) -> String {
     if let Some(s) = decode_str(v) {
         s
+    } else if let Some(f) = decode_float(v) {
+        format!("{}", f)
     } else {
         v.to_string()
     }
