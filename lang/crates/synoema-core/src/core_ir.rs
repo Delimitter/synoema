@@ -103,6 +103,8 @@ pub enum PrimOp {
     Show,
     // IO
     Print,
+    // Sequence (evaluate left for effect, return right)
+    Seq,
     // Range
     Range,
 }
@@ -127,6 +129,7 @@ impl PrimOp {
             BinOp::Or => PrimOp::Or,
             BinOp::Concat => PrimOp::Concat,
             BinOp::Cons => PrimOp::Cons,
+            BinOp::Seq => PrimOp::Seq,
             BinOp::Pipe | BinOp::Compose => {
                 unreachable!("Pipe and Compose are desugared before PrimOp conversion")
             }
@@ -152,6 +155,7 @@ impl PrimOp {
             PrimOp::Not => "not#",
             PrimOp::Concat => "concat#", PrimOp::Cons => "cons#",
             PrimOp::Show => "show#", PrimOp::Print => "print#",
+            PrimOp::Seq => "seq#",
             PrimOp::Range => "range#",
         }
     }
@@ -259,5 +263,6 @@ fn format_lit(lit: &Lit) -> String {
         Lit::Str(s) => format!("\"{}\"", s),
         Lit::Char(c) => format!("'{}'", c),
         Lit::Bool(b) => format!("{}", b),
+        Lit::Unit => "()".to_string(),
     }
 }

@@ -758,3 +758,75 @@ main = eval_expr (Add (Num 1.5) (Num 2.5))";
     let (val, _) = run_main(src);
     assert_eq!(val, Value::Float(4.0));
 }
+
+// ── Phase 14: IO / Effects ────────────────────────────
+
+#[test]
+fn unit_literal() {
+    assert_eq!(ev("()"), Value::Unit);
+}
+
+#[test]
+fn print_returns_unit() {
+    let (val, output) = run_main("main = print 42");
+    assert_eq!(val, Value::Unit);
+    assert_eq!(output, vec!["42"]);
+}
+
+#[test]
+fn print_string() {
+    let (_, output) = run_main(r#"main = print "hello""#);
+    assert_eq!(output, vec!["hello"]);
+}
+
+#[test]
+fn seq_two_prints() {
+    let (val, output) = run_main(r#"main = print "hello" ; print "world""#);
+    assert_eq!(val, Value::Unit);
+    assert_eq!(output, vec!["hello", "world"]);
+}
+
+#[test]
+fn seq_returns_right() {
+    assert_eq!(ev("42 ; 99"), Value::Int(99));
+}
+
+#[test]
+fn seq_discards_left() {
+    // Left side evaluated (side effects), right side returned
+    assert_eq!(ev("() ; true"), Value::Bool(true));
+}
+
+#[test]
+fn seq_chain_three_prints() {
+    let (_, output) = run_main(
+        r#"main = print "a" ; print "b" ; print "c""#
+    );
+    assert_eq!(output, vec!["a", "b", "c"]);
+}
+
+#[test]
+fn print_any_type() {
+    let (_, output) = run_main("main = print true");
+    assert_eq!(output, vec!["true"]);
+}
+
+#[test]
+fn print_list() {
+    let (_, output) = run_main("main = print [1 2 3]");
+    assert_eq!(output, vec!["[1 2 3]"]);
+}
+
+#[test]
+fn seq_with_pipe() {
+    // print "hello" ; [1 2 3] |> print
+    let (_, output) = run_main(
+        r#"main = print "hello" ; [1 2 3] |> print"#
+    );
+    assert_eq!(output, vec!["hello", "[1 2 3]"]);
+}
+
+#[test]
+fn unit_eq() {
+    assert_eq!(ev("() == ()"), Value::Bool(true));
+}

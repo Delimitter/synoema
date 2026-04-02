@@ -136,8 +136,15 @@ impl Infer {
             ty: Type::arrow(Type::Var(d), Type::string()),
         });
 
-        // print: String -> IO ()  (simplified as String -> String for now)
-        env.insert("print".into(), Scheme::mono(Type::arrow(Type::string(), Type::string())));
+        // print: ∀a. a -> ()
+        let pa = self.gen.fresh();
+        env.insert("print".into(), Scheme {
+            vars: vec![pa],
+            ty: Type::arrow(Type::Var(pa), Type::unit()),
+        });
+
+        // readline: String (0-arity IO action — reads from stdin)
+        env.insert("readline".into(), Scheme::mono(Type::string()));
 
         // length: ∀a. List a -> Int
         let e = self.gen.fresh();
@@ -667,6 +674,10 @@ impl Infer {
                 let sc = sa.compose(&sb);
                 (sc.clone(), Type::arrow(a.apply(&sc), c.apply(&sc)))
             }
+            // Sequence: a ; b — evaluate a for effect, return b's type
+            BinOp::Seq => {
+                (Subst::new(), t2)
+            }
         };
 
         Ok((s1.compose(&s2).compose(&s3), result_ty))
@@ -719,6 +730,7 @@ impl Infer {
             Lit::Str(_) => Type::string(),
             Lit::Char(_) => Type::char(),
             Lit::Bool(_) => Type::bool(),
+            Lit::Unit => Type::unit(),
         }
     }
 }

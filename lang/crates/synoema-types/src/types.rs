@@ -29,6 +29,7 @@ impl Type {
     pub fn bool() -> Self { Type::Con("Bool".into()) }
     pub fn string() -> Self { Type::Con("String".into()) }
     pub fn char() -> Self { Type::Con("Char".into()) }
+    pub fn unit() -> Self { Type::Con("Unit".into()) }
     pub fn list(elem: Type) -> Self {
         Type::App(Box::new(Type::Con("List".into())), Box::new(elem))
     }

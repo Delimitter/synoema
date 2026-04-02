@@ -14,6 +14,7 @@ pub enum Lit {
     Str(String),
     Char(char),
     Bool(bool),
+    Unit,
 }
 
 // ── Binary operators ─────────────────────────────────────
@@ -27,6 +28,7 @@ pub enum BinOp {
     Cons,                           // : (list cons)
     Pipe,                           // |>
     Compose,                        // >>
+    Seq,                            // ; (sequence: eval left for effect, return right)
 }
 
 impl BinOp {
@@ -40,6 +42,7 @@ impl BinOp {
             BinOp::And => "&&", BinOp::Or => "||",
             BinOp::Concat => "++", BinOp::Cons => ":",
             BinOp::Pipe => "|>", BinOp::Compose => ">>",
+            BinOp::Seq => ";",
         }
     }
 }

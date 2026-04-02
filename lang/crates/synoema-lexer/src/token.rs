@@ -68,6 +68,7 @@ pub enum Token {
     Backslash,  // \ (lambda)
     Underscore, // _
     Comma,      // ,
+    Semicolon,  // ; (sequence)
 
     // Delimiters
     LParen, RParen, LBracket, RBracket,
@@ -115,6 +116,7 @@ impl Token {
             Token::At => "'@'", Token::Bar => "'|'",
             Token::Backslash => "'\\'", Token::Underscore => "'_'",
             Token::Comma => "','",
+            Token::Semicolon => "';'",
             Token::LParen => "'('", Token::RParen => "')'",
             Token::LBracket => "'['", Token::RBracket => "']'",
             Token::LBrace => "'{'", Token::RBrace => "'}'",

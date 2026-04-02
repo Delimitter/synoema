@@ -457,6 +457,7 @@ impl Parser {
         loop {
             // Check for binary operator
             let (op, lbp, rbp) = match self.peek() {
+                Token::Semicolon => (BinOp::Seq,     0, 1), // lowest precedence, right-assoc
                 Token::Pipe      => (BinOp::Pipe,    2, 3),
                 Token::Or        => (BinOp::Or,      4, 5),
                 Token::And       => (BinOp::And,     6, 7),
@@ -587,6 +588,11 @@ impl Parser {
 
             Token::LParen => {
                 self.advance();
+                // () is the unit literal
+                if self.peek() == &Token::RParen {
+                    self.advance();
+                    return Ok(Expr::new(ExprKind::Lit(Lit::Unit), span));
+                }
                 let e = self.parse_expr()?;
                 self.expect(&Token::RParen)?;
                 Ok(Expr::new(ExprKind::Paren(Box::new(e)), span))

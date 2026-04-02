@@ -357,6 +357,16 @@ fn desugar_expr(fresh: &mut Fresh, expr: &Expr) -> CoreExpr {
             )
         }
 
+        ExprKind::BinOp(BinOp::Seq, lhs, rhs) => {
+            // a ; b  →  let _seq = a in b
+            let tmp = fresh.gen("_seq");
+            CoreExpr::Let(
+                tmp,
+                Box::new(desugar_expr(fresh, lhs)),
+                Box::new(desugar_expr(fresh, rhs)),
+            )
+        }
+
         ExprKind::BinOp(BinOp::Compose, f, g) => {
             // f >> g  →  \x -> g (f x)
             let x = fresh.gen("x");

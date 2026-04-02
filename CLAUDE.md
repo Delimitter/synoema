@@ -3,13 +3,13 @@
 ## Quick Reference
 
 Synoema — programming language for LLM code generation.
-~11000 lines Rust, 433 tests, 7 crates, Cranelift JIT backend.
+~11000 lines Rust, 444 tests, 7 crates, Cranelift JIT backend.
 
 ## Commands
 
 ```bash
 cargo build                     # Build all
-cargo test                      # Run 433 tests
+cargo test                      # Run 444 tests
 cargo run -p synoema-repl -- run examples/quicksort.sno  # Interpreter
 cargo run -p synoema-repl -- jit examples/factorial.sno   # JIT compile
 cargo run -p synoema-repl -- eval "6 * 7"                 # Eval expression
@@ -53,11 +53,12 @@ Source (.sno) → Lexer → Parser → Types (HM) → Core IR → Optimizer → 
 - **Phase 13** ✅ Float Eq/Ord/Show in interpreter + 19 tests (float ==, <, >, show, ADT+float)
 - **`**` operator** ✅ Power operator + float math builtins (sqrt, floor, ceil, abs, round) — interpreter + JIT, 28 tests
 - **VS Code extension** ✅ TextMate grammar for .sno files (`tools/vscode-extension/`)
+- **Phase 14a** ✅ IO/Effects in interpreter: `()` unit, `print` (∀a. a → ()), `;` sequence op, `readline` (stdin), 11 tests
 
 ## Current Priorities
 
 1. Publication: GitHub + Habr articles + HN launch
-2. Phase 14: IO / Effects (`@io` marker, print, readline)
+2. Phase 14b: IO in JIT (`print` via FFI, `readline` via FFI)
 
 ## Known Bugs
 

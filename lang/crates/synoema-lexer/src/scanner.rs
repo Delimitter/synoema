@@ -154,7 +154,7 @@ impl<'src> Scanner<'src> {
             b'*' => if self.match_char(b'*') { Token::StarStar } else { Token::Star },
             b'/' => Token::Slash, b'%' => Token::Percent,
             b'?' => Token::Question, b':' => Token::Colon, b'@' => Token::At,
-            b'\\' => Token::Backslash, b',' => Token::Comma,
+            b'\\' => Token::Backslash, b',' => Token::Comma, b';' => Token::Semicolon,
             b'(' => Token::LParen, b')' => Token::RParen,
             b'[' => Token::LBracket, b']' => Token::RBracket,
             b'{' => Token::LBrace,   b'}' => Token::RBrace,

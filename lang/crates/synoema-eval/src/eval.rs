@@ -153,6 +153,11 @@ impl Evaluator {
                         local.insert(fname.clone(), val.clone());
                         self.eval(&local, &equations[0].body)
                     }
+                    // 0-arity builtins (e.g. readline): execute immediately
+                    Value::Builtin(ref bname, 0) => {
+                        let n = bname.clone();
+                        self.call_builtin(&n, &[])
+                    }
                     _ => Ok(val),
                 }
             }
@@ -212,6 +217,11 @@ impl Evaluator {
                         let g_val = self.eval(env, rhs)?;
                         // Store f and g in a PartialBuiltin with 1 remaining arg
                         return Ok(Value::PartialBuiltin("compose#".into(), 1, vec![f_val, g_val]));
+                    }
+                    BinOp::Seq => {
+                        // a ; b — evaluate a for side effects, return b
+                        self.eval(env, lhs)?;
+                        return self.eval(env, rhs);
                     }
                     _ => {}
                 }
@@ -613,6 +623,7 @@ impl Evaluator {
             BinOp::Compose => Err(err(">> composition should be desugared by parser")),
             BinOp::Pipe => Err(err("|> pipe should be handled in eval")),
             BinOp::And | BinOp::Or => Err(err("&&/|| should be short-circuited in eval")),
+            BinOp::Seq => Err(err("; sequence should be short-circuited in eval")),
         }
     }
 
@@ -625,6 +636,7 @@ impl Evaluator {
             Lit::Bool(b) => Value::Bool(*b),
             Lit::Str(s) => Value::Str(s.clone()),
             Lit::Char(c) => Value::Char(*c),
+            Lit::Unit => Value::Unit,
         }
     }
 
@@ -632,6 +644,8 @@ impl Evaluator {
 
     fn builtin_env(&self) -> Env {
         let mut env = Env::new();
+        // 0-arity: readline executes immediately on lookup (reads from stdin)
+        env.insert("readline".to_string(), Value::Builtin("readline".to_string(), 0));
         for (name, arity) in &[
             ("print", 1), ("show", 1), ("length", 1),
             ("head", 1), ("tail", 1), ("even", 1), ("odd", 1),
@@ -650,6 +664,17 @@ impl Evaluator {
 
     fn call_builtin(&mut self, name: &str, args: &[Value]) -> EResult<Value> {
         match name {
+            "readline" => {
+                use std::io::BufRead;
+                let stdin = std::io::stdin();
+                let mut line = String::new();
+                stdin.lock().read_line(&mut line)
+                    .map_err(|e| err(format!("readline error: {}", e)))?;
+                // Strip trailing newline
+                if line.ends_with('\n') { line.pop(); }
+                if line.ends_with('\r') { line.pop(); }
+                Ok(Value::Str(line))
+            }
             "print" => {
                 let s = format!("{}", args[0]);
                 self.output.push(s);
