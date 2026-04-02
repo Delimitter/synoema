@@ -57,29 +57,75 @@ impl Evaluator {
             }
         }
 
+        // Collect impl method equations (more-specific first, to prepend to function equations)
+        let mut impl_eqs: std::collections::HashMap<String, Vec<Equation>> =
+            std::collections::HashMap::new();
+        for decl in &program.decls {
+            if let Decl::ImplDecl { methods, .. } = decl {
+                for (method_name, equations) in methods {
+                    impl_eqs.entry(method_name.clone())
+                        .or_default()
+                        .extend(equations.iter().cloned());
+                }
+            }
+        }
+
         // Second pass: register all functions (to enable mutual recursion)
+        // Prepend impl equations where applicable
         for decl in &program.decls {
             if let Decl::Func { name, equations, .. } = decl {
+                let prepend = impl_eqs.remove(name).unwrap_or_default();
+                let mut all_eqs = prepend;
+                all_eqs.extend(equations.iter().cloned());
                 let func = Value::Func {
                     name: name.clone(),
-                    equations: equations.clone(),
+                    equations: all_eqs,
                     env: env.clone(),
                 };
                 env.insert(name.clone(), func);
             }
         }
 
+        // Register standalone impl methods not covered by any Func decl
+        for (method_name, equations) in impl_eqs {
+            let func = Value::Func {
+                name: method_name.clone(),
+                equations,
+                env: env.clone(),
+            };
+            env.insert(method_name, func);
+        }
+
         // Update function closures to capture the complete environment
         // (enables mutual recursion)
         let snapshot = env.clone();
         for decl in &program.decls {
-            if let Decl::Func { name, equations, .. } = decl {
-                let func = Value::Func {
-                    name: name.clone(),
-                    equations: equations.clone(),
-                    env: snapshot.clone(),
-                };
-                env.insert(name.clone(), func);
+            if let Decl::Func { name, .. } = decl {
+                if let Some(Value::Func { equations, .. }) = snapshot.lookup(name) {
+                    let equations = equations.clone();
+                    let func = Value::Func {
+                        name: name.clone(),
+                        equations,
+                        env: snapshot.clone(),
+                    };
+                    env.insert(name.clone(), func);
+                }
+            }
+        }
+        // Also update standalone impl methods
+        for decl in &program.decls {
+            if let Decl::ImplDecl { methods, .. } = decl {
+                for (method_name, _) in methods {
+                    if let Some(Value::Func { equations, .. }) = snapshot.lookup(method_name) {
+                        let equations = equations.clone();
+                        let func = Value::Func {
+                            name: method_name.clone(),
+                            equations,
+                            env: snapshot.clone(),
+                        };
+                        env.insert(method_name.clone(), func);
+                    }
+                }
             }
         }
 
@@ -160,6 +206,13 @@ impl Evaluator {
                         let f = self.eval(env, rhs)?;
                         return self.apply(f, x);
                     }
+                    BinOp::Compose => {
+                        // f >> g  =  value that, when applied to x, returns g (f x)
+                        let f_val = self.eval(env, lhs)?;
+                        let g_val = self.eval(env, rhs)?;
+                        // Store f and g in a PartialBuiltin with 1 remaining arg
+                        return Ok(Value::PartialBuiltin("compose#".into(), 1, vec![f_val, g_val]));
+                    }
                     _ => {}
                 }
 
@@ -221,9 +274,28 @@ impl Evaluator {
                 self.eval(&local, result)
             }
 
+            // ── Record literal ───────────────────────
+            ExprKind::Record(fields) => {
+                let mut pairs = Vec::new();
+                for (name, expr) in fields {
+                    let val = self.eval(env, expr)?;
+                    pairs.push((name.clone(), val));
+                }
+                Ok(Value::Record(pairs))
+            }
+
             // ── Field access ────────────────────────
-            ExprKind::Field(_obj, _field) => {
-                Err(err("Record field access not yet implemented in MVL"))
+            ExprKind::Field(obj, field) => {
+                let obj_val = self.eval(env, obj)?;
+                match obj_val {
+                    Value::Record(fields) => {
+                        fields.into_iter()
+                            .find(|(name, _)| name == field)
+                            .map(|(_, val)| val)
+                            .ok_or_else(|| err(format!("Field '{}' not found in record", field)))
+                    }
+                    _ => Err(err(format!("Field access '{}' requires a record", field))),
+                }
             }
 
             // ── Parenthesized ───────────────────────
@@ -280,11 +352,16 @@ impl Evaluator {
                     // Bind first pattern from each equation that matches,
                     // build new Func with remaining patterns for all equations
                     let mut local = env.child();
-                    local.insert(name.clone(), Value::Func {
-                        name: name.clone(),
-                        equations: equations.clone(),
-                        env: env.clone(),
-                    });
+                    // Only insert self-reference if not already in env.
+                    // The original full-arity function is in the parent env (set by eval_program).
+                    // Inserting the reduced-arity version would shadow it and break recursion.
+                    if env.lookup(&name).is_none() {
+                        local.insert(name.clone(), Value::Func {
+                            name: name.clone(),
+                            equations: equations.clone(),
+                            env: env.clone(),
+                        });
+                    }
 
                     // For curried functions, the first pattern position must be
                     // consistent (e.g., all Var, or matching constructors).
@@ -416,6 +493,19 @@ impl Evaluator {
             }
 
             (Pat::Paren(inner), val) => self.try_bind_pattern(inner, val, env),
+
+            (Pat::Record(pat_fields), Value::Record(val_fields)) => {
+                for (pname, ppat) in pat_fields {
+                    if let Some((_, val)) = val_fields.iter().find(|(n, _)| n == pname) {
+                        if !self.try_bind_pattern(ppat, val, env) {
+                            return false;
+                        }
+                    } else {
+                        return false;
+                    }
+                }
+                true
+            }
 
             _ => false,
         }
@@ -638,6 +728,11 @@ impl Evaluator {
                     _ => Err(err("foldl requires a list")),
                 }
             },
+            "compose#" => {
+                // args[0]=f, args[1]=g, args[2]=x  →  g (f x)
+                let fx = self.apply(args[0].clone(), args[2].clone())?;
+                self.apply(args[1].clone(), fx)
+            }
             name if name.starts_with("ctor:") => {
                 let ctor_name = &name[5..];
                 Ok(Value::Con(ctor_name.to_string(), args.to_vec()))

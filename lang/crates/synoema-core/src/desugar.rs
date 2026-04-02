@@ -14,6 +14,7 @@
 
 use crate::core_ir::*;
 use synoema_parser::*;
+use std::collections::HashMap;
 
 /// Fresh variable name generator
 struct Fresh {
@@ -29,15 +30,49 @@ impl Fresh {
     }
 }
 
+/// Strip parentheses from a pattern
+fn strip_paren(pat: &Pat) -> &Pat {
+    match pat {
+        Pat::Paren(inner) => strip_paren(inner),
+        other => other,
+    }
+}
+
 /// Desugar a complete program
 pub fn desugar_program(program: &Program) -> CoreProgram {
     let mut fresh = Fresh::new();
     let mut defs = Vec::new();
+    let mut ctor_tags: HashMap<String, (i64, usize)> = HashMap::new();
+
+    // Collect constructor tags from ADT definitions
+    for decl in &program.decls {
+        if let Decl::TypeDef { variants, .. } = decl {
+            for (tag, variant) in variants.iter().enumerate() {
+                ctor_tags.insert(variant.name.clone(), (tag as i64, variant.fields.len()));
+            }
+        }
+    }
+
+    // Collect impl method equations to prepend to existing functions (more-specific first)
+    let mut impl_eqs: HashMap<String, Vec<Equation>> = HashMap::new();
+    for decl in &program.decls {
+        if let Decl::ImplDecl { methods, .. } = decl {
+            for (method_name, equations) in methods {
+                impl_eqs.entry(method_name.clone())
+                    .or_default()
+                    .extend(equations.iter().cloned());
+            }
+        }
+    }
 
     for decl in &program.decls {
         match decl {
             Decl::Func { name, equations, .. } => {
-                let body = desugar_func(&mut fresh, equations);
+                // Prepend impl equations so they take priority (more specific patterns)
+                let prepend = impl_eqs.remove(name).unwrap_or_default();
+                let mut all_eqs = prepend;
+                all_eqs.extend(equations.iter().cloned());
+                let body = desugar_func(&mut fresh, &all_eqs);
                 defs.push(CoreDef { name: name.clone(), body });
             }
             Decl::TypeSig(_) => {
@@ -46,10 +81,22 @@ pub fn desugar_program(program: &Program) -> CoreProgram {
             Decl::TypeDef { .. } => {
                 // ADT definitions: constructors are handled as Con values
             }
+            Decl::TraitDecl { .. } => {
+                // Trait declarations: used by type checker only
+            }
+            Decl::ImplDecl { .. } => {
+                // Impl methods already merged above via impl_eqs
+            }
         }
     }
 
-    CoreProgram { defs }
+    // Register standalone impl methods not covered by any Func decl
+    for (method_name, equations) in impl_eqs {
+        let body = desugar_func(&mut fresh, &equations);
+        defs.push(CoreDef { name: method_name, body });
+    }
+
+    CoreProgram { defs, ctor_tags }
 }
 
 /// Desugar a function (one or more equations) into a Core expression.
@@ -166,14 +213,43 @@ fn build_single_equation(
                 let fake_eq = Equation { pats: vec![inner.as_ref().clone()], body: eq.body.clone(), span: eq.span };
                 body = build_single_equation(fresh, &fake_eq, &[args[i].clone()]);
             }
+            Pat::Record(fields) => {
+                body = CoreExpr::Case(
+                    Box::new(CoreExpr::Var(args[i].clone())),
+                    vec![Alt {
+                        pat: CorePat::Record(fields.iter().map(|(name, p)| (name.clone(), desugar_pattern(p))).collect()),
+                        body,
+                    }],
+                );
+            }
         }
     }
     body
 }
 
+/// Inject a fallback expression as a wildcard arm into the innermost Case in body.
+/// Used when a guard has Con/Cons/Record patterns (not Lit) — the Case already
+/// handles matching, but needs a wildcard fallback for non-matching values.
+fn inject_fallback(body: CoreExpr, fallback: CoreExpr) -> CoreExpr {
+    match body {
+        CoreExpr::Case(scrut, mut alts) => {
+            // Add fallback as wildcard arm if not already there
+            if !alts.iter().any(|a| matches!(a.pat, CorePat::Wildcard | CorePat::Var(_))) {
+                alts.push(Alt { pat: CorePat::Wildcard, body: fallback });
+            }
+            CoreExpr::Case(scrut, alts)
+        }
+        CoreExpr::Let(name, val, inner) => {
+            // Let wraps a Case — recurse into the body
+            CoreExpr::Let(name, val, Box::new(inject_fallback(*inner, fallback)))
+        }
+        other => other, // cannot inject, return as-is
+    }
+}
+
 /// Build guard: if all literal patterns match → body, else fallback
 fn build_pattern_guard(
-    fresh: &mut Fresh,
+    _fresh: &mut Fresh,
     eq: &Equation,
     args: &[Name],
     body: CoreExpr,
@@ -181,11 +257,15 @@ fn build_pattern_guard(
 ) -> CoreExpr {
     let mut checks: Vec<(usize, &Lit)> = Vec::new();
     for (i, pat) in eq.pats.iter().enumerate() {
-        if let Pat::Lit(lit) = pat {
+        if let Pat::Lit(lit) = strip_paren(pat) {
             checks.push((i, lit));
         }
     }
-    if checks.is_empty() { return body; }
+    if checks.is_empty() {
+        // No literal guards — Con/Cons/Record patterns are handled by Case in build_single_equation.
+        // Inject the fallback as a wildcard arm so non-matching values fall through correctly.
+        return inject_fallback(body, fallback);
+    }
 
     // Build nested if-then-else for each literal check
     let mut result = body;
@@ -360,13 +440,18 @@ fn desugar_expr(fresh: &mut Fresh, expr: &Expr) -> CoreExpr {
             core
         }
 
-        // ── Field access (future: records) ──────────
-        ExprKind::Field(obj, field) => {
-            // For now: desugar as function application of a "getter"
-            CoreExpr::App(
-                Box::new(CoreExpr::Var(format!("get_{}", field))),
-                Box::new(desugar_expr(fresh, obj)),
+        // ── Record literal ──────────────────────────
+        ExprKind::Record(fields) => {
+            CoreExpr::Record(
+                fields.iter()
+                    .map(|(name, expr)| (name.clone(), desugar_expr(fresh, expr)))
+                    .collect()
             )
+        }
+
+        // ── Field access ─────────────────────────────
+        ExprKind::Field(obj, field) => {
+            CoreExpr::FieldAccess(Box::new(desugar_expr(fresh, obj)), field.clone())
         }
     }
 }
@@ -438,5 +523,12 @@ fn desugar_pattern(pat: &Pat) -> CorePat {
             )
         }
         Pat::Paren(inner) => desugar_pattern(inner),
+        Pat::Record(fields) => {
+            CorePat::Record(
+                fields.iter()
+                    .map(|(name, pat)| (name.clone(), desugar_pattern(pat)))
+                    .collect()
+            )
+        }
     }
 }

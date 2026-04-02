@@ -15,6 +15,7 @@ pub use eval::{Evaluator, EvalError};
 pub fn run(source: &str) -> Result<Env, String> {
     let program = synoema_parser::parse(source)
         .map_err(|e| format!("Parse error: {}", e))?;
+    let program = synoema_types::resolve_modules(program);
     let _types = synoema_types::typecheck(source)
         .map_err(|e| format!("{}", e))?;
     let mut evaluator = Evaluator::new();
@@ -24,9 +25,23 @@ pub fn run(source: &str) -> Result<Env, String> {
 
 /// Parse, type-check, evaluate, and return a specific function's result
 /// when called with no arguments (a constant or nullary function).
+///
+/// Phase 10.1: runs in a 64 MB stack thread so deeply-recursive programs
+/// (like euler1 with 999 recursive calls) don't stack-overflow.
 pub fn eval_main(source: &str) -> Result<(Value, Vec<String>), String> {
+    let source = source.to_string();
+    std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024) // 64 MB — handles ~50 000 levels of recursion
+        .spawn(move || eval_main_inner(&source))
+        .expect("Failed to spawn eval thread")
+        .join()
+        .expect("Eval thread panicked")
+}
+
+fn eval_main_inner(source: &str) -> Result<(Value, Vec<String>), String> {
     let program = synoema_parser::parse(source)
         .map_err(|e| format!("Parse error: {}", e))?;
+    let program = synoema_types::resolve_modules(program);
     let _types = synoema_types::typecheck(source)
         .map_err(|e| format!("{}", e))?;
     let mut evaluator = Evaluator::new();

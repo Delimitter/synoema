@@ -60,6 +60,8 @@ pub enum Pat {
     Cons(Box<Pat>, Box<Pat>),
     /// Parenthesized: `(pat)`
     Paren(Box<Pat>),
+    /// Record pattern: `{x = v, y = _}`
+    Record(Vec<(String, Pat)>),
 }
 
 // ── Expressions ──────────────────────────────────────────
@@ -104,6 +106,9 @@ pub enum ExprKind {
 
     /// Field access: `r.name`
     Field(Box<Expr>, String),
+
+    /// Record literal: `{x = 3, y = 4}`
+    Record(Vec<(String, Expr)>),
 
     /// List literal: `[1 2 3]`
     List(Vec<Expr>),
@@ -222,6 +227,39 @@ pub enum Decl {
         variants: Vec<Variant>,
         span: Span,
     },
+
+    /// Type class declaration: `trait Show a\n  show : a -> String`
+    TraitDecl {
+        name: String,
+        ty_param: String,
+        methods: Vec<TypeSig>,
+        span: Span,
+    },
+
+    /// Type class implementation: `impl Show Color\n  show Red = "Red"`
+    ImplDecl {
+        trait_name: String,
+        ty_name: String,
+        methods: Vec<(String, Vec<Equation>)>,
+        span: Span,
+    },
+}
+
+// ── Module declarations ──────────────────────────────────
+
+/// A `mod Name` block containing declarations
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModuleDecl {
+    pub name: String,
+    pub body: Vec<Decl>,
+}
+
+/// A `use Module (name1 name2)` import
+#[derive(Debug, Clone, PartialEq)]
+pub struct UseDecl {
+    pub module: String,
+    pub names: Vec<String>,
+    pub span: Span,
 }
 
 // ── Program ──────────────────────────────────────────────
@@ -230,4 +268,6 @@ pub enum Decl {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
     pub decls: Vec<Decl>,
+    pub modules: Vec<ModuleDecl>,
+    pub uses: Vec<UseDecl>,
 }

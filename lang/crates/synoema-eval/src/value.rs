@@ -31,6 +31,8 @@ pub enum Value {
     Builtin(String, usize), // name, arity
     /// Partially applied builtin
     PartialBuiltin(String, usize, Vec<Value>), // name, remaining arity, accumulated args
+    /// Record value: {name = "Alice", age = 30}
+    Record(Vec<(String, Value)>),
     /// Unit (void)
     Unit,
 }
@@ -45,6 +47,7 @@ impl PartialEq for Value {
             (Value::Char(a), Value::Char(b)) => a == b,
             (Value::List(a), Value::List(b)) => a == b,
             (Value::Con(na, fa), Value::Con(nb, fb)) => na == nb && fa == fb,
+            (Value::Record(a), Value::Record(b)) => a == b,
             (Value::Unit, Value::Unit) => true,
             _ => false,
         }
@@ -97,6 +100,14 @@ impl fmt::Display for Value {
                 }
                 Ok(())
             }
+            Value::Record(fields) => {
+                write!(f, "{{")?;
+                for (i, (name, val)) in fields.iter().enumerate() {
+                    if i > 0 { write!(f, ", ")?; }
+                    write!(f, "{} = {}", name, val)?;
+                }
+                write!(f, "}}")
+            }
             Value::Closure { .. } => write!(f, "<closure>"),
             Value::Func { name, .. } => write!(f, "<fn {}>", name),
             Value::Builtin(name, _) => write!(f, "<builtin {}>", name),
@@ -147,5 +158,19 @@ impl Env {
         let mut e = self.clone();
         e.push_scope();
         e
+    }
+
+    /// Iterate over all bindings (most recent scope first)
+    pub fn iter_all(&self) -> Vec<(String, Value)> {
+        let mut seen = std::collections::HashSet::new();
+        let mut result = Vec::new();
+        for frame in self.frames.iter().rev() {
+            for (k, v) in frame {
+                if seen.insert(k.clone()) {
+                    result.push((k.clone(), v.clone()));
+                }
+            }
+        }
+        result
     }
 }

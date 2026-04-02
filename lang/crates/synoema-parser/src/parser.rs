@@ -81,18 +81,65 @@ impl Parser {
 
     pub fn parse_program(&mut self) -> PResult<Program> {
         let mut decls = Vec::new();
+        let mut modules = Vec::new();
+        let mut uses = Vec::new();
         self.skip_newlines();
 
         while self.peek() != &Token::Eof {
-            let decl = self.parse_decl()?;
-            decls.push(decl);
+            match self.peek().clone() {
+                Token::KwMod => {
+                    let module = self.parse_module()?;
+                    modules.push(module);
+                }
+                Token::KwUse => {
+                    let use_decl = self.parse_use()?;
+                    uses.push(use_decl);
+                }
+                _ => {
+                    let decl = self.parse_decl()?;
+                    decls.push(decl);
+                }
+            }
             self.skip_newlines();
         }
 
         // Group function equations by name
         let decls = group_func_equations(decls);
 
-        Ok(Program { decls })
+        Ok(Program { decls, modules, uses })
+    }
+
+    fn parse_module(&mut self) -> PResult<ModuleDecl> {
+        self.expect(&Token::KwMod)?;
+        let name = self.expect_upper_id()?;
+        self.eat(&Token::Newline);
+        self.expect(&Token::Indent)?;
+
+        let mut body = Vec::new();
+        self.skip_newlines();
+        while self.peek() != &Token::Dedent && self.peek() != &Token::Eof {
+            let decl = self.parse_decl()?;
+            body.push(decl);
+            self.skip_newlines();
+        }
+        self.eat(&Token::Dedent);
+
+        let body = group_func_equations(body);
+        Ok(ModuleDecl { name, body })
+    }
+
+    fn parse_use(&mut self) -> PResult<UseDecl> {
+        let span = self.peek_span();
+        self.expect(&Token::KwUse)?;
+        let module = self.expect_upper_id()?;
+        self.expect(&Token::LParen)?;
+        let mut names = Vec::new();
+        while self.peek() != &Token::RParen && self.peek() != &Token::Eof {
+            names.push(self.expect_lower_id()?);
+        }
+        self.expect(&Token::RParen)?;
+        self.eat(&Token::Newline);
+        Ok(UseDecl { module, names, span })
     }
 
     // ── Declarations ──────────────────────────────────────
@@ -112,8 +159,72 @@ impl Parser {
                 }
             }
 
+            // Type class
+            Token::KwTrait => self.parse_trait_decl(),
+
+            // Type class implementation
+            Token::KwImpl => self.parse_impl_decl(),
+
             _ => Err(self.error(format!("Expected declaration, got {:?}", self.peek()))),
         }
+    }
+
+    fn parse_trait_decl(&mut self) -> PResult<Decl> {
+        let span = self.peek_span();
+        self.expect(&Token::KwTrait)?;
+        let name = self.expect_upper_id()?;
+        let ty_param = self.expect_lower_id()?;
+        self.eat(&Token::Newline);
+        self.expect(&Token::Indent)?;
+
+        let mut methods = Vec::new();
+        self.skip_newlines();
+        while self.peek() != &Token::Dedent && self.peek() != &Token::Eof {
+            if self.is_type_sig() {
+                if let Decl::TypeSig(sig) = self.parse_type_sig()? {
+                    methods.push(sig);
+                }
+            } else {
+                break;
+            }
+            self.skip_newlines();
+        }
+        self.eat(&Token::Dedent);
+        Ok(Decl::TraitDecl { name, ty_param, methods, span })
+    }
+
+    fn parse_impl_decl(&mut self) -> PResult<Decl> {
+        let span = self.peek_span();
+        self.expect(&Token::KwImpl)?;
+        let trait_name = self.expect_upper_id()?;
+        let ty_name = self.expect_upper_id()?;
+        self.eat(&Token::Newline);
+        self.expect(&Token::Indent)?;
+
+        let mut methods: Vec<(String, Vec<Equation>)> = Vec::new();
+        self.skip_newlines();
+        while self.peek() != &Token::Dedent && self.peek() != &Token::Eof {
+            if let Token::LowerId(_) = self.peek() {
+                if self.is_type_sig() {
+                    // Skip type signatures inside impl blocks
+                    self.parse_type_sig()?;
+                } else {
+                    let decl = self.parse_func_def()?;
+                    if let Decl::Func { name, equations, .. } = decl {
+                        if let Some((_, existing)) = methods.iter_mut().find(|(n, _)| n == &name) {
+                            existing.extend(equations);
+                        } else {
+                            methods.push((name, equations));
+                        }
+                    }
+                }
+            } else {
+                break;
+            }
+            self.skip_newlines();
+        }
+        self.eat(&Token::Dedent);
+        Ok(Decl::ImplDecl { trait_name, ty_name, methods, span })
     }
 
     fn is_type_sig(&self) -> bool {
@@ -303,6 +414,20 @@ impl Parser {
                 Ok(Pat::Con("Nil".into(), vec![]))
             }
 
+            Token::LBrace => {
+                self.advance();
+                let mut fields = Vec::new();
+                while self.peek() != &Token::RBrace && self.peek() != &Token::Eof {
+                    let fname = self.expect_lower_id()?;
+                    self.expect(&Token::Assign)?;
+                    let pat = self.parse_pattern()?;
+                    fields.push((fname, pat));
+                    self.eat(&Token::Comma);
+                }
+                self.expect(&Token::RBrace)?;
+                Ok(Pat::Record(fields))
+            }
+
             _ => Err(self.error(format!("Expected pattern, got {:?}", self.peek()))),
         }
     }
@@ -440,7 +565,7 @@ impl Parser {
             Token::LowerId(_) | Token::UpperId(_) |
             Token::Int(_) | Token::Float(_) | Token::Str(_) | Token::Char(_) |
             Token::KwTrue | Token::KwFalse |
-            Token::LParen | Token::LBracket
+            Token::LParen | Token::LBracket | Token::LBrace
         )
     }
 
@@ -467,6 +592,22 @@ impl Parser {
             }
 
             Token::LBracket => self.parse_list_expr(span),
+
+            Token::LBrace => {
+                self.advance();
+                let mut fields = Vec::new();
+                self.skip_newlines();
+                while self.peek() != &Token::RBrace && self.peek() != &Token::Eof {
+                    let fname = self.expect_lower_id()?;
+                    self.expect(&Token::Assign)?;
+                    let val = self.parse_expr()?;
+                    fields.push((fname, val));
+                    self.eat(&Token::Comma);
+                    self.skip_newlines();
+                }
+                self.expect(&Token::RBrace)?;
+                Ok(Expr::new(ExprKind::Record(fields), span))
+            }
 
             _ => Err(self.error(format!("Expected expression, got {:?}", self.peek()))),
         }

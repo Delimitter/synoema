@@ -13,6 +13,7 @@ fn infer(src: &str) -> Type {
         .unwrap_or_else(|e| panic!("Infer failed for:\n{}\nError: {}", src, e))
 }
 
+#[allow(dead_code)]
 fn assert_type_matches(ty: &Type, expected: &str) {
     let s = format!("{}", ty);
     assert!(
@@ -22,6 +23,7 @@ fn assert_type_matches(ty: &Type, expected: &str) {
 }
 
 /// Simple structural check — type variables may have different names
+#[allow(dead_code)]
 fn types_structurally_match(ty: &Type, expected: &str) -> bool {
     // Normalize: replace all type variable names with sequential letters
     let rendered = format!("{}", ty);
@@ -330,4 +332,94 @@ fn error_wrong_pattern_arity() {
     let err = check_err("f (x:y:z) = x + y + z\ng = f 42");
     // This should either parse-error or type-error
     assert!(!err.is_empty());
+}
+
+// ── Records ──────────────────────────────────────────────
+
+#[test]
+fn record_literal_closed() {
+    // A record literal {x = 3, y = 4} should have closed type {x: Int, y: Int}
+    let ty = infer("r = {x = 3, y = 4}");
+    match &ty {
+        Type::Record(fields, tail) => {
+            assert_eq!(tail, &None, "Record literal should be closed");
+            assert_eq!(fields.len(), 2);
+        }
+        _ => panic!("Expected Record type, got {}", ty),
+    }
+}
+
+#[test]
+fn record_field_access() {
+    // Simple field access: should give the field type
+    let ty = infer("f r = r.x");
+    // f should be a function type returning something
+    assert!(matches!(&ty, Type::Arrow(_, _)), "Expected function type, got {}", ty);
+}
+
+#[test]
+fn row_poly_extra_field() {
+    // get_x accepts any record with at least an x field.
+    // Applying it to {x = 3, y = 4} should type-check.
+    let env = check("get_x rec = rec.x\nmain = get_x {x = 3, y = 4}");
+    let main_ty = env.lookup("main").expect("main not found");
+    assert_eq!(main_ty.ty, Type::int(), "main should have type Int, got {}", main_ty.ty);
+}
+
+#[test]
+fn row_poly_multiple_callers() {
+    // Same get_x function applied to records with different extra fields.
+    let env = check(
+        "get_x rec = rec.x\na = get_x {x = 1, y = 2}\nb = get_x {x = 10, z = true}"
+    );
+    let a_ty = env.lookup("a").expect("a not found");
+    let b_ty = env.lookup("b").expect("b not found");
+    assert_eq!(a_ty.ty, Type::int(), "a should have type Int");
+    assert_eq!(b_ty.ty, Type::int(), "b should have type Int");
+}
+
+#[test]
+fn row_poly_no_such_field_error() {
+    // Accessing a field that is known not to exist should still fail.
+    // {x = 3}.y — we are accessing y but the literal only has x.
+    // Since the literal is a closed record, this should error.
+    let err = check_err("f = {x = 3}.y");
+    assert!(!err.is_empty(), "Should produce an error for missing field");
+}
+
+#[test]
+fn row_poly_two_fields() {
+    // A function accessing two fields — should require both in the argument.
+    let env = check("add_xy r = r.x + r.y\nmain = add_xy {x = 3, y = 4}");
+    let main_ty = env.lookup("main").expect("main not found");
+    assert_eq!(main_ty.ty, Type::int(), "main should have type Int");
+}
+
+#[test]
+fn row_poly_two_fields_extra() {
+    // Same function, extra fields in the argument record — should still work.
+    let env = check("add_xy r = r.x + r.y\nmain = add_xy {x = 3, y = 4, z = 99}");
+    let main_ty = env.lookup("main").expect("main not found");
+    assert_eq!(main_ty.ty, Type::int());
+}
+
+// ── Modules ──────────────────────────────────────────────
+
+#[test]
+fn module_basic() {
+    // mod Math defines `square`, use brings it into scope, main calls it
+    let env = check("mod Math\n  square x = x * x\n\nuse Math (square)\n\nmain = square 5");
+    // After module resolution: Math.square, square (alias), main
+    assert!(env.lookup("Math.square").is_some(), "Math.square should be defined");
+    assert!(env.lookup("square").is_some(), "square alias should exist");
+    assert!(env.lookup("main").is_some(), "main should be defined");
+}
+
+#[test]
+fn module_function_type() {
+    let env = check("mod Arith\n  double x = x * 2\n\nuse Arith (double)\n\nresult = double 5");
+    let scheme = env.lookup("Math.square")
+        .or_else(|| env.lookup("Arith.double"))
+        .expect("Arith.double should be defined");
+    assert_eq!(scheme.ty, Type::arrow(Type::int(), Type::int()));
 }

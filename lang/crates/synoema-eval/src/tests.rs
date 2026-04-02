@@ -12,6 +12,7 @@ fn run_ok(src: &str) -> Env {
     run(src).unwrap_or_else(|e| panic!("Run failed for:\n{}\nError: {}", src, e))
 }
 
+#[allow(dead_code)]
 fn lookup(src: &str, name: &str) -> Value {
     let env = run_ok(src);
     env.lookup(name).cloned()
@@ -141,7 +142,7 @@ fn lambda_apply() {
 #[test]
 fn lambda_closure() {
     // Lambda captures enclosing scope
-    let (v, _) = run_main("a = 10\nf = \\x -> x + a\nresult = f 5");
+    let (_v, _) = run_main("a = 10\nf = \\x -> x + a\nresult = f 5");
     // result = 15
     // But eval_main returns the last func which is 'result'
     // We need to look it up properly
@@ -346,4 +347,218 @@ fn error_div_zero() {
 #[test]
 fn error_head_empty() {
     assert!(eval_expr("head []").is_err());
+}
+
+// ── Records (Phase 9.4) ───────────────────────────────
+
+#[test]
+fn record_literal() {
+    let val = ev("{x = 3, y = 4}");
+    assert_eq!(val, Value::Record(vec![
+        ("x".into(), Value::Int(3)),
+        ("y".into(), Value::Int(4)),
+    ]));
+}
+
+#[test]
+fn record_field_access() {
+    let env = run_ok("p = {x = 10, y = 20}\nmain = p.x");
+    match env.lookup("main") {
+        Some(Value::Func { equations, .. }) => {
+            let mut ev = Evaluator::new();
+            let v = ev.eval(&env, &equations[0].body).unwrap();
+            assert_eq!(v, Value::Int(10));
+        }
+        _ => panic!("main not found"),
+    }
+}
+
+#[test]
+fn record_pattern_match() {
+    let env = run_ok("get_x {x = v, y = _} = v\nmain = get_x {x = 42, y = 0}");
+    let mut ev = Evaluator::new();
+    let f = env.lookup("get_x").unwrap().clone();
+    let rec = Value::Record(vec![
+        ("x".into(), Value::Int(42)),
+        ("y".into(), Value::Int(0)),
+    ]);
+    assert_eq!(ev.apply(f, rec).unwrap(), Value::Int(42));
+}
+
+#[test]
+fn record_field_in_function() {
+    let env = run_ok("dist_sq p = p.x * p.x + p.y * p.y");
+    let mut ev = Evaluator::new();
+    let f = env.lookup("dist_sq").unwrap().clone();
+    let p = Value::Record(vec![
+        ("x".into(), Value::Int(3)),
+        ("y".into(), Value::Int(4)),
+    ]);
+    assert_eq!(ev.apply(f, p).unwrap(), Value::Int(25));
+}
+
+// ── Modules (Phase 9.5) ───────────────────────────────
+
+#[test]
+fn module_simple() {
+    let src = "\
+mod Math
+  square x = x * x
+use Math (square)
+main = square 7";
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Int(49));
+}
+
+#[test]
+fn module_constant() {
+    let src = "\
+mod Consts
+  pi = 314
+use Consts (pi)
+main = pi";
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Int(314));
+}
+
+// ── Row Polymorphism (Phase 11.2) ─────────────────────
+
+#[test]
+fn row_poly_field_access() {
+    // get_x accepts any record with an x field
+    let env = run_ok("get_x r = r.x");
+    let mut ev = Evaluator::new();
+    let f = env.lookup("get_x").unwrap().clone();
+    let r1 = Value::Record(vec![("x".into(), Value::Int(5)), ("y".into(), Value::Int(10))]);
+    let r2 = Value::Record(vec![("x".into(), Value::Int(99)), ("z".into(), Value::Bool(true))]);
+    assert_eq!(ev.apply(f.clone(), r1).unwrap(), Value::Int(5));
+    assert_eq!(ev.apply(f, r2).unwrap(), Value::Int(99));
+}
+
+// ── Strings ───────────────────────────────────────────
+
+#[test]
+fn string_concat_op() {
+    assert_eq!(ev("\"hello\" ++ \" world\""), Value::Str("hello world".into()));
+}
+
+#[test]
+fn string_eq() {
+    assert_eq!(ev("\"abc\" == \"abc\""), Value::Bool(true));
+    assert_eq!(ev("\"abc\" == \"def\""), Value::Bool(false));
+}
+
+#[test]
+fn string_show_int() {
+    assert_eq!(ev("show 42"), Value::Str("42".into()));
+}
+
+// ── Compose ───────────────────────────────────────────
+
+#[test]
+fn compose_op() {
+    let env = run_ok("double x = x * 2\nadd1 x = x + 1\nmain = (double >> add1) 5");
+    match env.lookup("main") {
+        Some(Value::Func { equations, .. }) => {
+            let mut ev = Evaluator::new();
+            let v = ev.eval(&env, &equations[0].body).unwrap();
+            assert_eq!(v, Value::Int(11));
+        }
+        _ => panic!("main not found"),
+    }
+}
+
+// ── Where bindings ────────────────────────────────────
+
+#[test]
+fn where_bindings_basic() {
+    let src = "hyp a b = root\n  sq_sum = a * a + b * b\n  root = sq_sum";
+    let env = run_ok(src);
+    let mut ev = Evaluator::new();
+    let f = env.lookup("hyp").unwrap().clone();
+    let partial = ev.apply(f, Value::Int(3)).unwrap();
+    let result = ev.apply(partial, Value::Int(4)).unwrap();
+    assert_eq!(result, Value::Int(25));
+}
+
+// ── Full Programs (extended) ──────────────────────────
+
+#[test]
+fn full_fibonacci() {
+    let src = "fib 0 = 0\nfib 1 = 1\nfib n = fib (n - 1) + fib (n - 2)";
+    let env = run_ok(src);
+    let mut ev = Evaluator::new();
+    let f = env.lookup("fib").unwrap().clone();
+    assert_eq!(ev.apply(f.clone(), Value::Int(0)).unwrap(), Value::Int(0));
+    assert_eq!(ev.apply(f.clone(), Value::Int(1)).unwrap(), Value::Int(1));
+    assert_eq!(ev.apply(f.clone(), Value::Int(7)).unwrap(), Value::Int(13));
+    assert_eq!(ev.apply(f, Value::Int(10)).unwrap(), Value::Int(55));
+}
+
+#[test]
+fn full_adt_pattern_matching() {
+    let src = "\
+Maybe a = Just a | None
+fromJust (Just v) = v
+fromJust None = 0";
+    let env = run_ok(src);
+    let mut ev = Evaluator::new();
+    let f = env.lookup("fromJust").unwrap().clone();
+    let just42 = Value::Con("Just".into(), vec![Value::Int(42)]);
+    let none = Value::Con("None".into(), vec![]);
+    assert_eq!(ev.apply(f.clone(), just42).unwrap(), Value::Int(42));
+    assert_eq!(ev.apply(f, none).unwrap(), Value::Int(0));
+}
+
+#[test]
+fn full_higher_order_foldl() {
+    // User-defined foldl: foldl f acc [1 2 3 4 5] = 15
+    let src = "\
+myfoldl f acc [] = acc
+myfoldl f acc (x:xs) = myfoldl f (f acc x) xs
+result = myfoldl (\\acc x -> acc + x) 0 [1 2 3 4 5]";
+    let env = run_ok(src);
+    match env.lookup("result") {
+        Some(Value::Func { equations, .. }) => {
+            let mut ev = Evaluator::new();
+            let v = ev.eval(&env, &equations[0].body).unwrap();
+            assert_eq!(v, Value::Int(15));
+        }
+        _ => panic!("result not found"),
+    }
+}
+
+// ── Type classes (Phase 12) ───────────────────────────
+
+#[test]
+fn typeclass_show_adt() {
+    // impl Show on a custom ADT; `show` dispatches to the impl method
+    let src = "\
+Color = Red | Green | Blue
+trait Show a
+  show : a -> String
+impl Show Color
+  show Red = \"Red\"
+  show Green = \"Green\"
+  show Blue = \"Blue\"
+main = show Red";
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Str("Red".into()));
+}
+
+#[test]
+fn typeclass_impl_fallback_to_existing() {
+    // impl equations prepend to the existing user-defined function,
+    // so non-matching values fall through to the existing equation
+    let src = "\
+Color = Red | Green
+show_color Red = \"Red\"
+show_color Green = \"Green\"
+show_color _ = \"Other\"
+impl ShowColor Color
+  show_color Red = \"Red\"
+  show_color Green = \"Green\"
+main = show_color Green";
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Str("Green".into()));
 }
