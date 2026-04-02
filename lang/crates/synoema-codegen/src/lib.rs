@@ -886,4 +886,74 @@ main = check (Just \"fail\")
     fn jit_seq_chain() {
         assert_eq!(jit(r#"main = print "a" ; print "b" ; print "c""#), 0);
     }
+
+    // ── Phase 15a: show (any type), list ==, range ─────────
+
+    #[test]
+    fn jit_show_float() {
+        assert_eq!(jit_str("main = show 3.14"), "3.14");
+    }
+
+    #[test]
+    fn jit_show_float_whole() {
+        assert_eq!(jit_str("main = show 2.0"), "2.0");
+    }
+
+    #[test]
+    fn jit_show_str_identity() {
+        // show on a string should return the string unchanged
+        assert_eq!(jit_str(r#"main = show "hello""#), "hello");
+    }
+
+    #[test]
+    fn jit_show_int_still_works() {
+        assert_eq!(jit_str("main = show 42"), "42");
+    }
+
+    #[test]
+    fn jit_list_eq_equal() {
+        assert_eq!(jit("main = ? [1 2 3] == [1 2 3] -> 1 : 0"), 1);
+    }
+
+    #[test]
+    fn jit_list_eq_not_equal() {
+        assert_eq!(jit("main = ? [1 2 3] == [1 2 4] -> 1 : 0"), 0);
+    }
+
+    #[test]
+    fn jit_list_eq_different_length() {
+        assert_eq!(jit("main = ? [1 2] == [1 2 3] -> 1 : 0"), 0);
+    }
+
+    #[test]
+    fn jit_list_eq_empty() {
+        assert_eq!(jit("main = ? [] == [] -> 1 : 0"), 1);
+    }
+
+    #[test]
+    fn jit_list_eq_int_small() {
+        // Tests that integers 2, 6 etc. are not falsely treated as strings
+        assert_eq!(jit("main = ? [2 4 6] == [2 4 6] -> 1 : 0"), 1);
+    }
+
+    #[test]
+    fn jit_range_length() {
+        assert_eq!(jit("main = length [1..10]"), 10);
+    }
+
+    #[test]
+    fn jit_range_sum() {
+        assert_eq!(jit("main = sum [1..10]"), 55);
+    }
+
+    #[test]
+    fn jit_range_single() {
+        assert_eq!(jit("main = sum [5..5]"), 5);
+    }
+
+    #[test]
+    fn jit_range_in_comp() {
+        // List comprehension over range
+        assert_eq!(jit("main = sum [x * 2 | x <- [1..5]]"), 30);
+    }
 }

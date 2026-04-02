@@ -3,13 +3,13 @@
 ## Quick Reference
 
 Synoema — programming language for LLM code generation.
-~11000 lines Rust, 452 tests, 7 crates, Cranelift JIT backend.
+~11000 lines Rust, 488 tests, 7 crates, Cranelift JIT backend.
 
 ## Commands
 
 ```bash
 cargo build                     # Build all
-cargo test                      # Run 452 tests
+cargo test                      # Run 488 tests
 cargo run -p synoema-repl -- run examples/quicksort.sno  # Interpreter
 cargo run -p synoema-repl -- jit examples/factorial.sno   # JIT compile
 cargo run -p synoema-repl -- eval "6 * 7"                 # Eval expression
@@ -55,15 +55,16 @@ Source (.sno) → Lexer → Parser → Types (HM) → Core IR → Optimizer → 
 - **VS Code extension** ✅ TextMate grammar for .sno files (`tools/vscode-extension/`)
 - **Phase 14a** ✅ IO/Effects in interpreter: `()` unit, `print` (∀a. a → ()), `;` sequence op, `readline` (stdin), 11 tests
 - **Phase 14b** ✅ IO in JIT: `synoema_print_val` (any tagged val via FFI), `synoema_readline` (stdin → tagged str), `Lit::Unit` → `iconst(0)`, 8 tests
+- **Phase 15a** ✅ JIT completeness: `show` for all types (float/str/bool/int), `list ==` (recursive), `[a..b]` ranges via `synoema_range`, fixed `synoema_val_eq` address validation, 13 tests
 
 ## Current Priorities
 
 1. Publication: GitHub + Habr articles + HN launch
-2. Phase 15: Lists in JIT (cons, head, tail, pattern matching on lists)
+2. Phase 15b: `show` for lists in JIT, `show Bool` ("true"/"false"), `show` for ADTs
 
 ## Known Bugs
 
-- 0 warnings, 0 known bugs (452/452 tests passing)
+- 0 warnings, 0 known bugs (488/488 tests passing)
 
 Note: the "Ackermann JIT bug" was a false positive. `ack 3 4 = 125` is correct (2^7 − 3).
 

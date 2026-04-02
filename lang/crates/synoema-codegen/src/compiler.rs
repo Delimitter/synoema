@@ -99,6 +99,9 @@ impl Compiler {
         // IO functions
         builder.symbol("synoema_print_val", runtime::synoema_print_val as *const u8);
         builder.symbol("synoema_readline", runtime::synoema_readline as *const u8);
+        builder.symbol("synoema_show_any", runtime::synoema_show_any as *const u8);
+        builder.symbol("synoema_list_eq", runtime::synoema_list_eq as *const u8);
+        builder.symbol("synoema_range", runtime::synoema_range as *const u8);
 
         let module = JITModule::new(builder);
 
@@ -163,7 +166,8 @@ impl Compiler {
         decl(self, "synoema_nil", "synoema_nil", &sig0)?;
         decl(self, "synoema_readline", "readline", &sig0)?;
         // fn(i64) -> i64
-        decl(self, "synoema_show_int", "show", &sig1)?;  // show n → tagged string ptr
+        decl(self, "synoema_show_any", "show", &sig1)?;   // show any → tagged string ptr
+        decl(self, "synoema_show_any", "synoema_show_any", &sig1)?;
         decl(self, "synoema_print_val", "print", &sig1)?;  // print any value, returns 0 (unit)
         decl(self, "synoema_print_val", "synoema_print_val", &sig1)?;
         decl(self, "synoema_head", "synoema_head", &sig1)?;
@@ -196,8 +200,11 @@ impl Compiler {
         decl(self, "synoema_record_get", "synoema_record_get", &sig2)?;
         // Records: fn(i64, i64, i64) -> i64 (unused return — record_set)
         decl(self, "synoema_record_set", "synoema_record_set", &sig4)?;
-        // Universal equality: dispatches on string tag at runtime
+        // Universal equality + list equality
         decl(self, "synoema_val_eq", "synoema_val_eq", &sig2)?;
+        decl(self, "synoema_list_eq", "synoema_list_eq", &sig2)?;
+        // Range: fn(i64, i64) -> i64  ([from..to] → list)
+        decl(self, "synoema_range", "synoema_range", &sig2)?;
         // ADT ConNode functions
         decl(self, "synoema_make_con", "synoema_make_con", &sig2)?;   // fn(i64,i64)->i64
         decl(self, "synoema_con_get_tag", "synoema_con_get_tag", &sig1)?;  // fn(i64)->i64
@@ -592,6 +599,15 @@ fn compile_expr(
                             let l = compile_expr(builder, vars, vc, funcs, module, ctor_tags, lhs)?;
                             let r = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg)?;
                             let fid = *funcs.get("synoema_int_pow").ok_or_else(|| cerr("synoema_int_pow not declared"))?;
+                            let fref = module.declare_func_in_func(fid, builder.func);
+                            let call = builder.ins().call(fref, &[l, r]);
+                            return Ok(builder.inst_results(call)[0]);
+                        }
+                        // Range [from..to]: call synoema_range(from, to) → list
+                        PrimOp::Range => {
+                            let l = compile_expr(builder, vars, vc, funcs, module, ctor_tags, lhs)?;
+                            let r = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg)?;
+                            let fid = *funcs.get("synoema_range").ok_or_else(|| cerr("synoema_range not declared"))?;
                             let fref = module.declare_func_in_func(fid, builder.func);
                             let call = builder.ins().call(fref, &[l, r]);
                             return Ok(builder.inst_results(call)[0]);

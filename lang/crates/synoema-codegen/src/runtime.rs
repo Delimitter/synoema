@@ -578,22 +578,93 @@ pub extern "C" fn synoema_str_eq(a: i64, b: i64) -> i64 {
 /// Returns 1 if equal, 0 otherwise. Works for ints, bools, strings, and floats.
 #[unsafe(no_mangle)]
 pub extern "C" fn synoema_val_eq(a: i64, b: i64) -> i64 {
-    if is_str(a) || is_str(b) {
-        // Both must be strings for equality to hold; delegate to byte-level compare
-        if is_str(a) && is_str(b) {
+    // Only treat as heap pointer types if the address is plausibly a real heap address.
+    // Small integers (e.g. 2, 6) can accidentally have tag bits set.
+    let a_heap = (a as u64) >= 0x10000;
+    let b_heap = (b as u64) >= 0x10000;
+    if (is_str(a) && a_heap) || (is_str(b) && b_heap) {
+        if (is_str(a) && a_heap) && (is_str(b) && b_heap) {
             synoema_str_eq(a, b)
         } else {
-            0 // string vs non-string is never equal
+            0
         }
-    } else if is_float(a) || is_float(b) {
-        if is_float(a) && is_float(b) {
+    } else if (is_float(a) && a_heap) || (is_float(b) && b_heap) {
+        if (is_float(a) && a_heap) && (is_float(b) && b_heap) {
             synoema_float_eq(a, b)
         } else {
-            0 // float vs non-float is never equal
+            0
         }
+    } else if is_likely_list_ptr(a) || is_likely_list_ptr(b) {
+        synoema_list_eq(a, b)
     } else {
         if a == b { 1 } else { 0 }
     }
+}
+
+/// Convert any JIT value to a tagged string. Returns a tagged string pointer.
+/// - int → decimal digits
+/// - float → decimal representation
+/// - bool (0/1) → "false"/"true"
+/// - string → identity (already a string)
+pub extern "C" fn synoema_show_any(val: i64) -> i64 {
+    let is_heap = (val as u64) >= 0x10000;
+    if is_str(val) && is_heap {
+        val // already a string, return as-is
+    } else if is_float(val) && is_heap {
+        let f = synoema_float_get(val);
+        let s = if f.fract() == 0.0 && f.abs() < 1e15 {
+            format!("{:.1}", f) // show 3.0 not 3
+        } else {
+            format!("{}", f)
+        };
+        let bytes = s.as_bytes();
+        let len = bytes.len();
+        let total = std::mem::size_of::<StrNode>() + len;
+        let ptr = arena_alloc(total, std::mem::align_of::<StrNode>()) as *mut StrNode;
+        if ptr.is_null() { panic!("synoema_show_any: allocation failed"); }
+        unsafe {
+            (*ptr).len = len as i64;
+            let dst = ptr.add(1) as *mut u8;
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), dst, len);
+            (ptr as i64) | STR_TAG
+        }
+    } else {
+        // Plain int or bool
+        synoema_show_int(val)
+    }
+}
+
+/// Recursively compare two lists for equality. Returns 1 if equal, 0 otherwise.
+pub extern "C" fn synoema_list_eq(a: i64, b: i64) -> i64 {
+    let mut ca = a;
+    let mut cb = b;
+    loop {
+        match (ca, cb) {
+            (0, 0) => return 1, // both Nil
+            (0, _) | (_, 0) => return 0, // one Nil, one not
+            _ => {
+                let na = unsafe { &*(ca as *const ListNode) };
+                let nb = unsafe { &*(cb as *const ListNode) };
+                // Compare heads recursively (handles nested lists / tagged values)
+                if synoema_val_eq(na.head, nb.head) == 0 { return 0; }
+                ca = na.tail;
+                cb = nb.tail;
+            }
+        }
+    }
+}
+
+/// Build a list [from..to] inclusive. Returns a tagged list (head=from, ..., head=to).
+pub extern "C" fn synoema_range(from: i64, to: i64) -> i64 {
+    // Build in reverse then it's already in order via recursion from the end.
+    // Iterative approach: build from `to` down to `from`.
+    let mut result = 0i64; // Nil
+    let mut i = to;
+    while i >= from {
+        result = synoema_cons(i, result);
+        i -= 1;
+    }
+    result
 }
 
 /// Decode a tagged string pointer to a Rust String (for display/testing).
