@@ -7,10 +7,10 @@
 
 ## 0. Быстрый статус (апрель 2026)
 
-- **373 тестов**, все зелёные, 0 warnings
-- **Phases 9.2–9.5 + 10.1–10.3 + 11.1–11.5** завершены
-- JIT поддерживает: int, bool, string, list, closures, records, modules, ADTs, ==, !=, list comprehensions
-- Interpreter: всё вышеперечисленное + полный pattern matching
+- **386 тестов**, все зелёные, 0 warnings
+- **Phases 9.2–9.5 + 10.1–10.3 + 11.1–11.5 + 12a–12b** завершены
+- JIT поддерживает: int, bool, float, string, list, closures, records, record patterns, modules, ADTs, ==, !=, list comprehensions
+- Interpreter: всё вышеперечисленное + полный pattern matching + type classes (trait/impl)
 - Arena allocator: нет утечек памяти
 
 ---
@@ -71,8 +71,8 @@ synoema-repo/
 
 | Метрика | Значение |
 |---------|----------|
-| Строк Rust | ~9500 |
-| Тестов | 368 (все зелёные) |
+| Строк Rust | ~10000 |
+| Тестов | 386 (все зелёные) |
 | Warnings | 0 |
 | Примеров | 12 программ (.sno) |
 | BPE-aligned операторов | 33/33 |
@@ -114,11 +114,14 @@ synoema-repo/
 - **Nested ADT patterns (Phase 11.3):** `Just (MkPair x y)` — вложенные конструкторы в JIT, 2 теста
 - **Full ADT matching (Phase 11.4):** `Just 0` literal sub-patterns, тройная вложенность `Just (Just (Just x))`, рекурсивный `bind_sub_pat`, 4 теста
 - **String literal patterns (Phase 11.5):** `greet "Alice" = "Hello"`, строковые суб-паттерны внутри конструкторов, 5 тестов
+- **Float (Phase 12a):** `3.14`, арифметика `+ - * /`, сравнения, условия со строками — FloatNode heap-alloc, tag=0x04, 10 тестов
+- **Record patterns (Phase 12b):** `get_x {x = v, y = _} = v` — `CorePat::Record` в JIT через `synoema_record_get` + FNV-хэш, 5 тестов
 - show возвращает строковое значение (tagged i64 ptr), compile_and_display для human-readable вывода
-- Heap-allocated linked list + string + record + ConNode runtime
+- Heap-allocated linked list + string + record + ConNode + FloatNode runtime
 
 ### JIT НЕ поддерживает:
-- Effects / IO monad (Phase 12)
+- Effects / IO monad
+- Type class dispatch
 
 ## 5. Верифицированные результаты
 
@@ -142,7 +145,7 @@ Average:      4.4× faster
 
 ## 6. Известные баги
 
-0 известных багов, 373/373 тестов зелёные.
+0 известных багов, 386/386 тестов зелёные.
 
 ### Исправленные баги (эта сессия):
 | Баг | Решение |
