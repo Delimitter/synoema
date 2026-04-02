@@ -710,6 +710,11 @@ pub extern "C" fn synoema_show_any(val: i64) -> i64 {
     }
 }
 
+/// Convert a Bool value (0 = false, non-zero = true) to a tagged string "true"/"false".
+pub extern "C" fn synoema_show_bool(v: i64) -> i64 {
+    if v != 0 { alloc_str("true") } else { alloc_str("false") }
+}
+
 /// Convert a list to its string representation "[a b c]". Returns a tagged string.
 pub extern "C" fn synoema_show_list(list: i64) -> i64 {
     alloc_str(&format_list(list))
@@ -792,22 +797,6 @@ pub extern "C" fn synoema_sum(list: i64) -> i64 {
         cur = node.tail;
     }
     total
-}
-
-// ── Filter/Map (implemented in runtime for efficiency) ──
-
-/// Filter a list by a predicate function pointer
-/// pred: extern "C" fn(i64) -> i64 (returns 0 or 1)
-pub extern "C" fn synoema_filter(pred_ptr: i64, list: i64) -> i64 {
-    if list == 0 { return 0; }
-    let pred: extern "C" fn(i64) -> i64 = unsafe { std::mem::transmute(pred_ptr) };
-    let node = unsafe { &*(list as *const ListNode) };
-    let rest = synoema_filter(pred_ptr, node.tail);
-    if pred(node.head) != 0 {
-        synoema_cons(node.head, rest)
-    } else {
-        rest
-    }
 }
 
 // ── Records ─────────────────────────────────────────────
@@ -952,6 +941,74 @@ pub extern "C" fn synoema_show_con(ptr: i64) -> i64 {
         }
     }
     alloc_str(&s)
+}
+
+/// map f xs — apply a 1-arg closure to each list element. Returns mapped list.
+/// closure_ptr: pointer to ClosureNode { fn_ptr: i64, env_ptr: i64 }
+pub extern "C" fn synoema_map(closure_ptr: i64, list: i64) -> i64 {
+    let fn_ptr_val = unsafe { *(closure_ptr as *const i64) };
+    let env_ptr    = unsafe { *((closure_ptr + 8) as *const i64) };
+    let fn_ptr: extern "C" fn(i64, i64) -> i64 = unsafe { std::mem::transmute(fn_ptr_val) };
+
+    // Collect elements first to avoid mutating the list while iterating
+    let mut elems: Vec<i64> = Vec::new();
+    let mut cur = list;
+    while cur != 0 {
+        elems.push(unsafe { (*(cur as *const ListNode)).head });
+        cur = unsafe { (*(cur as *const ListNode)).tail };
+    }
+    // Build result right-to-left (preserves order)
+    let mut result = 0i64;
+    for &elem in elems.iter().rev() {
+        result = synoema_cons(fn_ptr(env_ptr, elem), result);
+    }
+    result
+}
+
+/// filter p xs — keep only elements where predicate p returns non-zero. Returns filtered list.
+pub extern "C" fn synoema_filter(closure_ptr: i64, list: i64) -> i64 {
+    let fn_ptr_val = unsafe { *(closure_ptr as *const i64) };
+    let env_ptr    = unsafe { *((closure_ptr + 8) as *const i64) };
+    let fn_ptr: extern "C" fn(i64, i64) -> i64 = unsafe { std::mem::transmute(fn_ptr_val) };
+
+    let mut elems: Vec<i64> = Vec::new();
+    let mut cur = list;
+    while cur != 0 {
+        elems.push(unsafe { (*(cur as *const ListNode)).head });
+        cur = unsafe { (*(cur as *const ListNode)).tail };
+    }
+    let mut result = 0i64;
+    for &elem in elems.iter().rev() {
+        if fn_ptr(env_ptr, elem) != 0 {
+            result = synoema_cons(elem, result);
+        }
+    }
+    result
+}
+
+/// foldl f init xs — left fold with a curried 2-arg closure.
+/// f is called as: partial = f acc → then partial elem → new_acc.
+pub extern "C" fn synoema_foldl(f_closure: i64, init: i64, list: i64) -> i64 {
+    let fn_ptr_val = unsafe { *(f_closure as *const i64) };
+    let env_ptr    = unsafe { *((f_closure + 8) as *const i64) };
+    let fn_ptr: extern "C" fn(i64, i64) -> i64 = unsafe { std::mem::transmute(fn_ptr_val) };
+
+    let mut elems: Vec<i64> = Vec::new();
+    let mut cur = list;
+    while cur != 0 {
+        elems.push(unsafe { (*(cur as *const ListNode)).head });
+        cur = unsafe { (*(cur as *const ListNode)).tail };
+    }
+    let mut acc = init;
+    for elem in elems {
+        // Curried call: f(acc) returns a partial closure, then partial(elem) returns new acc
+        let partial = fn_ptr(env_ptr, acc);
+        let fn_ptr2_val = unsafe { *(partial as *const i64) };
+        let env_ptr2    = unsafe { *((partial + 8) as *const i64) };
+        let fn_ptr2: extern "C" fn(i64, i64) -> i64 = unsafe { std::mem::transmute(fn_ptr2_val) };
+        acc = fn_ptr2(env_ptr2, elem);
+    }
+    acc
 }
 
 /// concatMap: apply a closure to each list element, concat resulting lists.

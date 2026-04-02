@@ -291,3 +291,50 @@ fn display_round_trip() {
         }
     }
 }
+
+// ── Float literal desugar ─────────────────────────────────────
+
+#[test]
+fn desugar_float_literal() {
+    let body = core_def("x = 3.14");
+    match body {
+        CoreExpr::Lit(synoema_parser::Lit::Float(f)) => {
+            assert!((f - 3.14).abs() < 1e-10, "Expected 3.14, got {}", f);
+        }
+        _ => panic!("Expected float literal, got: {:?}", body),
+    }
+}
+
+// ── Power operator desugar ────────────────────────────────────
+
+#[test]
+fn desugar_pow_op() {
+    let s = fmt("f x = x ** 2");
+    assert!(s.contains("pow#") || s.contains("ipow#"),
+        "Should contain pow# primop: {}", s);
+}
+
+// ── Logical operators desugar ─────────────────────────────────
+
+#[test]
+fn desugar_logical_and() {
+    let s = fmt("f x y = x && y");
+    assert!(s.contains("and#"), "Should contain and# primop: {}", s);
+}
+
+#[test]
+fn desugar_logical_or() {
+    let s = fmt("f x y = x || y");
+    assert!(s.contains("or#"), "Should contain or# primop: {}", s);
+}
+
+// ── Sequence operator desugar ─────────────────────────────────
+
+#[test]
+fn desugar_seq_op() {
+    // e1 ; e2 desugars to some structure — just verify it doesn't panic
+    // and the result contains the right-hand-side value
+    let s = fmt("main = 42 ; 99");
+    assert!(!s.is_empty(), "Should desugar sequence: {}", s);
+    assert!(s.contains("99"), "Right-hand value should appear in output: {}", s);
+}

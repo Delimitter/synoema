@@ -1042,4 +1042,220 @@ main = check (Just \"fail\")
     fn jit_show_record_float_field() {
         assert_eq!(jit_str("main = show {pi = 3.14}"), "{pi = 3.14}");
     }
+
+    // ── Logical operators in JIT ────────────────────────────────
+
+    #[test]
+    fn jit_and_true_true() { assert_eq!(jit("main = ? true && true -> 1 : 0"), 1); }
+
+    #[test]
+    fn jit_and_true_false() { assert_eq!(jit("main = ? true && false -> 1 : 0"), 0); }
+
+    #[test]
+    fn jit_or_false_true() { assert_eq!(jit("main = ? false || true -> 1 : 0"), 1); }
+
+    #[test]
+    fn jit_or_false_false() { assert_eq!(jit("main = ? false || false -> 1 : 0"), 0); }
+
+    // ── Float equality and comparison in JIT ─────────────────────
+
+    #[test]
+    fn jit_float_eq_true() { assert_eq!(jit("main = ? 1.5 == 1.5 -> 1 : 0"), 1); }
+
+    #[test]
+    fn jit_float_eq_false() { assert_eq!(jit("main = ? 1.5 == 2.0 -> 1 : 0"), 0); }
+
+    #[test]
+    fn jit_float_neq_true() { assert_eq!(jit("main = ? 1.5 != 2.0 -> 1 : 0"), 1); }
+
+    #[test]
+    fn jit_float_neq_false() { assert_eq!(jit("main = ? 1.5 != 1.5 -> 1 : 0"), 0); }
+
+    #[test]
+    fn jit_float_lte_equal() { assert_eq!(jit("main = ? 1.5 <= 1.5 -> 1 : 0"), 1); }
+
+    #[test]
+    fn jit_float_lte_less() { assert_eq!(jit("main = ? 1.0 <= 2.0 -> 1 : 0"), 1); }
+
+    #[test]
+    fn jit_float_lte_false() { assert_eq!(jit("main = ? 2.0 <= 1.0 -> 1 : 0"), 0); }
+
+    #[test]
+    fn jit_float_gte_equal() { assert_eq!(jit("main = ? 2.5 >= 2.5 -> 1 : 0"), 1); }
+
+    #[test]
+    fn jit_float_gte_greater() { assert_eq!(jit("main = ? 3.0 >= 1.5 -> 1 : 0"), 1); }
+
+    // ── GCD and Quicksort in JIT ─────────────────────────────────
+
+    #[test]
+    fn jit_gcd() {
+        assert_eq!(jit("gcd a 0 = a\ngcd a b = gcd b (a % b)\nmain = gcd 48 18"), 6);
+    }
+
+    #[test]
+    fn jit_quicksort_sum() {
+        let src = "\
+qsort [] = []
+qsort (p:xs) = qsort lo ++ [p] ++ qsort hi
+  lo = [x | x <- xs , x <= p]
+  hi = [x | x <- xs , x > p]
+main = sum (qsort [3 1 4 1 5 9 2 6])";
+        assert_eq!(jit(src), 31);
+    }
+
+    // ── Range + filter in comprehensions ─────────────────────────
+
+    #[test]
+    fn jit_range_filter_evens() {
+        assert_eq!(jit("main = length [x | x <- [1..10], x % 2 == 0]"), 5);
+    }
+
+    #[test]
+    fn jit_range_filter_sum_evens() {
+        assert_eq!(jit("main = sum [x | x <- [1..10], x % 2 == 0]"), 30);
+    }
+
+    // ── Pipe operator in JIT ──────────────────────────────────────
+
+    #[test]
+    fn jit_pipe_simple() {
+        assert_eq!(jit("double x = x * 2\nmain = 21 |> double"), 42);
+    }
+
+    #[test]
+    fn jit_pipe_chain() {
+        assert_eq!(jit("double x = x * 2\nmain = 5 |> double |> double"), 20);
+    }
+
+    // ── Record with float field ───────────────────────────────────
+
+    #[test]
+    fn jit_record_float_field() {
+        let f = run_float("p = {x = 3.0, y = 4.0}\nmain = p.x");
+        assert!((f - 3.0).abs() < 1e-10, "Expected 3.0, got {}", f);
+    }
+
+    // ── Power right associativity ─────────────────────────────────
+
+    #[test]
+    fn jit_pow_right_assoc() {
+        // 2 ** 3 ** 2 = 2 ** (3 ** 2) = 2 ** 9 = 512
+        assert_eq!(jit("main = 2 ** 3 ** 2"), 512);
+    }
+
+    // ── Phase 16: Type class Show in JIT ──────────────────────────
+
+    #[test]
+    fn jit_typeclass_show_red() {
+        let src = "\
+Color = Red | Green | Blue
+impl Show Color
+  show Red = \"Red\"
+  show Green = \"Green\"
+  show Blue = \"Blue\"
+main = show Red";
+        assert_eq!(jit_str(src), "Red");
+    }
+
+    #[test]
+    fn jit_typeclass_show_green() {
+        let src = "\
+Color = Red | Green | Blue
+impl Show Color
+  show Red = \"Red\"
+  show Green = \"Green\"
+  show Blue = \"Blue\"
+main = show Green";
+        assert_eq!(jit_str(src), "Green");
+    }
+
+    #[test]
+    fn jit_typeclass_show_with_trait_decl() {
+        let src = "\
+Color = Red | Green | Blue
+trait Show a
+  show : a -> String
+impl Show Color
+  show Red = \"Red\"
+  show Green = \"Green\"
+  show Blue = \"Blue\"
+main = show Blue";
+        assert_eq!(jit_str(src), "Blue");
+    }
+
+    #[test]
+    fn jit_typeclass_show_in_concat() {
+        let src = "\
+Color = Red | Green | Blue
+impl Show Color
+  show Red = \"Red\"
+  show Green = \"Green\"
+  show Blue = \"Blue\"
+main = \"color=\" ++ show Green";
+        assert_eq!(jit_str(src), "color=Green");
+    }
+
+    #[test]
+    fn jit_show_bool_var_true() {
+        assert_eq!(jit_str("main = show_bool true"), "true");
+    }
+
+    #[test]
+    fn jit_show_bool_var_false() {
+        assert_eq!(jit_str("main = show_bool false"), "false");
+    }
+
+    #[test]
+    fn jit_show_bool_comparison() {
+        // show on a comparison → is_bool_expr detects it, calls synoema_show_bool
+        assert_eq!(jit_str("main = show (3 > 2)"), "true");
+    }
+
+    #[test]
+    fn jit_show_bool_eq_false() {
+        assert_eq!(jit_str("main = show (1 == 2)"), "false");
+    }
+
+    // ── Phase 17: map / filter / foldl in JIT ─────────────────────
+
+    #[test]
+    fn jit_map_double() {
+        assert_eq!(jit("main = sum (map (\\x -> x * 2) [1 2 3])"), 12);
+    }
+
+    #[test]
+    fn jit_map_increment() {
+        assert_eq!(jit("main = sum (map (\\x -> x + 1) [1 2 3 4 5])"), 20);
+    }
+
+    #[test]
+    fn jit_map_squares_range() {
+        assert_eq!(jit("main = sum (map (\\x -> x * x) [1..5])"), 55);
+    }
+
+    #[test]
+    fn jit_filter_even() {
+        assert_eq!(jit("main = sum (filter (\\x -> x % 2 == 0) [1 2 3 4 5 6])"), 12);
+    }
+
+    #[test]
+    fn jit_filter_gt() {
+        assert_eq!(jit("main = length (filter (\\x -> x > 3) [1 2 3 4 5])"), 2);
+    }
+
+    #[test]
+    fn jit_filter_range() {
+        assert_eq!(jit("main = length (filter (\\x -> x % 2 == 0) [1..100])"), 50);
+    }
+
+    #[test]
+    fn jit_foldl_sum() {
+        assert_eq!(jit("main = foldl (\\acc x -> acc + x) 0 [1 2 3 4 5]"), 15);
+    }
+
+    #[test]
+    fn jit_foldl_product() {
+        assert_eq!(jit("main = foldl (\\acc x -> acc * x) 1 [1 2 3 4 5]"), 120);
+    }
 }

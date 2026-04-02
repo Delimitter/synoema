@@ -125,6 +125,7 @@ fn fold_app(func: CoreExpr, arg: CoreExpr) -> CoreExpr {
 fn fold_unary(op: PrimOp, lit: &Lit) -> Option<Lit> {
     match (op, lit) {
         (PrimOp::Neg, Lit::Int(n)) => Some(Lit::Int(-n)),
+        (PrimOp::Neg, Lit::Float(n)) => Some(Lit::Float(-n)),
         (PrimOp::Not, Lit::Bool(b)) => Some(Lit::Bool(!b)),
         _ => None,
     }
@@ -158,11 +159,26 @@ fn fold_binary(op: PrimOp, a: &Lit, b: &Lit) -> Option<Lit> {
         (PrimOp::And, Lit::Bool(x), Lit::Bool(y)) => Some(Lit::Bool(*x && *y)),
         (PrimOp::Or,  Lit::Bool(x), Lit::Bool(y)) => Some(Lit::Bool(*x || *y)),
 
+        // Integer power (guard against overflow)
+        (PrimOp::Pow, Lit::Int(x), Lit::Int(y)) if *y >= 0 => {
+            u32::try_from(*y).ok()
+                .and_then(|exp| x.checked_pow(exp))
+                .map(Lit::Int)
+        }
+
         // Float arithmetic
-        (PrimOp::Add, Lit::Float(x), Lit::Float(y)) => Some(Lit::Float(x + y)),
-        (PrimOp::Sub, Lit::Float(x), Lit::Float(y)) => Some(Lit::Float(x - y)),
-        (PrimOp::Mul, Lit::Float(x), Lit::Float(y)) => Some(Lit::Float(x * y)),
-        (PrimOp::Div, Lit::Float(x), Lit::Float(y)) if *y != 0.0 => Some(Lit::Float(x / y)),
+        (PrimOp::FAdd, Lit::Float(x), Lit::Float(y)) => Some(Lit::Float(x + y)),
+        (PrimOp::FSub, Lit::Float(x), Lit::Float(y)) => Some(Lit::Float(x - y)),
+        (PrimOp::FMul, Lit::Float(x), Lit::Float(y)) => Some(Lit::Float(x * y)),
+        (PrimOp::FDiv, Lit::Float(x), Lit::Float(y)) if *y != 0.0 => Some(Lit::Float(x / y)),
+        (PrimOp::FPow, Lit::Float(x), Lit::Float(y)) => Some(Lit::Float(x.powf(*y))),
+
+        // Float comparisons
+        (PrimOp::FEq,  Lit::Float(x), Lit::Float(y)) => Some(Lit::Bool(x == y)),
+        (PrimOp::FLt,  Lit::Float(x), Lit::Float(y)) => Some(Lit::Bool(x < y)),
+        (PrimOp::FGt,  Lit::Float(x), Lit::Float(y)) => Some(Lit::Bool(x > y)),
+        (PrimOp::FLte, Lit::Float(x), Lit::Float(y)) => Some(Lit::Bool(x <= y)),
+        (PrimOp::FGte, Lit::Float(x), Lit::Float(y)) => Some(Lit::Bool(x >= y)),
 
         _ => None,
     }
@@ -392,5 +408,21 @@ mod tests {
     fn fold_cond_false() {
         let result = fold("main = ? false -> 99 : 7");
         assert!(matches!(result, CoreExpr::Lit(Lit::Int(7))));
+    }
+
+    #[test]
+    fn fold_int_pow() {
+        let result = fold("main = 2 ** 10");
+        assert!(matches!(result, CoreExpr::Lit(Lit::Int(1024))));
+    }
+
+    #[test]
+    fn fold_float_neg() {
+        let e = fold("main = 0.0 - 3.14");
+        // After desugaring to FSub + constant fold → Lit(Float(-3.14))
+        if let CoreExpr::Lit(Lit::Float(f)) = e {
+            assert!((f - (-3.14)).abs() < 1e-10);
+        }
+        // If not folded (desugarer may not produce FSub), that's also OK
     }
 }

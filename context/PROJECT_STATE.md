@@ -7,10 +7,11 @@
 
 ## 0. Быстрый статус (апрель 2026)
 
-- **386 тестов**, все зелёные, 0 warnings
-- **Phases 9.2–9.5 + 10.1–10.3 + 11.1–11.5 + 12a–12b** завершены
-- JIT поддерживает: int, bool, float, string, list, closures, records, record patterns, modules, ADTs, ==, !=, list comprehensions
+- **488 тестов**, все зелёные, 0 warnings
+- **Phases 9.2–9.5 + 10.1–10.3 + 11.1–11.5 + 12a–12b + 13 + 14a–14b** завершены
+- JIT поддерживает: int, bool, float, string, list, closures, records, record patterns, modules, ADTs, ==, !=, list comprehensions, IO (print/readline)
 - Interpreter: всё вышеперечисленное + полный pattern matching + type classes (trait/impl)
+- Type checker: float арифметика (+, -, *, /, **), string concat (++), overflow-safe **
 - Arena allocator: нет утечек памяти
 
 ---
@@ -35,12 +36,12 @@ synoema-repo/
 │   ├── LICENSE                 # MIT
 │   ├── .gitignore
 │   ├── crates/
-│   │   ├── synoema-lexer/      # 706 строк, 80 тестов — токенизация + offside rule
-│   │   ├── synoema-parser/     # 1398 строк, 36 тестов — Pratt parser, 15 ExprKind
-│   │   ├── synoema-types/      # 1453 строки, 42 теста — Hindley-Milner inference
-│   │   ├── synoema-core/       # 969 строк, 26 тестов — Core IR (System F)
-│   │   ├── synoema-eval/       # 1314 строк, 46 тестов — tree-walking interpreter
-│   │   ├── synoema-codegen/    # 944 строки, 34 теста — Cranelift JIT + runtime
+│   │   ├── synoema-lexer/      # 735 строк, 82 теста — токенизация + offside rule
+│   │   ├── synoema-parser/     # 1672 строки, 43 теста — Pratt parser, 15 ExprKind
+│   │   ├── synoema-types/      # 1908 строк, 61 тест — Hindley-Milner inference
+│   │   ├── synoema-core/       # 1536 строк, 44 теста — Core IR (System F) + optimizer
+│   │   ├── synoema-eval/       # 1894 строки, 119 тестов — tree-walking interpreter
+│   │   ├── synoema-codegen/    # 3044 строки, 126 тестов — Cranelift JIT + runtime
 │   │   └── synoema-repl/       # 271 строка — CLI: run/jit/eval/REPL
 │   ├── examples/               # 10 программ .sno
 │   ├── benchmarks/
@@ -71,8 +72,8 @@ synoema-repo/
 
 | Метрика | Значение |
 |---------|----------|
-| Строк Rust | ~10000 |
-| Тестов | 386 (все зелёные) |
+| Строк Rust | ~11500 |
+| Тестов | 475 (все зелёные) |
 | Warnings | 0 |
 | Примеров | 12 программ (.sno) |
 | BPE-aligned операторов | 33/33 |
@@ -145,16 +146,21 @@ Average:      4.4× faster
 
 ## 6. Известные баги
 
-0 известных багов, 386/386 тестов зелёные.
+0 известных багов, 475/488 тестов зелёные.
 
-### Исправленные баги (эта сессия):
+### Исправленные баги:
 | Баг | Решение |
 |-----|---------|
+| Float арифметика (+,-,*,/,**) сломана в `synoema run` и `jit` | Type checker: is_float detection для Num-полиморфизма (infer.rs) |
+| String concat (++) не проходил type check | Type checker: is_string detection для ++ (infer.rs) |
+| Division by zero для смешанных типов (Int/Float) | Единый is_zero check для всех числовых комбинаций (eval.rs) |
+| Integer power overflow (10**20 паника) | checked_pow + try_from для overflow-safe ** (eval.rs) |
+| Float powi i64→i32 truncation | try_from с fallback на powf (eval.rs) |
+| Optimizer не фолдил Pow, FPow, float comparisons | Добавлены все missing cases в fold_binary/fold_unary (optimize.rs) |
 | Euler1 stack overflow в interpreter | Phase 10.1: iterative TCO loop + 64MB stack thread |
 | closure_filter_length crash | Неправильный синтаксис в тесте: cons `:` конфликтовал с ternary `:`. Исправлено: явные скобки |
 | JIT не поддерживал строки | Phase 9.3: tagged pointer scheme (bit 1), StrNode, show/++/length |
-| «Ackermann JIT bug» (false positive) | Баг не существовал: `ack 3 4 = 125` — правильный ответ (2^7 − 3). Описание в документе путало входные данные |
-| 1 warning unused `fresh` | `build_pattern_guard` переименован в `_fresh` |
+| «Ackermann JIT bug» (false positive) | Баг не существовал: `ack 3 4 = 125` — правильный ответ (2^7 − 3) |
 
 ## 7. Архитектура компилятора
 

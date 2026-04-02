@@ -830,3 +830,243 @@ fn seq_with_pipe() {
 fn unit_eq() {
     assert_eq!(ev("() == ()"), Value::Bool(true));
 }
+
+// ── Float arithmetic through full pipeline (run_main) ─
+
+#[test]
+fn run_float_add() {
+    let (val, _) = run_main("main = 3.14 + 2.71");
+    assert_eq!(val, Value::Float(5.85));
+}
+
+#[test]
+fn run_float_sub() {
+    let (val, _) = run_main("main = 5.0 - 1.5");
+    assert_eq!(val, Value::Float(3.5));
+}
+
+#[test]
+fn run_float_mul() {
+    let (val, _) = run_main("main = 2.0 * 3.0");
+    assert_eq!(val, Value::Float(6.0));
+}
+
+#[test]
+fn run_float_div() {
+    let (val, _) = run_main("main = 10.0 / 4.0");
+    assert_eq!(val, Value::Float(2.5));
+}
+
+#[test]
+fn run_float_pow() {
+    let (val, _) = run_main("main = 2.0 ** 3.0");
+    assert_eq!(val, Value::Float(8.0));
+}
+
+#[test]
+fn run_float_with_sqrt() {
+    let (val, _) = run_main("main = sqrt 4.0 + 1.0");
+    assert_eq!(val, Value::Float(3.0));
+}
+
+// ── String concat through full pipeline ───────────────
+
+#[test]
+fn run_string_concat() {
+    let (val, _) = run_main("main = \"hello\" ++ \" world\"");
+    assert_eq!(val, Value::Str("hello world".into()));
+}
+
+// ── Division by zero — mixed types ────────────────────
+
+#[test]
+fn div_int_by_float_zero() {
+    let result = eval_expr("5 / 0.0");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("Division by zero"));
+}
+
+#[test]
+fn div_float_by_int_zero() {
+    let result = eval_expr("5.0 / 0");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("Division by zero"));
+}
+
+// ── Power overflow protection ─────────────────────────
+
+#[test]
+fn pow_int_overflow() {
+    let result = eval_expr("10 ** 20");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("overflow"));
+}
+
+#[test]
+fn pow_int_normal() {
+    assert_eq!(ev("2 ** 10"), Value::Int(1024));
+}
+
+// ── Logic (extended) ──────────────────────────────────────────
+
+#[test]
+fn or_false_false() { assert_eq!(ev("false || false"), Value::Bool(false)); }
+
+#[test]
+fn not_builtin() {
+    // `not` is a builtin in the evaluator
+    assert_eq!(ev("not true"), Value::Bool(false));
+    assert_eq!(ev("not false"), Value::Bool(true));
+}
+
+// ── Strings (extended) ────────────────────────────────────────
+
+#[test]
+fn string_neq() {
+    assert_eq!(ev("\"abc\" != \"def\""), Value::Bool(true));
+    assert_eq!(ev("\"abc\" != \"abc\""), Value::Bool(false));
+}
+
+#[test]
+fn string_length_builtin() {
+    assert_eq!(ev("length \"hello\""), Value::Int(5));
+    assert_eq!(ev("length \"\""), Value::Int(0));
+}
+
+#[test]
+fn show_bool() {
+    let (val, _) = run_main("main = show true");
+    assert_eq!(val, Value::Str("true".into()));
+    let (val2, _) = run_main("main = show false");
+    assert_eq!(val2, Value::Str("false".into()));
+}
+
+#[test]
+fn show_list_int() {
+    let (val, _) = run_main("main = show [1 2 3]");
+    assert_eq!(val, Value::Str("[1 2 3]".into()));
+}
+
+#[test]
+fn show_in_string_concat() {
+    let (val, _) = run_main(r#"main = "n=" ++ show 42"#);
+    assert_eq!(val, Value::Str("n=42".into()));
+}
+
+// ── List (extended) ───────────────────────────────────────────
+
+#[test]
+fn list_comp_double_transform() {
+    let (val, _) = run_main("main = [x * 2 | x <- [1..5]]");
+    assert_eq!(val, Value::List(vec![
+        Value::Int(2), Value::Int(4), Value::Int(6), Value::Int(8), Value::Int(10)
+    ]));
+}
+
+#[test]
+fn cons_builds_list() {
+    let (val, _) = run_main("main = 1 : 2 : 3 : []");
+    assert_eq!(val, Value::List(vec![
+        Value::Int(1), Value::Int(2), Value::Int(3)
+    ]));
+}
+
+// ── Full Programs (extended) ──────────────────────────────────
+
+#[test]
+fn full_gcd() {
+    let src = "gcd a 0 = a\ngcd a b = gcd b (a % b)";
+    let env = run_ok(src);
+    let mut ev = Evaluator::new();
+    let f = env.lookup("gcd").unwrap().clone();
+    let partial = ev.apply(f, Value::Int(48)).unwrap();
+    assert_eq!(ev.apply(partial, Value::Int(18)).unwrap(), Value::Int(6));
+}
+
+// ── Records (extended) ────────────────────────────────────────
+
+#[test]
+fn record_three_fields() {
+    let val = ev("{a = 10, b = 20, c = 30}");
+    assert_eq!(val, Value::Record(vec![
+        ("a".into(), Value::Int(10)),
+        ("b".into(), Value::Int(20)),
+        ("c".into(), Value::Int(30)),
+    ]));
+}
+
+#[test]
+fn record_float_field() {
+    let env = run_ok("p = {pi = 3.14, r = 2.0}\nmain = p.pi");
+    match env.lookup("main") {
+        Some(Value::Func { equations, .. }) => {
+            let mut ev = Evaluator::new();
+            let v = ev.eval(&env, &equations[0].body).unwrap();
+            assert_eq!(v, Value::Float(3.14));
+        }
+        _ => panic!("main not found"),
+    }
+}
+
+// ── Pipe (extended) ───────────────────────────────────────────
+
+#[test]
+fn pipe_chain_two_steps() {
+    let env = run_ok("double x = x * 2\nresult = 5 |> double |> double");
+    match env.lookup("result") {
+        Some(Value::Func { equations, .. }) => {
+            let mut ev = Evaluator::new();
+            let v = ev.eval(&env, &equations[0].body).unwrap();
+            assert_eq!(v, Value::Int(20));
+        }
+        _ => panic!("result not found"),
+    }
+}
+
+// ── Modules (extended) ────────────────────────────────────────
+
+#[test]
+fn module_two_imports() {
+    let src = "\
+mod Math
+  double x = x * 2
+  square x = x * x
+use Math (double square)
+main = double (square 3)";
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Int(18));
+}
+
+// ── IO (extended) ─────────────────────────────────────────────
+
+#[test]
+fn print_float_output() {
+    let (_, output) = run_main("main = print 3.14");
+    assert_eq!(output, vec!["3.14"]);
+}
+
+// ── Builtins (extended) ───────────────────────────────────────
+
+#[test]
+fn filter_builtin() {
+    assert_eq!(
+        ev("filter even [1 2 3 4 5 6]"),
+        Value::List(vec![Value::Int(2), Value::Int(4), Value::Int(6)])
+    );
+}
+
+#[test]
+fn map_builtin() {
+    assert_eq!(
+        ev("map (\\x -> x * 2) [1 2 3]"),
+        Value::List(vec![Value::Int(2), Value::Int(4), Value::Int(6)])
+    );
+}
+
+#[test]
+fn foldl_builtin() {
+    assert_eq!(
+        ev("foldl (\\acc x -> acc + x) 0 [1 2 3 4 5]"),
+        Value::Int(15)
+    );
+}

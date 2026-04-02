@@ -573,10 +573,12 @@ impl Evaluator {
             BinOp::Sub => num_op(l, r, |a, b| a - b, |a, b| a - b),
             BinOp::Mul => num_op(l, r, |a, b| a * b, |a, b| a * b),
             BinOp::Div => {
-                match (&l, &r) {
-                    (Value::Int(_), Value::Int(0)) => Err(err("Division by zero")),
-                    (Value::Float(_), Value::Float(b)) if *b == 0.0 => Err(err("Division by zero")),
-                    _ => num_op(l, r, |a, b| a / b, |a, b| a / b),
+                let is_zero = matches!(&r, Value::Int(0))
+                           || matches!(&r, Value::Float(f) if *f == 0.0);
+                if is_zero {
+                    Err(err("Division by zero"))
+                } else {
+                    num_op(l, r, |a, b| a / b, |a, b| a / b)
                 }
             }
             BinOp::Mod => {
@@ -588,11 +590,23 @@ impl Evaluator {
             }
             BinOp::Pow => {
                 match (&l, &r) {
-                    (Value::Int(a), Value::Int(b)) if *b >= 0 => Ok(Value::Int(a.pow(*b as u32))),
+                    (Value::Int(a), Value::Int(b)) if *b >= 0 => {
+                        let exp = u32::try_from(*b)
+                            .map_err(|_| err("Exponent too large"))?;
+                        a.checked_pow(exp)
+                            .map(Value::Int)
+                            .ok_or_else(|| err("Integer overflow in **"))
+                    }
                     (Value::Int(_), Value::Int(_)) => Err(err("** requires non-negative exponent for Int")),
                     (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a.powf(*b))),
                     (Value::Int(a), Value::Float(b)) => Ok(Value::Float((*a as f64).powf(*b))),
-                    (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a.powi(*b as i32))),
+                    (Value::Float(a), Value::Int(b)) => {
+                        if let Ok(exp) = i32::try_from(*b) {
+                            Ok(Value::Float(a.powi(exp)))
+                        } else {
+                            Ok(Value::Float(a.powf(*b as f64)))
+                        }
+                    }
                     _ => Err(err("** requires numeric operands")),
                 }
             }
@@ -647,7 +661,7 @@ impl Evaluator {
         // 0-arity: readline executes immediately on lookup (reads from stdin)
         env.insert("readline".to_string(), Value::Builtin("readline".to_string(), 0));
         for (name, arity) in &[
-            ("print", 1), ("show", 1), ("length", 1),
+            ("print", 1), ("show", 1), ("show_bool", 1), ("length", 1),
             ("head", 1), ("tail", 1), ("even", 1), ("odd", 1),
             ("not", 1), ("sum", 1), ("filter", 2), ("map", 2),
             ("foldl", 3),
@@ -681,6 +695,14 @@ impl Evaluator {
                 Ok(Value::Unit)
             }
             "show" => Ok(Value::Str(format!("{}", args[0]))),
+            "show_bool" => {
+                let b = match &args[0] {
+                    Value::Bool(b) => *b,
+                    Value::Int(0) => false,
+                    _ => true,
+                };
+                Ok(Value::Str(if b { "true".into() } else { "false".into() }))
+            }
             "length" => match &args[0] {
                 Value::List(l) => Ok(Value::Int(l.len() as i64)),
                 Value::Str(s) => Ok(Value::Int(s.len() as i64)),

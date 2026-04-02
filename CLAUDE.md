@@ -3,13 +3,13 @@
 ## Quick Reference
 
 Synoema — programming language for LLM code generation.
-~11500 lines Rust, 503 tests, 7 crates, Cranelift JIT backend.
+~11500 lines Rust, 518 tests, 7 crates, Cranelift JIT backend.
 
 ## Commands
 
 ```bash
 cargo build                     # Build all
-cargo test                      # Run 503 tests
+cargo test                      # Run 518 tests
 cargo run -p synoema-repl -- run examples/quicksort.sno  # Interpreter
 cargo run -p synoema-repl -- jit examples/factorial.sno   # JIT compile
 cargo run -p synoema-repl -- eval "6 * 7"                 # Eval expression
@@ -58,15 +58,17 @@ Source (.sno) → Lexer → Parser → Types (HM) → Core IR → Optimizer → 
 - **Phase 15a** ✅ JIT completeness: `show` for all types (float/str/bool/int), `list ==` (recursive), `[a..b]` ranges via `synoema_range`, fixed `synoema_val_eq` address validation, 13 tests
 - **Phase 15b** ✅ `show` for Bool/List in JIT: compile-time fold `show true/false`, `synoema_show_list` ("[1 2 3]" format, recursive elements), `show` in concat, 8 tests
 - **Phase 15c** ✅ `show` for ADTs/Records in JIT: CON_TAG=1/RECORD_TAG=5 pointer tagging, `synoema_show_con` (reads stored name+arity), compile-time `show {record}` expansion, 8 tests
+- **Phase 16** ✅ Type class `Show` dispatch in JIT: user-defined `impl Show Color` works in JIT (overrides built-in), `synoema_show_bool` + `show_bool` built-in, `is_bool_expr` heuristic (`show (x>y)` → "true"/"false"), 10 tests
+- **Phase 17** ✅ Higher-order stdlib in JIT: `synoema_map`/`synoema_filter`/`synoema_foldl` via closure ABI (`fn_ptr(env, arg)`), curried foldl (partial application), old non-closure `synoema_filter` removed, 8 tests
 
 ## Current Priorities
 
 1. Publication: GitHub + Habr articles + HN launch
-2. Phase 16: `show` for nested ADTs, type class `Show` dispatch in JIT
+2. Phase 18: next JIT feature (operator sections, `zip`/`zipWith`, or string stdlib)
 
 ## Known Bugs
 
-- 0 warnings, 0 known bugs (503/503 tests passing)
+- 0 warnings, 0 known bugs (518/518 tests passing)
 
 Note: the "Ackermann JIT bug" was a false positive. `ack 3 4 = 125` is correct (2^7 − 3).
 

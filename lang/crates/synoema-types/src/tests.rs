@@ -423,3 +423,114 @@ fn module_function_type() {
         .expect("Arith.double should be defined");
     assert_eq!(scheme.ty, Type::arrow(Type::int(), Type::int()));
 }
+
+// ── Float arithmetic type inference ───────────────────
+
+#[test]
+fn float_add() {
+    let ty = infer("x = 3.14 + 2.71");
+    assert_eq!(ty, Type::float());
+}
+
+#[test]
+fn float_sub() {
+    let ty = infer("x = 5.0 - 1.5");
+    assert_eq!(ty, Type::float());
+}
+
+#[test]
+fn float_mul() {
+    let ty = infer("x = 2.0 * 3.0");
+    assert_eq!(ty, Type::float());
+}
+
+#[test]
+fn float_div() {
+    let ty = infer("x = 10.0 / 3.0");
+    assert_eq!(ty, Type::float());
+}
+
+#[test]
+fn float_pow() {
+    let ty = infer("x = 2.0 ** 3.0");
+    assert_eq!(ty, Type::float());
+}
+
+#[test]
+fn float_neg() {
+    let ty = infer("x = 0.0 - 3.14");
+    assert_eq!(ty, Type::float());
+}
+
+#[test]
+fn float_with_sqrt() {
+    let ty = infer("x = sqrt 4.0 + 1.0");
+    assert_eq!(ty, Type::float());
+}
+
+#[test]
+fn int_arithmetic_still_int() {
+    let ty = infer("x = 2 + 3");
+    assert_eq!(ty, Type::int());
+}
+
+#[test]
+fn int_pow_still_int() {
+    let ty = infer("x = 2 ** 10");
+    assert_eq!(ty, Type::int());
+}
+
+// ── String concat type inference ──────────────────────
+
+#[test]
+fn string_concat() {
+    let ty = infer("x = \"hello\" ++ \" world\"");
+    assert_eq!(ty, Type::string());
+}
+
+// ── Unit type ─────────────────────────────────────────────────
+
+#[test]
+fn unit_literal_type() {
+    let ty = infer("x = ()");
+    assert_eq!(ty, Type::Con("Unit".into()));
+}
+
+// ── Show returns String ───────────────────────────────────────
+
+#[test]
+fn show_returns_string_type() {
+    let ty = infer("x = show 42");
+    assert_eq!(ty, Type::string());
+}
+
+// ── Logical operators ─────────────────────────────────────────
+
+#[test]
+fn logical_and_type() {
+    let ty = infer("x = true && false");
+    assert_eq!(ty, Type::bool());
+}
+
+#[test]
+fn logical_or_type() {
+    let ty = infer("x = false || true");
+    assert_eq!(ty, Type::bool());
+}
+
+// ── String inequality ─────────────────────────────────────────
+
+#[test]
+fn string_neq_type() {
+    let ty = infer(r#"x = "abc" != "def""#);
+    assert_eq!(ty, Type::bool());
+}
+
+// ── Sequence right type ───────────────────────────────────────
+
+#[test]
+fn seq_right_type() {
+    // a ; b has the type of b
+    let ty = infer("x = 42 ; 99");
+    assert_eq!(ty, Type::int());
+}

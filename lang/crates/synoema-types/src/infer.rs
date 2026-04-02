@@ -347,11 +347,13 @@ impl Infer {
                 self.infer_binop(env, *op, lhs, rhs)
             }
 
-            // NEG: Int -> Int
+            // NEG: Int -> Int  OR  Float -> Float
             ExprKind::Neg(inner) => {
                 let (s1, t1) = self.infer(env, inner)?;
-                let s2 = unify(&t1, &Type::int(), &mut self.gen)?;
-                Ok((s1.compose(&s2), Type::int()))
+                let is_float = matches!(&t1, Type::Con(s) if s == "Float");
+                let num_ty = if is_float { Type::float() } else { Type::int() };
+                let s2 = unify(&t1, &num_ty, &mut self.gen)?;
+                Ok((s1.compose(&s2), num_ty))
             }
 
             // COND: guard : Bool, both branches same type
@@ -622,8 +624,20 @@ impl Infer {
         let (s2, t2) = self.infer(&env2, rhs)?;
 
         let (s3, result_ty) = match op {
-            // Arithmetic: Int -> Int -> Int
-            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::Pow => {
+            // Arithmetic: Int -> Int -> Int  OR  Float -> Float -> Float
+            // If either operand is already known to be Float, require both Float.
+            // Mod (%) is always Int-only.
+            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Pow => {
+                let resolved_t1 = t1.apply(&s2);
+                let resolved_t2 = t2.clone();
+                let is_float = matches!(&resolved_t1, Type::Con(s) if s == "Float")
+                            || matches!(&resolved_t2, Type::Con(s) if s == "Float");
+                let num_ty = if is_float { Type::float() } else { Type::int() };
+                let sa = unify(&resolved_t1, &num_ty, &mut self.gen)?;
+                let sb = unify(&resolved_t2.apply(&sa), &num_ty, &mut self.gen)?;
+                (sa.compose(&sb), num_ty)
+            }
+            BinOp::Mod => {
                 let sa = unify(&t1.apply(&s2), &Type::int(), &mut self.gen)?;
                 let sb = unify(&t2.apply(&sa), &Type::int(), &mut self.gen)?;
                 (sa.compose(&sb), Type::int())
@@ -639,14 +653,24 @@ impl Infer {
                 let sb = unify(&t2.apply(&sa), &Type::bool(), &mut self.gen)?;
                 (sa.compose(&sb), Type::bool())
             }
-            // Concat: List a -> List a -> List a
+            // Concat: List a -> List a -> List a  OR  String -> String -> String
             BinOp::Concat => {
-                let elem = self.gen.fresh_var();
-                let list_ty = Type::list(elem);
-                let sa = unify(&t1.apply(&s2), &list_ty, &mut self.gen)?;
-                let sb = unify(&t2.apply(&sa), &list_ty.apply(&sa), &mut self.gen)?;
-                let final_ty = list_ty.apply(&sa).apply(&sb);
-                (sa.compose(&sb), final_ty)
+                let resolved_t1 = t1.apply(&s2);
+                let resolved_t2 = t2.clone();
+                let is_string = matches!(&resolved_t1, Type::Con(s) if s == "String")
+                             || matches!(&resolved_t2, Type::Con(s) if s == "String");
+                if is_string {
+                    let sa = unify(&resolved_t1, &Type::string(), &mut self.gen)?;
+                    let sb = unify(&resolved_t2.apply(&sa), &Type::string(), &mut self.gen)?;
+                    (sa.compose(&sb), Type::string())
+                } else {
+                    let elem = self.gen.fresh_var();
+                    let list_ty = Type::list(elem);
+                    let sa = unify(&resolved_t1, &list_ty, &mut self.gen)?;
+                    let sb = unify(&resolved_t2.apply(&sa), &list_ty.apply(&sa), &mut self.gen)?;
+                    let final_ty = list_ty.apply(&sa).apply(&sb);
+                    (sa.compose(&sb), final_ty)
+                }
             }
             // Cons: a -> List a -> List a
             BinOp::Cons => {

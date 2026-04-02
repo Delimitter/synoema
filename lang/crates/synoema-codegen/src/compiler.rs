@@ -100,10 +100,14 @@ impl Compiler {
         builder.symbol("synoema_print_val", runtime::synoema_print_val as *const u8);
         builder.symbol("synoema_readline", runtime::synoema_readline as *const u8);
         builder.symbol("synoema_show_any", runtime::synoema_show_any as *const u8);
+        builder.symbol("synoema_show_bool", runtime::synoema_show_bool as *const u8);
         builder.symbol("synoema_show_list", runtime::synoema_show_list as *const u8);
         builder.symbol("synoema_show_con", runtime::synoema_show_con as *const u8);
         builder.symbol("synoema_list_eq", runtime::synoema_list_eq as *const u8);
         builder.symbol("synoema_range", runtime::synoema_range as *const u8);
+        builder.symbol("synoema_map", runtime::synoema_map as *const u8);
+        builder.symbol("synoema_filter", runtime::synoema_filter as *const u8);
+        builder.symbol("synoema_foldl", runtime::synoema_foldl as *const u8);
 
         let module = JITModule::new(builder);
 
@@ -158,6 +162,15 @@ impl Compiler {
             s.returns.push(AbiParam::new(types::I64));
             s
         };
+        // Helper: declare fn(i64, i64, i64) -> i64 (foldl: 3 params, 1 return)
+        let sig3_ret = {
+            let mut s = self.module.make_signature();
+            s.params.push(AbiParam::new(types::I64));
+            s.params.push(AbiParam::new(types::I64));
+            s.params.push(AbiParam::new(types::I64));
+            s.returns.push(AbiParam::new(types::I64));
+            s
+        };
         // Helper: declare fn(i64, i64, i64) -> void (con_set)
         let sig3_void = {
             let mut s = self.module.make_signature();
@@ -180,6 +193,8 @@ impl Compiler {
         // fn(i64) -> i64
         decl(self, "synoema_show_any", "show", &sig1)?;   // show any → tagged string ptr
         decl(self, "synoema_show_any", "synoema_show_any", &sig1)?;
+        decl(self, "synoema_show_bool", "synoema_show_bool", &sig1)?;
+        decl(self, "synoema_show_bool", "show_bool", &sig1)?;
         decl(self, "synoema_show_list", "synoema_show_list", &sig1)?;
         decl(self, "synoema_print_val", "print", &sig1)?;  // print any value, returns 0 (unit)
         decl(self, "synoema_print_val", "synoema_print_val", &sig1)?;
@@ -218,6 +233,10 @@ impl Compiler {
         decl(self, "synoema_list_eq", "synoema_list_eq", &sig2)?;
         // Range: fn(i64, i64) -> i64  ([from..to] → list)
         decl(self, "synoema_range", "synoema_range", &sig2)?;
+        // Higher-order stdlib: map/filter fn(i64,i64)->i64, foldl fn(i64,i64,i64)->i64
+        decl(self, "synoema_map",    "map",    &sig2)?;
+        decl(self, "synoema_filter", "filter", &sig2)?;
+        decl(self, "synoema_foldl",  "foldl",  &sig3_ret)?;
         // ADT ConNode functions
         decl(self, "synoema_make_con", "synoema_make_con", &sig4_ret)?; // fn(i64,i64,i64,i64)->i64
         decl(self, "synoema_show_con", "synoema_show_con", &sig1)?;
@@ -650,13 +669,24 @@ fn compile_expr(
                 let a = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg)?;
                 return compile_unop(builder, *op, a);
             }
-            // Special case: show (Bool/Record literal) → compile-time expansion
+            // Special case: show / show_bool → type-directed dispatch
             if let CoreExpr::Var(name) = func.as_ref() {
-                if name == "show" {
-                    // Bool: runtime can't distinguish 0/1 from int — fold at compile time
+                if name == "show" || name == "show_bool" {
+                    // Bool literal: fold at compile time
                     if let CoreExpr::Lit(synoema_parser::Lit::Bool(b)) = arg.as_ref() {
                         let s = if *b { "true" } else { "false" };
                         return compile_str_literal(s, builder, funcs, module);
+                    }
+                }
+                if name == "show" {
+                    // Bool expression (comparison, logical op): use synoema_show_bool at runtime
+                    if is_bool_expr(arg) {
+                        let v = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg)?;
+                        let show_bool_id = *funcs.get("synoema_show_bool")
+                            .ok_or_else(|| cerr("synoema_show_bool not declared"))?;
+                        let show_bool_ref = module.declare_func_in_func(show_bool_id, builder.func);
+                        let call = builder.ins().call(show_bool_ref, &[v]);
+                        return Ok(builder.inst_results(call)[0]);
                     }
                     // Record literal: field names available at compile time → "{f = v, ...}"
                     if let CoreExpr::Record(fields) = arg.as_ref() {
@@ -1559,6 +1589,33 @@ fn compile_show_record(
     let r = module.declare_func_in_func(str_concat, builder.func);
     let c = builder.ins().call(r, &[acc, close]); acc = builder.inst_results(c)[0];
     Ok(acc)
+}
+
+/// Returns true if the expression always produces a Bool (0 or 1) at runtime.
+/// Used to dispatch `show (bool_expr)` to synoema_show_bool instead of synoema_show_any.
+fn is_bool_expr(expr: &CoreExpr) -> bool {
+    match expr {
+        CoreExpr::Lit(Lit::Bool(_)) => true,
+        // Binary bool ops: App(App(PrimOp(op), lhs), rhs)
+        CoreExpr::App(func, _) => {
+            if let CoreExpr::App(inner, _) = func.as_ref() {
+                if let CoreExpr::PrimOp(op) = inner.as_ref() {
+                    return matches!(op,
+                        PrimOp::Eq | PrimOp::Neq |
+                        PrimOp::Lt | PrimOp::Gt | PrimOp::Lte | PrimOp::Gte |
+                        PrimOp::And | PrimOp::Or |
+                        PrimOp::FEq | PrimOp::FLt | PrimOp::FGt | PrimOp::FLte | PrimOp::FGte
+                    );
+                }
+            }
+            // Unary not: App(PrimOp(Not), arg)
+            if let CoreExpr::PrimOp(op) = func.as_ref() {
+                return matches!(op, PrimOp::Not);
+            }
+            false
+        }
+        _ => false,
+    }
 }
 
 /// Add all variables bound by a pattern into `bound`.
