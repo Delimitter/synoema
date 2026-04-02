@@ -762,4 +762,82 @@ main = check (Just \"fail\")
         let f = run_float("half x = x / 2.0\nmain = half 9.0");
         assert!((f - 4.5).abs() < 1e-10, "Expected 4.5, got {}", f);
     }
+
+    // ── Power operator tests ────────────────────────────
+
+    #[test]
+    fn jit_pow_int() {
+        assert_eq!(jit("main = 2 ** 10"), 1024);
+    }
+
+    #[test]
+    fn jit_pow_int_zero() {
+        assert_eq!(jit("main = 5 ** 0"), 1);
+    }
+
+    #[test]
+    fn jit_pow_int_one() {
+        assert_eq!(jit("main = 7 ** 1"), 7);
+    }
+
+    #[test]
+    fn jit_pow_float() {
+        let f = run_float("main = 2.0 ** 3.0");
+        assert!((f - 8.0).abs() < 1e-10, "Expected 8.0, got {}", f);
+    }
+
+    #[test]
+    fn jit_pow_float_half() {
+        // 4.0 ** 0.5 = 2.0 (square root)
+        let f = run_float("main = 4.0 ** 0.5");
+        assert!((f - 2.0).abs() < 1e-10, "Expected 2.0, got {}", f);
+    }
+
+    // ── Float math builtins ───────────────────────────────
+
+    #[test]
+    fn jit_sqrt() {
+        let f = run_float("main = sqrt 4.0");
+        assert!((f - 2.0).abs() < 1e-10, "Expected 2.0, got {}", f);
+    }
+
+    #[test]
+    fn jit_sqrt_nine() {
+        let f = run_float("main = sqrt 9.0");
+        assert!((f - 3.0).abs() < 1e-10, "Expected 3.0, got {}", f);
+    }
+
+    #[test]
+    fn jit_floor() {
+        let f = run_float("main = floor 3.7");
+        assert!((f - 3.0).abs() < 1e-10, "Expected 3.0, got {}", f);
+    }
+
+    #[test]
+    fn jit_ceil() {
+        let f = run_float("main = ceil 3.2");
+        assert!((f - 4.0).abs() < 1e-10, "Expected 4.0, got {}", f);
+    }
+
+    #[test]
+    fn jit_round_up() {
+        let f = run_float("main = round 3.6");
+        assert!((f - 4.0).abs() < 1e-10, "Expected 4.0, got {}", f);
+    }
+
+    #[test]
+    fn jit_round_down() {
+        let f = run_float("main = round 3.2");
+        assert!((f - 3.0).abs() < 1e-10, "Expected 3.0, got {}", f);
+    }
+
+    #[test]
+    fn jit_abs_int() {
+        assert_eq!(jit("main = abs (0 - 5)"), 5);
+    }
+
+    #[test]
+    fn jit_abs_pos_int() {
+        assert_eq!(jit("main = abs 42"), 42);
+    }
 }

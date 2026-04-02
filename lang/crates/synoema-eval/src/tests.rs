@@ -667,6 +667,86 @@ fn show_float_half() {
     assert_eq!(val, Value::Str("0.5".into()));
 }
 
+// ── Power operator ────────────────────────────────────
+
+#[test]
+fn pow_int() {
+    assert_eq!(ev("2 ** 10"), Value::Int(1024));
+}
+
+#[test]
+fn pow_int_zero() {
+    assert_eq!(ev("5 ** 0"), Value::Int(1));
+}
+
+#[test]
+fn pow_int_one() {
+    assert_eq!(ev("7 ** 1"), Value::Int(7));
+}
+
+#[test]
+fn pow_float() {
+    assert_eq!(ev("2.0 ** 3.0"), Value::Float(8.0));
+}
+
+#[test]
+fn pow_right_assoc() {
+    // 2 ** 3 ** 2 should be 2 ** (3 ** 2) = 2 ** 9 = 512
+    assert_eq!(ev("2 ** 3 ** 2"), Value::Int(512));
+}
+
+// ── Float math builtins ───────────────────────────────
+
+#[test]
+fn sqrt_float() {
+    assert_eq!(ev("sqrt 4.0"), Value::Float(2.0));
+}
+
+#[test]
+fn sqrt_nine() {
+    assert_eq!(ev("sqrt 9.0"), Value::Float(3.0));
+}
+
+#[test]
+fn abs_neg_int() {
+    assert_eq!(ev("abs (0 - 5)"), Value::Int(5));
+}
+
+#[test]
+fn abs_pos_int() {
+    assert_eq!(ev("abs 5"), Value::Int(5));
+}
+
+#[test]
+fn abs_float() {
+    assert_eq!(ev("abs (0.0 - 3.5)"), Value::Float(3.5));
+}
+
+#[test]
+fn floor_float() {
+    assert_eq!(ev("floor 3.7"), Value::Float(3.0));
+}
+
+#[test]
+fn floor_neg_float() {
+    assert_eq!(ev("floor (0.0 - 3.2)"), Value::Float(-4.0));
+}
+
+#[test]
+fn ceil_float() {
+    assert_eq!(ev("ceil 3.2"), Value::Float(4.0));
+}
+
+#[test]
+fn round_float_up() {
+    assert_eq!(ev("round 3.6"), Value::Float(4.0));
+}
+
+#[test]
+fn round_float_down() {
+    assert_eq!(ev("round 3.2"), Value::Float(3.0));
+}
+
 // Comprehensive type class test: ADT with float fields
 #[test]
 fn typeclass_adt_float_eval() {
