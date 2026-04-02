@@ -1,0 +1,107 @@
+{
+  "name": "Synoema",
+  "scopeName": "source.sno",
+  "fileTypes": ["sno"],
+  "patterns": [
+    { "include": "#comment-line" },
+    { "include": "#comment-block" },
+    { "include": "#string" },
+    { "include": "#keyword" },
+    { "include": "#boolean" },
+    { "include": "#numeric-float" },
+    { "include": "#numeric-integer" },
+    { "include": "#builtin" },
+    { "include": "#constructor" },
+    { "include": "#type-annotation" },
+    { "include": "#function-definition" },
+    { "include": "#operator-ternary" },
+    { "include": "#operator" },
+    { "include": "#variable" }
+  ],
+  "repository": {
+    "comment-line": {
+      "name": "comment.line.double-dash.sno",
+      "match": "--.*$"
+    },
+    "comment-block": {
+      "name": "comment.block.sno",
+      "begin": "\\{-",
+      "end": "-\\}",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.comment.begin.sno" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.comment.end.sno" }
+      }
+    },
+    "string": {
+      "name": "string.quoted.double.sno",
+      "begin": "\"",
+      "end": "\"",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.string.begin.sno" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.sno" }
+      },
+      "patterns": [
+        {
+          "name": "constant.character.escape.sno",
+          "match": "\\\\(n|t|r|\\\\|\"|'|0|x[0-9a-fA-F]{2})"
+        }
+      ]
+    },
+    "keyword": {
+      "name": "keyword.control.sno",
+      "match": "\\b(let|in|where|mod|use|type|trait|impl|deriving)\\b"
+    },
+    "boolean": {
+      "name": "constant.language.sno",
+      "match": "\\b(true|false)\\b"
+    },
+    "numeric-float": {
+      "name": "constant.numeric.float.sno",
+      "match": "\\b\\d+\\.\\d+\\b"
+    },
+    "numeric-integer": {
+      "name": "constant.numeric.integer.sno",
+      "match": "\\b\\d+\\b"
+    },
+    "builtin": {
+      "name": "support.function.sno",
+      "match": "\\b(show|length|head|tail|sum|map|filter|foldl|foldr|print|sqrt|floor|ceil|abs|round)\\b"
+    },
+    "constructor": {
+      "name": "entity.name.type.sno",
+      "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+    },
+    "type-annotation": {
+      "name": "entity.name.type.sno",
+      "match": "\\b(Int|Bool|String|Float|List)\\b"
+    },
+    "function-definition": {
+      "name": "entity.name.function.sno",
+      "match": "^\\s*([a-z_][a-zA-Z0-9_']*)(?=\\s+[^=]|\\s*=)"
+    },
+    "operator-ternary": {
+      "patterns": [
+        {
+          "name": "keyword.operator.ternary.sno",
+          "match": "\\?"
+        },
+        {
+          "name": "keyword.operator.ternary.sno",
+          "match": "(?<![=!<>])->(?![>])"
+        }
+      ]
+    },
+    "operator": {
+      "name": "keyword.operator.sno",
+      "match": "(\\*\\*|\\+\\+|\\|>|>>|==|!=|<=|>=|&&|\\|\\||[+\\-*/%<>!\\\\@#.:=|])"
+    },
+    "variable": {
+      "name": "variable.other.sno",
+      "match": "\\b[a-z_][a-zA-Z0-9_']*\\b"
+    }
+  }
+}
