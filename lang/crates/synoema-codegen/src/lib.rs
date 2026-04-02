@@ -840,4 +840,50 @@ main = check (Just \"fail\")
     fn jit_abs_pos_int() {
         assert_eq!(jit("main = abs 42"), 42);
     }
+
+    // ── Phase 14b: IO / Effects in JIT ────────────────────
+
+    #[test]
+    fn jit_unit_literal() {
+        // () compiles to 0 (unit)
+        assert_eq!(jit("main = ()"), 0);
+    }
+
+    #[test]
+    fn jit_print_int_returns_unit() {
+        // print returns 0 (unit)
+        assert_eq!(jit("main = print 42"), 0);
+    }
+
+    #[test]
+    fn jit_print_string_returns_unit() {
+        assert_eq!(jit(r#"main = print "hello""#), 0);
+    }
+
+    #[test]
+    fn jit_seq_returns_right() {
+        // a ; b returns b's value
+        assert_eq!(jit("main = () ; 99"), 99);
+    }
+
+    #[test]
+    fn jit_seq_two_prints() {
+        // print "hello" ; print "world" — both execute, returns 0
+        assert_eq!(jit(r#"main = print "hello" ; print "world""#), 0);
+    }
+
+    #[test]
+    fn jit_seq_print_then_int() {
+        assert_eq!(jit(r#"main = print "hi" ; 42"#), 42);
+    }
+
+    #[test]
+    fn jit_print_bool() {
+        assert_eq!(jit("main = print true"), 0);
+    }
+
+    #[test]
+    fn jit_seq_chain() {
+        assert_eq!(jit(r#"main = print "a" ; print "b" ; print "c""#), 0);
+    }
 }

@@ -96,6 +96,9 @@ impl Compiler {
         builder.symbol("synoema_float_round", runtime::synoema_float_round as *const u8);
         builder.symbol("synoema_int_pow", runtime::synoema_int_pow as *const u8);
         builder.symbol("synoema_abs_int", runtime::synoema_abs_int as *const u8);
+        // IO functions
+        builder.symbol("synoema_print_val", runtime::synoema_print_val as *const u8);
+        builder.symbol("synoema_readline", runtime::synoema_readline as *const u8);
 
         let module = JITModule::new(builder);
 
@@ -158,9 +161,11 @@ impl Compiler {
 
         // fn() -> i64
         decl(self, "synoema_nil", "synoema_nil", &sig0)?;
+        decl(self, "synoema_readline", "readline", &sig0)?;
         // fn(i64) -> i64
         decl(self, "synoema_show_int", "show", &sig1)?;  // show n → tagged string ptr
-        decl(self, "synoema_print_int", "print", &sig1)?;
+        decl(self, "synoema_print_val", "print", &sig1)?;  // print any value, returns 0 (unit)
+        decl(self, "synoema_print_val", "synoema_print_val", &sig1)?;
         decl(self, "synoema_head", "synoema_head", &sig1)?;
         decl(self, "synoema_tail", "synoema_tail", &sig1)?;
         decl(self, "synoema_is_nil", "synoema_is_nil", &sig1)?;
@@ -438,6 +443,7 @@ fn compile_expr(
     match expr {
         CoreExpr::Lit(Lit::Int(n)) => Ok(builder.ins().iconst(types::I64, *n)),
         CoreExpr::Lit(Lit::Bool(b)) => Ok(builder.ins().iconst(types::I64, if *b {1} else {0})),
+        CoreExpr::Lit(Lit::Unit) => Ok(builder.ins().iconst(types::I64, 0)), // unit = 0
         CoreExpr::Lit(Lit::Str(s)) => {
             // Leak a copy of the string bytes to get a stable pointer, then call
             // synoema_str_new(data_ptr, len) which allocates a tagged StrNode.

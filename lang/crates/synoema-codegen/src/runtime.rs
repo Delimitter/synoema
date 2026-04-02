@@ -436,6 +436,44 @@ pub extern "C" fn synoema_print_int(val: i64) -> i64 {
     val
 }
 
+/// Print any tagged JIT value with newline. Returns 0 (unit).
+/// Uses address-validated tag checks to avoid interpreting small integers as pointers.
+pub extern "C" fn synoema_print_val(val: i64) -> i64 {
+    // Only treat as a pointer if the address is plausibly a heap address (> 64KB).
+    // Small integers (e.g. 42) can accidentally have tag bits set.
+    let is_heap = (val as u64) >= 0x10000;
+    if is_str(val) && is_heap {
+        let p = str_ptr(val);
+        let len = unsafe { (*p).len } as usize;
+        let data = unsafe { std::slice::from_raw_parts(p.add(1) as *const u8, len) };
+        print!("{}", std::str::from_utf8(data).unwrap_or("<invalid utf8>"));
+    } else if is_float(val) && is_heap {
+        print!("{}", synoema_float_get(val));
+    } else if is_likely_list_ptr(val) {
+        print_list(val);
+    } else {
+        // Plain integer or boolean (0=false/unit/nil, 1=true, n=integer)
+        print!("{}", val);
+    }
+    println!();
+    0 // unit
+}
+
+/// Read a line from stdin. Returns a tagged string value.
+pub extern "C" fn synoema_readline() -> i64 {
+    use std::io::BufRead;
+    let stdin = std::io::stdin();
+    let mut line = String::new();
+    stdin.lock().read_line(&mut line).unwrap_or(0);
+    if line.ends_with('\n') { line.pop(); }
+    if line.ends_with('\r') { line.pop(); }
+    let bytes = line.into_bytes().into_boxed_slice();
+    let data_ptr = bytes.as_ptr() as i64;
+    let len = bytes.len() as i64;
+    Box::leak(bytes);
+    synoema_str_new(data_ptr, len)
+}
+
 /// Print a list in [1 2 3] format
 pub extern "C" fn synoema_print_list(list: i64) -> i64 {
     print_list(list);
