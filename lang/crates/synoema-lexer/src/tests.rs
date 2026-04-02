@@ -242,6 +242,19 @@ fn full_fizzbuzz() {
     assert!(lex(src).is_ok(), "Failed to lex fizzbuzz");
 }
 
+// ── Module Syntax ─────────────────────────────────────────
+
+#[test]
+fn mod_use_sequence() {
+    // Tokenises a minimal module program without errors
+    let result = lex("mod Math\n  square x = x * x\n\nuse Math (square)\n\nmain = square 5");
+    assert!(result.is_ok(), "Expected lex to succeed for mod/use program");
+    let tokens = result.unwrap();
+    // Should contain KwMod and KwUse
+    assert!(tokens.iter().any(|st| st.token == Token::KwMod));
+    assert!(tokens.iter().any(|st| st.token == Token::KwUse));
+}
+
 // ── Error Cases ──────────────────────────────────────────
 
 #[test]
@@ -252,4 +265,16 @@ fn error_unterminated_string() {
 #[test]
 fn error_unexpected_char() {
     assert!(lex_raw("~").is_err());
+}
+
+#[test]
+fn record_braces() {
+    assert_eq!(raw("{name = 42}"), vec![
+        Token::LBrace,
+        Token::LowerId("name".into()),
+        Token::Assign,
+        Token::Int(42),
+        Token::RBrace,
+        Token::Eof,
+    ]);
 }

@@ -74,6 +74,22 @@ fizzbuzz n =
   : ? n % 5 == 0 -> "Buzz"
   : show n
 
+-- Records and field access
+point x y = {x = x, y = y}
+dist_sq p = p.x * p.x + p.y * p.y
+
+-- Record pattern matching
+get_x {x = v, y = _} = v
+
+-- Modules: namespace isolation
+mod Math
+  square x = x * x
+  abs x = ? x < 0 -> 0 - x : x
+
+use Math (square abs)
+
+main = square 5 + abs (0 - 3)   -- 25 + 3 = 28
+
 -- Type signatures (optional — types are inferred)
 map : (a -> b) -> List a -> List b
 ```
@@ -117,7 +133,7 @@ cargo build --release -p synoema-repl
 ### Test
 
 ```bash
-cargo test        # 264 tests across all crates
+cargo test        # 373 tests across all crates — all green
 ```
 
 ### Try the examples
@@ -127,7 +143,9 @@ cargo run -p synoema-repl -- run examples/quicksort.sno    # [1 2 3 4 5 6 7 8 9]
 cargo run -p synoema-repl -- jit examples/factorial.sno    # 3628800
 cargo run -p synoema-repl -- run examples/fizzbuzz.sno     # FizzBuzz
 cargo run -p synoema-repl -- jit examples/euler1.sno       # 233168
-cargo run -p synoema-repl -- run examples/higher_order.sno # 12
+cargo run -p synoema-repl -- jit examples/modules.sno      # 59  (mod + use)
+cargo run -p synoema-repl -- jit examples/geometry.sno     # 52  (records + modules)
+cargo run -p synoema-repl -- run examples/records.sno      # 25  (record fields)
 ```
 
 ## Key Design Principles
@@ -155,14 +173,14 @@ Source → Lexer → Parser → Type Check → Core IR ─┬→ Interpreter (al
 
 | Crate | Lines | Tests | Purpose |
 |-------|------:|------:|---------|
-| synoema-lexer | 706 | 80 | Tokenization + offside rule |
-| synoema-parser | 1398 | 36 | Pratt parsing, 13 precedence levels |
-| synoema-types | 1453 | 42 | Hindley-Milner type inference |
-| synoema-core | 969 | 26 | Core IR + desugaring (System F) |
-| synoema-eval | 1314 | 46 | Tree-walking interpreter |
-| synoema-codegen | 944 | 34 | Cranelift JIT compiler |
-| synoema-repl | 271 | — | CLI: run / jit / eval / REPL |
-| **Total** | **7055** | **264** | |
+| synoema-lexer | ~800 | 51 | Tokenization + offside rule |
+| synoema-parser | ~1600 | 43 | Pratt parsing, 15 ExprKind |
+| synoema-types | ~1700 | 51 | Hindley-Milner + row polymorphism |
+| synoema-core | ~1100 | 31 | Core IR + desugaring + optimizer |
+| synoema-eval | ~1500 | 63 | Tree-walking interpreter |
+| synoema-codegen | ~1500 | 92 | Cranelift JIT compiler |
+| synoema-repl | ~300 | — | CLI: run / jit / eval / REPL |
+| **Total** | **~9500** | **373** | |
 
 ## Language Reference
 
@@ -178,6 +196,9 @@ Source → Lexer → Parser → Type Check → Core IR ─┬→ Interpreter (al
 | Cons | `x:xs` | Head : tail |
 | Pipe | `data \|> f \|> g` | Left-to-right composition |
 | Compose | `f >> g` | Right-to-left composition |
+| Records | `{x = 3, y = 4}`, `r.x` | Field access |
+| Record patterns | `get_x {x = v} = v` | Destructuring |
+| Modules | `mod Math` / `use Math (f g)` | Lexical namespaces |
 | Algebraic data types | `Shape = Circle r \| Rect w h` | Sum types |
 | Type signature | `f : Int -> Int` | Optional annotation |
 | Where-binding | indented below definition | Block scope |
@@ -190,10 +211,13 @@ Source → Lexer → Parser → Type Check → Core IR ─┬→ Interpreter (al
 | Pattern matching | ✓ | ✓ |
 | Recursion | ✓ | ✓ |
 | Lists | ✓ | ✓ |
-| Strings | ✓ | — (Phase 9.3) |
-| Closures / HOF | ✓ | — (Phase 9.2) |
-| List comprehensions | ✓ | — (Phase 9.2) |
-| ADTs | ✓ | — |
+| Strings + `==` / `!=` | ✓ | ✓ |
+| Closures / HOF | ✓ | ✓ |
+| List comprehensions | ✓ | ✓ |
+| Records + field access | ✓ | ✓ |
+| Modules (`mod`/`use`) | ✓ | ✓ |
+| Constant folding / DCE | — | ✓ |
+| ADTs | ✓ | ✓ |
 
 ## Constrained Decoding (LLM Integration)
 
@@ -239,12 +263,20 @@ Full bibliography: [docs/research/scientific_foundations.md](../docs/research/sc
 - [x] Cranelift JIT — native x86-64, 4.4× faster than Python
 - [x] Constrained decoding — GBNF for SGLang / XGrammar / llama.cpp
 - [x] Lists in JIT — heap-allocated linked list runtime
-- [ ] **Phase 9.2** — Closures in JIT (unlocks `map`, `filter`, comprehensions via native code)
-- [ ] **Phase 10.1** — Tail call optimization (fixes stack overflow in deep recursion)
-- [ ] Phase 9.3 — Strings in JIT
-- [ ] Phase 9.4 — Records + row polymorphism
-- [ ] Phase 9.5 — Modules (`mod` / `use`)
-- [ ] Phase 10.3 — Region-based memory (no GC, no leaks)
+- [x] **Phase 9.2** — Closures in JIT (`map`, `filter`, comprehensions via native code)
+- [x] **Phase 9.3** — Strings in JIT (tagged pointer, `show`, `++`, `==`, `!=`)
+- [x] **Phase 9.4** — Records + field access in JIT (FNV-hash field lookup)
+- [x] **Phase 9.5** — Modules (`mod` / `use`, lexical namespacing, works in JIT)
+- [x] **Phase 10.1** — Tail call optimization (64MB stack thread, iterative eval)
+- [x] **Phase 10.2** — Constant folding / DCE in Core IR optimizer
+- [x] **Phase 10.3** — Arena-based memory (8MB bump allocator, no leaks)
+- [x] **Phase 11.1** — ADTs in JIT (ConNode, tag comparison, field extraction)
+- [x] **Phase 11.2** — Row polymorphism for records (Rémy-style row unification)
+- [x] **Phase 11.3** — Nested ADT patterns in JIT (nested constructor matching)
+- [x] **Phase 11.4** — Full ADT pattern matching (literal sub-patterns, triple nesting, recursive bind)
+- [x] **Phase 11.5** — String literal patterns in JIT (top-level + inside constructors)
+- [ ] Phase 12 — Effects / IO monad (`<-`, `@io`)
+- [ ] Phase 13 — Type classes (`trait`, `impl`)
 
 ## License
 

@@ -90,7 +90,7 @@ fn jit_file(path: &str) {
     }
 
     // JIT compile and run via Cranelift
-    match synoema_codegen::compile_and_run(&source) {
+    match synoema_codegen::compile_and_display(&source) {
         Ok(result) => println!("{}", result),
         Err(e) => {
             eprintln!("{}", e);

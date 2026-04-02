@@ -52,7 +52,7 @@ impl Infer {
 
                 let (subst, ty) = self.infer_func(&env, equations)?;
                 // Unify the pre-registered variable with the inferred type
-                let su = unify(&self_tv.apply(&subst), &ty)?;
+                let su = unify(&self_tv.apply(&subst), &ty, &mut self.gen)?;
                 let final_subst = subst.compose(&su);
                 let final_ty = ty.apply(&su);
 
@@ -305,6 +305,7 @@ impl Infer {
                 let s3 = unify(
                     &t1.apply(&s2),
                     &Type::arrow(t2, ret.clone()),
+                    &mut self.gen,
                 )?;
                 Ok((s1.compose(&s2).compose(&s3), ret.apply(&s3)))
             }
@@ -322,19 +323,19 @@ impl Infer {
             // NEG: Int -> Int
             ExprKind::Neg(inner) => {
                 let (s1, t1) = self.infer(env, inner)?;
-                let s2 = unify(&t1, &Type::int())?;
+                let s2 = unify(&t1, &Type::int(), &mut self.gen)?;
                 Ok((s1.compose(&s2), Type::int()))
             }
 
             // COND: guard : Bool, both branches same type
             ExprKind::Cond(guard, then_e, else_e) => {
                 let (s1, t1) = self.infer(env, guard)?;
-                let s2 = unify(&t1, &Type::bool())?;
+                let s2 = unify(&t1, &Type::bool(), &mut self.gen)?;
                 let env2 = env.apply(&s1.compose(&s2));
                 let (s3, t_then) = self.infer(&env2, then_e)?;
                 let env3 = env2.apply(&s3);
                 let (s4, t_else) = self.infer(&env3, else_e)?;
-                let s5 = unify(&t_then.apply(&s4), &t_else)?;
+                let s5 = unify(&t_then.apply(&s4), &t_else, &mut self.gen)?;
                 let final_s = s1.compose(&s2).compose(&s3).compose(&s4).compose(&s5);
                 Ok((final_s, t_else.apply(&s5)))
             }
@@ -349,7 +350,7 @@ impl Infer {
                     for elem in &elems[1..] {
                         let env_cur = env.apply(&s);
                         let (si, ti) = self.infer(&env_cur, elem)?;
-                        let su = unify(&t_first.apply(&s).apply(&si), &ti)?;
+                        let su = unify(&t_first.apply(&s).apply(&si), &ti, &mut self.gen)?;
                         s = s.compose(&si).compose(&su);
                     }
                     Ok((s.clone(), Type::list(t_first.apply(&s))))
@@ -359,10 +360,10 @@ impl Infer {
             // RANGE: [a..b] both Int, result List Int
             ExprKind::Range(from, to) => {
                 let (s1, t1) = self.infer(env, from)?;
-                let s2 = unify(&t1, &Type::int())?;
+                let s2 = unify(&t1, &Type::int(), &mut self.gen)?;
                 let env2 = env.apply(&s1.compose(&s2));
                 let (s3, t2) = self.infer(&env2, to)?;
-                let s4 = unify(&t2, &Type::int())?;
+                let s4 = unify(&t2, &Type::int(), &mut self.gen)?;
                 let final_s = s1.compose(&s2).compose(&s3).compose(&s4);
                 Ok((final_s, Type::list(Type::int())))
             }
@@ -389,10 +390,44 @@ impl Infer {
                 Ok((s_acc.compose(&sr), tr))
             }
 
-            // FIELD: e.name — type check e, then look up field
-            // (simplified for now: just infer e)
-            ExprKind::Field(obj, _field) => {
-                self.infer(env, obj)
+            // RECORD LITERAL: {name = e1, age = e2} : {name: T1, age: T2}
+            // Record literals produce CLOSED record types (no row tail).
+            ExprKind::Record(fields) => {
+                let mut subst = Subst::new();
+                let mut field_types: Vec<(String, Type)> = Vec::new();
+                for (name, expr) in fields {
+                    let (s, ty) = self.infer(&env.apply(&subst), expr)?;
+                    subst = s.compose(&subst);
+                    field_types.push((name.clone(), ty));
+                }
+                Ok((subst, Type::Record(field_types, None)))
+            }
+
+            // FIELD ACCESS: r.field — row-polymorphic field access.
+            //
+            // Strategy: create a fresh type variable T for the field type and a fresh
+            // row variable `r` for "any additional fields".  Unify the object's type
+            // with the open record `{field: T | r}`.  This lets `get_x rec = rec.x`
+            // accept ANY record that has at least an `x` field.
+            ExprKind::Field(obj, field) => {
+                let (s_obj, obj_ty) = self.infer(env, obj)?;
+                let obj_ty = obj_ty.apply(&s_obj);
+
+                // Fresh type variable for the field value
+                let field_tv = self.gen.fresh_var();
+                // Fresh row variable for "the rest of the record"
+                let row_var = self.gen.fresh();
+
+                // Unify the object type with {field: T | r}
+                let open_record = Type::Record(
+                    vec![(field.clone(), field_tv.clone())],
+                    Some(row_var),
+                );
+                let s_unify = unify(&obj_ty, &open_record, &mut self.gen)?;
+
+                let final_subst = s_obj.compose(&s_unify);
+                let result_ty = field_tv.apply(&s_unify);
+                Ok((final_subst, result_ty))
             }
 
             // PAREN: transparent
@@ -450,7 +485,7 @@ impl Infer {
         // Unify with remaining equations
         for eq in &equations[1..] {
             let (si, ti) = self.infer_equation(&env.apply(&acc_subst), eq)?;
-            let su = unify(&func_ty.apply(&si), &ti)?;
+            let su = unify(&func_ty.apply(&si), &ti, &mut self.gen)?;
             acc_subst = acc_subst.compose(&si).compose(&su);
             func_ty = func_ty.apply(&si).apply(&su);
         }
@@ -529,6 +564,20 @@ impl Infer {
                 Ok((list_ty, bindings))
             }
             Pat::Paren(inner) => self.infer_pattern(inner),
+            Pat::Record(fields) => {
+                let mut all_bindings: Vec<(String, Type)> = Vec::new();
+                let mut field_types: Vec<(String, Type)> = Vec::new();
+                for (name, sub_pat) in fields {
+                    let (ty, bindings) = self.infer_pattern(sub_pat)?;
+                    field_types.push((name.clone(), ty));
+                    all_bindings.extend(bindings);
+                }
+                // Record patterns are open by default — they match records with extra fields too.
+                // We introduce a fresh row variable so that pattern-matching a record with
+                // `{x = v}` does not fail when the record also has other fields.
+                let row_var = self.gen.fresh();
+                Ok((Type::Record(field_types, Some(row_var)), all_bindings))
+            }
         }
     }
 
@@ -548,40 +597,40 @@ impl Infer {
         let (s3, result_ty) = match op {
             // Arithmetic: Int -> Int -> Int
             BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
-                let sa = unify(&t1.apply(&s2), &Type::int())?;
-                let sb = unify(&t2.apply(&sa), &Type::int())?;
+                let sa = unify(&t1.apply(&s2), &Type::int(), &mut self.gen)?;
+                let sb = unify(&t2.apply(&sa), &Type::int(), &mut self.gen)?;
                 (sa.compose(&sb), Type::int())
             }
             // Comparison: a -> a -> Bool
             BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt | BinOp::Lte | BinOp::Gte => {
-                let su = unify(&t1.apply(&s2), &t2)?;
+                let su = unify(&t1.apply(&s2), &t2, &mut self.gen)?;
                 (su, Type::bool())
             }
             // Logic: Bool -> Bool -> Bool
             BinOp::And | BinOp::Or => {
-                let sa = unify(&t1.apply(&s2), &Type::bool())?;
-                let sb = unify(&t2.apply(&sa), &Type::bool())?;
+                let sa = unify(&t1.apply(&s2), &Type::bool(), &mut self.gen)?;
+                let sb = unify(&t2.apply(&sa), &Type::bool(), &mut self.gen)?;
                 (sa.compose(&sb), Type::bool())
             }
             // Concat: List a -> List a -> List a
             BinOp::Concat => {
                 let elem = self.gen.fresh_var();
                 let list_ty = Type::list(elem);
-                let sa = unify(&t1.apply(&s2), &list_ty)?;
-                let sb = unify(&t2.apply(&sa), &list_ty.apply(&sa))?;
+                let sa = unify(&t1.apply(&s2), &list_ty, &mut self.gen)?;
+                let sb = unify(&t2.apply(&sa), &list_ty.apply(&sa), &mut self.gen)?;
                 let final_ty = list_ty.apply(&sa).apply(&sb);
                 (sa.compose(&sb), final_ty)
             }
             // Cons: a -> List a -> List a
             BinOp::Cons => {
                 let list_ty = Type::list(t1.apply(&s2).clone());
-                let su = unify(&t2, &list_ty)?;
+                let su = unify(&t2, &list_ty, &mut self.gen)?;
                 (su.clone(), list_ty.apply(&su))
             }
             // Pipe: a |> (a -> b) = b  (desugars to application)
             BinOp::Pipe => {
                 let ret = self.gen.fresh_var();
-                let su = unify(&t2, &Type::arrow(t1.apply(&s2).clone(), ret.clone()))?;
+                let su = unify(&t2, &Type::arrow(t1.apply(&s2).clone(), ret.clone()), &mut self.gen)?;
                 (su.clone(), ret.apply(&su))
             }
             // Compose: (a -> b) >> (b -> c) = (a -> c)
@@ -589,10 +638,11 @@ impl Infer {
                 let a = self.gen.fresh_var();
                 let b = self.gen.fresh_var();
                 let c = self.gen.fresh_var();
-                let sa = unify(&t1.apply(&s2), &Type::arrow(a.clone(), b.clone()))?;
+                let sa = unify(&t1.apply(&s2), &Type::arrow(a.clone(), b.clone()), &mut self.gen)?;
                 let sb = unify(
                     &t2.apply(&sa),
                     &Type::arrow(b.apply(&sa), c.clone()),
+                    &mut self.gen,
                 )?;
                 let sc = sa.compose(&sb);
                 (sc.clone(), Type::arrow(a.apply(&sc), c.apply(&sc)))
@@ -619,7 +669,7 @@ impl Infer {
                     let (si, ti) = self.infer(&env_cur, source)?;
                     // source must be List a, and name gets type a
                     let elem = self.gen.fresh_var();
-                    let su = unify(&ti, &Type::list(elem.clone()))?;
+                    let su = unify(&ti, &Type::list(elem.clone()), &mut self.gen)?;
                     let s_combined = si.compose(&su);
                     env_cur = env_cur.apply(&s_combined);
                     env_cur.insert(name.clone(), Scheme::mono(elem.apply(&s_combined)));
@@ -627,7 +677,7 @@ impl Infer {
                 }
                 Generator::Guard(guard_expr) => {
                     let (si, ti) = self.infer(&env_cur, guard_expr)?;
-                    let su = unify(&ti, &Type::bool())?;
+                    let su = unify(&ti, &Type::bool(), &mut self.gen)?;
                     let s_combined = si.compose(&su);
                     env_cur = env_cur.apply(&s_combined);
                     s_acc = s_acc.compose(&s_combined);

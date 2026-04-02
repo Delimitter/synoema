@@ -23,3 +23,6 @@ plans/
 
 # Cursor local config (contains API keys)
 .cursor/
+
+# Auto-generated MCP server context (added automatically)
+.mcp-server-context.md

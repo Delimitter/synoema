@@ -6,9 +6,11 @@
 
 pub mod core_ir;
 pub mod desugar;
+pub mod optimize;
 
 pub use core_ir::*;
 pub use desugar::desugar_program;
+pub use optimize::{optimize_expr, optimize_program};
 
 /// Parse and desugar Synoema source code into Core IR.
 pub fn to_core(source: &str) -> Result<CoreProgram, String> {

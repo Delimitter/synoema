@@ -375,3 +375,95 @@ fn error_empty_input() {
     assert!(p.is_ok());
     assert!(p.unwrap().decls.is_empty());
 }
+
+#[test]
+fn expr_record_literal() {
+    let e = parse_expr("{name = \"Alice\", age = 30}").expect("parse failed");
+    match e.kind {
+        ExprKind::Record(fields) => {
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].0, "name");
+            assert_eq!(fields[1].0, "age");
+        }
+        _ => panic!("Expected Record, got {:?}", e.kind),
+    }
+}
+
+#[test]
+fn expr_record_field_access() {
+    let e = parse_expr("r.name").expect("parse failed");
+    match e.kind {
+        ExprKind::Field(_, field) => assert_eq!(field, "name"),
+        _ => panic!("Expected Field, got {:?}", e.kind),
+    }
+}
+
+#[test]
+fn expr_record_empty() {
+    let e = parse_expr("{}").expect("parse failed");
+    match e.kind {
+        ExprKind::Record(fields) => assert!(fields.is_empty()),
+        _ => panic!("Expected empty Record"),
+    }
+}
+
+#[test]
+fn pattern_record() {
+    let p = parse_ok("f {name = n, age = a} = n");
+    match first_func(&p) {
+        Decl::Func { equations, .. } => {
+            assert_eq!(equations[0].pats.len(), 1);
+            assert!(matches!(&equations[0].pats[0], Pat::Record(_)));
+            if let Pat::Record(fields) = &equations[0].pats[0] {
+                assert_eq!(fields.len(), 2);
+                assert_eq!(fields[0].0, "name");
+                assert_eq!(fields[1].0, "age");
+                assert!(matches!(&fields[0].1, Pat::Var(n) if n == "n"));
+                assert!(matches!(&fields[1].1, Pat::Var(n) if n == "a"));
+            }
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn pattern_record_wildcard_field() {
+    let p = parse_ok("f {x = _, y = n} = n");
+    match first_func(&p) {
+        Decl::Func { equations, .. } => {
+            if let Pat::Record(fields) = &equations[0].pats[0] {
+                assert!(matches!(&fields[0].1, Pat::Wildcard));
+                assert!(matches!(&fields[1].1, Pat::Var(_)));
+            } else {
+                panic!("Expected record pattern");
+            }
+        }
+        _ => unreachable!(),
+    }
+}
+
+// ── Module Declarations ───────────────────────────────────
+
+#[test]
+fn parse_module_decl() {
+    let src = "mod Math\n  square x = x * x\n\nuse Math (square)\n\nmain = square 5";
+    let p = parse_ok(src);
+    // One regular decl (main), one module, one use
+    assert_eq!(p.modules.len(), 1);
+    assert_eq!(p.modules[0].name, "Math");
+    assert_eq!(p.modules[0].body.len(), 1);
+    assert_eq!(p.uses.len(), 1);
+    assert_eq!(p.uses[0].module, "Math");
+    assert_eq!(p.uses[0].names, vec!["square"]);
+    assert_eq!(p.decls.len(), 1);
+}
+
+#[test]
+fn parse_module_multi_export() {
+    let src = "mod Num\n  double x = x * 2\n  triple x = x * 3\n\nuse Num (double triple)\n\nmain = double 5";
+    let p = parse_ok(src);
+    assert_eq!(p.modules.len(), 1);
+    assert_eq!(p.modules[0].body.len(), 2);
+    assert_eq!(p.uses[0].names, vec!["double", "triple"]);
+}
+

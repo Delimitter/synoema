@@ -5,6 +5,16 @@
 
 ---
 
+## 0. Быстрый статус (апрель 2026)
+
+- **373 тестов**, все зелёные, 0 warnings
+- **Phases 9.2–9.5 + 10.1–10.3 + 11.1–11.5** завершены
+- JIT поддерживает: int, bool, string, list, closures, records, modules, ADTs, ==, !=, list comprehensions
+- Interpreter: всё вышеперечисленное + полный pattern matching
+- Arena allocator: нет утечек памяти
+
+---
+
 ## 1. Что такое Synoema
 
 Synoema [sy-NO-e-ma] — язык программирования, оптимизированный для генерации кода
@@ -61,14 +71,14 @@ synoema-repo/
 
 | Метрика | Значение |
 |---------|----------|
-| Строк Rust | 7055 |
-| Тестов | 264 (все зелёные) |
-| Warnings | 1 (unused `fresh` в desugar.rs) |
-| Примеров | 10 программ (.sno) |
+| Строк Rust | ~9500 |
+| Тестов | 368 (все зелёные) |
+| Warnings | 0 |
+| Примеров | 12 программ (.sno) |
 | BPE-aligned операторов | 33/33 |
 | Экономия токенов vs Python | 46% |
 | Ускорение vs Python (JIT) | 4.4× среднее |
-| GBNF-грамматика | 145 строк, 41 правило |
+| GBNF-грамматика | 162 строки, 48 правил |
 | Статей написано | 14 (7 RU + 7 EN) |
 
 ## 4. Что работает
@@ -83,23 +93,32 @@ synoema-repo/
 - Let-polymorphism: `id` как `Int → Int` и `Bool → Bool` в одной программе
 - Pipe: `x |> f |> g`
 - Рекурсия: factorial, fibonacci, quicksort, ackermann
+- **Records (Phase 9.4):** `{x = 3, y = 4}`, field access `p.x`, pattern matching
+- **Modules (Phase 9.5):** `mod Math`, `use Math (square pi)` — lexical namespacing
+- **Row polymorphism (Phase 11.2):** `get_x r = r.x` принимает `{x=3, y=4}` и `{x=1, z=true}` — Rémy-style row unification
 
-### JIT (`synoema jit`) — числа + списки:
+### JIT (`synoema jit`) — числа + списки + closures + строки + records + компрехеншны:
 - Целочисленная арифметика: +, -, *, /, %
-- Сравнения: ==, !=, <, >, <=, >=
+- Сравнения: ==, !=, <, >, <=, >=  (universal: работает для int и string)
 - Логические: &&, ||, !
 - Pattern matching (литералы, переменные, Nil, Cons)
 - Рекурсия (включая multi-equation: gcd, pow, collatz)
 - Списки: MkList, cons, concat, head, tail, length, sum
-- show/print через FFI
-- Heap-allocated linked list runtime
+- **Closures (Phase 9.2):** lambda lifting, indirect calls, higher-order functions (map, filter)
+- **Строки (Phase 9.3):** tagged pointer scheme (bit 1), StrNode, show/++/length/== на строках, fizzbuzz
+- **List comprehensions:** `[x*x | x <- xs]`, `[x | x <- xs, x > 3]` — через synoema_concatmap FFI
+- **Records (Phase 9.4):** `{x = 3, y = 4}`, `r.field` — RecordNode heap alloc, FNV-hash field lookup
+- **String equality:** `"hello" == "hello"` → true — `synoema_val_eq` runtime dispatch
+- **Constant folding (Phase 10.2):** `2 + 3 → 5`, `? true -> x : y → x` на этапе компиляции
+- **ADTs (Phase 11.1):** `Maybe a = Just a | None`, multi-equation matching, ConNode heap alloc, tag comparison
+- **Nested ADT patterns (Phase 11.3):** `Just (MkPair x y)` — вложенные конструкторы в JIT, 2 теста
+- **Full ADT matching (Phase 11.4):** `Just 0` literal sub-patterns, тройная вложенность `Just (Just (Just x))`, рекурсивный `bind_sub_pat`, 4 теста
+- **String literal patterns (Phase 11.5):** `greet "Alice" = "Hello"`, строковые суб-паттерны внутри конструкторов, 5 тестов
+- show возвращает строковое значение (tagged i64 ptr), compile_and_display для human-readable вывода
+- Heap-allocated linked list + string + record + ConNode runtime
 
-### JIT НЕ поддерживает (нужна Phase 9.2+):
-- Closures как значения (map f xs — f как переменная)
-- Строки в JIT
-- List comprehensions через JIT (desugaring в concatMap требует closures)
-- Records
-- Модули
+### JIT НЕ поддерживает:
+- Effects / IO monad (Phase 12)
 
 ## 5. Верифицированные результаты
 
@@ -109,7 +128,8 @@ factorial.sno  JIT=3628800   Interp=3628800   ✓
 gcd.sno        JIT=21        Interp=21         ✓
 pow.sno        JIT=1048576   Interp=1048576    ✓
 collatz.sno    JIT=111       Interp=111        ✓
-euler1.sno     JIT=233168    Interp=overflow   ✓ (JIT only — interp needs TCO)
+euler1.sno     JIT=233168    Interp=233168     ✓ (Phase 10.1 TCO: 64MB stack thread)
+fizzbuzz.sno   JIT=FizzBuzz  Interp=FizzBuzz   ✓ (Phase 9.3 strings in JIT)
 ```
 
 ### Performance (JIT vs CPython 3.12):
@@ -122,11 +142,16 @@ Average:      4.4× faster
 
 ## 6. Известные баги
 
-| Баг | Причина | Как воспроизвести | Решение |
-|-----|---------|-------------------|---------|
-| Ackermann JIT ≠ Interpreter | 3-equation multi-arg pattern match в desugar | `synoema jit examples/ackermann.sno` → 125 (должно 5) | Доработать build_equation_chain для 3+ equations с литералами в разных позициях |
-| Euler1 stack overflow (interp) | Рекурсия 999 уровней без TCO | `synoema run examples/euler1.sno` | Phase 10.1: tail call optimization |
-| 1 warning | Unused `fresh` в build_pattern_guard | `cargo build` | Переименовать в `_fresh` только в этой функции |
+0 известных багов, 373/373 тестов зелёные.
+
+### Исправленные баги (эта сессия):
+| Баг | Решение |
+|-----|---------|
+| Euler1 stack overflow в interpreter | Phase 10.1: iterative TCO loop + 64MB stack thread |
+| closure_filter_length crash | Неправильный синтаксис в тесте: cons `:` конфликтовал с ternary `:`. Исправлено: явные скобки |
+| JIT не поддерживал строки | Phase 9.3: tagged pointer scheme (bit 1), StrNode, show/++/length |
+| «Ackermann JIT bug» (false positive) | Баг не существовал: `ack 3 4 = 125` — правильный ответ (2^7 − 3). Описание в документе путало входные данные |
+| 1 warning unused `fresh` | `build_pattern_guard` переименован в `_fresh` |
 
 ## 7. Архитектура компилятора
 

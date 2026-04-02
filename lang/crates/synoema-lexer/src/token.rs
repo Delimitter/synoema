@@ -71,6 +71,7 @@ pub enum Token {
 
     // Delimiters
     LParen, RParen, LBracket, RBracket,
+    LBrace, RBrace,  // { }
 
     // Layout
     Newline, Indent, Dedent,
@@ -116,6 +117,7 @@ impl Token {
             Token::Comma => "','",
             Token::LParen => "'('", Token::RParen => "')'",
             Token::LBracket => "'['", Token::RBracket => "']'",
+            Token::LBrace => "'{'", Token::RBrace => "'}'",
             Token::Newline => "newline", Token::Indent => "indent",
             Token::Dedent => "dedent", Token::Eof => "end of file",
         }

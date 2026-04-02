@@ -17,6 +17,10 @@ pub enum Type {
     Arrow(Box<Type>, Box<Type>),
     /// Type constructor application: T τ₁ ... τₙ  (e.g. List Int, Maybe a)
     App(Box<Type>, Box<Type>),
+    /// Structural record type: {name: T1, age: T2}
+    /// The second field is a row-tail variable: None = closed record,
+    /// Some(r) = open record {fields... | r} (row polymorphism).
+    Record(Vec<(String, Type)>, Option<TyVarId>),
 }
 
 impl Type {
@@ -46,6 +50,15 @@ impl Type {
                 s.extend(b.ftv());
                 s
             }
+            Type::Record(fields, row_tail) => {
+                let mut acc = fields.iter().fold(HashSet::new(), |mut a, (_, ty)| {
+                    a.extend(ty.ftv()); a
+                });
+                if let Some(r) = row_tail {
+                    acc.insert(*r);
+                }
+                acc
+            }
         }
     }
 
@@ -68,7 +81,41 @@ impl Type {
                 Box::new(a.apply(subst)),
                 Box::new(b.apply(subst)),
             ),
+            Type::Record(fields, row_tail) => {
+                // Apply substitution to field types
+                let new_fields = fields.iter().map(|(n, t)| (n.clone(), t.apply(subst))).collect();
+                // If the row tail variable has a substitution, resolve it
+                match row_tail {
+                    None => Type::Record(new_fields, None),
+                    Some(r) => {
+                        if let Some(bound) = subst.0.get(r) {
+                            // The row tail variable was substituted — merge the bound type
+                            let bound = bound.apply(subst);
+                            match bound {
+                                Type::Record(extra_fields, inner_tail) => {
+                                    // Merge: original fields + extra fields, propagate tail
+                                    let mut merged = new_fields;
+                                    for (n, t) in extra_fields {
+                                        if !merged.iter().any(|(existing, _)| *existing == n) {
+                                            merged.push((n, t));
+                                        }
+                                    }
+                                    Type::Record(merged, inner_tail)
+                                }
+                                Type::Var(v) => Type::Record(new_fields, Some(v)),
+                                _ => Type::Record(new_fields, Some(*r)),
+                            }
+                        } else {
+                            Type::Record(new_fields, Some(*r))
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    pub fn record(fields: Vec<(impl Into<String>, Type)>) -> Self {
+        Type::Record(fields.into_iter().map(|(n, t)| (n.into(), t)).collect(), None)
     }
 }
 
@@ -96,6 +143,18 @@ impl fmt::Display for Type {
                     Type::App(_, _) | Type::Arrow(_, _) => write!(f, "{} ({})", con, arg),
                     _ => write!(f, "{} {}", con, arg),
                 }
+            }
+            Type::Record(fields, row_tail) => {
+                write!(f, "{{")?;
+                for (i, (name, ty)) in fields.iter().enumerate() {
+                    if i > 0 { write!(f, ", ")?; }
+                    write!(f, "{}: {}", name, ty)?;
+                }
+                if let Some(r) = row_tail {
+                    if !fields.is_empty() { write!(f, " | ")?; }
+                    write!(f, "{}", Type::Var(*r))?;
+                }
+                write!(f, "}}")
             }
         }
     }

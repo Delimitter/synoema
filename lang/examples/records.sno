@@ -1,0 +1,14 @@
+-- Records example: geometric shapes
+point x y = {x = x, y = y}
+dist_sq p = p.x * p.x + p.y * p.y
+
+circle cx cy r = {center = point cx cy, radius = r}
+area c = c.radius * c.radius  -- simplified (without pi)
+
+get_x p = p.x
+get_y p = p.y
+
+origin = point 0 0
+p1 = point 3 4
+
+main = dist_sq p1

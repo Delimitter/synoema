@@ -1,0 +1,11 @@
+-- Modules example: namespace Math with utility functions
+
+mod Math
+  pi = 3
+  square x = x * x
+  cube x = x * x * x
+  abs x = ? x < 0 -> 0 - x : x
+
+use Math (pi square cube abs)
+
+main = square 5 + cube 3 + abs (0 - 7)

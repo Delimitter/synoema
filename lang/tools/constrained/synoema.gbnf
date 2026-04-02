@@ -16,7 +16,15 @@
 
 root ::= program
 
-program ::= (decl newline)* decl newline?
+program ::= (top-item newline)* top-item newline?
+
+top-item ::= module-decl | use-decl | decl
+
+# ── Module System ────────────────────────────────────────
+
+module-decl ::= "mod" ws upper-id newline (ws func-def newline)+
+
+use-decl ::= "use" ws upper-id ws "(" ws lower-id (ws lower-id)* ws ")"
 
 decl ::= func-def | type-sig | type-def
 
@@ -76,6 +84,12 @@ atom ::= lower-id
        | "(" ws expr ws ")"
        | list-expr
        | lambda-expr
+       | record-expr
+
+record-expr ::= "{" ws "}"
+              | "{" ws record-field (ws "," ws record-field)* ws "}"
+
+record-field ::= lower-id ws "=" ws expr
 
 lambda-expr ::= "\\" ws (pattern ws)+ "->" ws expr
 
@@ -100,6 +114,9 @@ pattern ::= "_"
           | "(" ws pattern ws ":" ws pattern ws ")"
           | "(" ws pattern ws ")"
           | "[" ws "]"
+          | record-pattern
+
+record-pattern ::= "{" ws lower-id ws "=" ws pattern (ws "," ws lower-id ws "=" ws pattern)* ws "}"
 
 # ── Types ────────────────────────────────────────────────
 

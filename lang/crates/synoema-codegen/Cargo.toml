@@ -8,6 +8,7 @@ license.workspace = true
 synoema-lexer = { path = "../synoema-lexer" }
 synoema-parser = { path = "../synoema-parser" }
 synoema-core = { path = "../synoema-core" }
+synoema-types = { path = "../synoema-types" }
 cranelift-codegen = "0.104"
 cranelift-frontend = "0.104"
 cranelift-module = "0.104"

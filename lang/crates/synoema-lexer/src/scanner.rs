@@ -156,6 +156,7 @@ impl<'src> Scanner<'src> {
             b'\\' => Token::Backslash, b',' => Token::Comma,
             b'(' => Token::LParen, b')' => Token::RParen,
             b'[' => Token::LBracket, b']' => Token::RBracket,
+            b'{' => Token::LBrace,   b'}' => Token::RBrace,
             _ => return Err(self.error(format!("unexpected character '{}'", ch as char))),
         };
         Ok(SpannedToken { token, span: self.make_span(start) })

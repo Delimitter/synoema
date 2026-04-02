@@ -1,0 +1,15 @@
+-- Geometry: modules + records + pattern matching
+
+mod Vec2
+  make x y = {x = x, y = y}
+  add a b = {x = a.x + b.x, y = a.y + b.y}
+  dot a b = a.x * b.x + a.y * b.y
+  len_sq v = v.x * v.x + v.y * v.y
+
+use Vec2 (make add dot len_sq)
+
+origin = make 0 0
+p1 = make 3 4
+p2 = make 1 2
+
+main = len_sq (add p1 p2)
