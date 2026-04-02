@@ -20,7 +20,7 @@ pub enum Lit {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
-    Add, Sub, Mul, Div, Mod,       // arithmetic
+    Add, Sub, Mul, Div, Mod, Pow,   // arithmetic
     Eq, Neq, Lt, Gt, Lte, Gte,    // comparison
     And, Or,                        // logic
     Concat,                         // ++
@@ -33,7 +33,7 @@ impl BinOp {
     pub fn symbol(&self) -> &'static str {
         match self {
             BinOp::Add => "+",  BinOp::Sub => "-",  BinOp::Mul => "*",
-            BinOp::Div => "/",  BinOp::Mod => "%",
+            BinOp::Div => "/",  BinOp::Mod => "%",  BinOp::Pow => "**",
             BinOp::Eq => "==",  BinOp::Neq => "!=",
             BinOp::Lt => "<",   BinOp::Gt => ">",
             BinOp::Lte => "<=", BinOp::Gte => ">=",

@@ -88,9 +88,9 @@ pub enum CorePat {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrimOp {
     // Arithmetic (integer)
-    Add, Sub, Mul, Div, Mod, Neg,
+    Add, Sub, Mul, Div, Mod, Neg, Pow,
     // Arithmetic (float)
-    FAdd, FSub, FMul, FDiv,
+    FAdd, FSub, FMul, FDiv, FPow,
     // Comparison
     Eq, Neq, Lt, Gt, Lte, Gte,
     // Float comparison
@@ -116,6 +116,7 @@ impl PrimOp {
             BinOp::Mul => PrimOp::Mul,
             BinOp::Div => PrimOp::Div,
             BinOp::Mod => PrimOp::Mod,
+            BinOp::Pow => PrimOp::Pow,
             BinOp::Eq => PrimOp::Eq,
             BinOp::Neq => PrimOp::Neq,
             BinOp::Lt => PrimOp::Lt,
@@ -137,8 +138,10 @@ impl PrimOp {
             PrimOp::Add => "add#", PrimOp::Sub => "sub#",
             PrimOp::Mul => "mul#", PrimOp::Div => "div#",
             PrimOp::Mod => "mod#", PrimOp::Neg => "neg#",
+            PrimOp::Pow => "pow#",
             PrimOp::FAdd => "fadd#", PrimOp::FSub => "fsub#",
             PrimOp::FMul => "fmul#", PrimOp::FDiv => "fdiv#",
+            PrimOp::FPow => "fpow#",
             PrimOp::Eq => "eq#",   PrimOp::Neq => "neq#",
             PrimOp::Lt => "lt#",   PrimOp::Gt => "gt#",
             PrimOp::Lte => "lte#", PrimOp::Gte => "gte#",

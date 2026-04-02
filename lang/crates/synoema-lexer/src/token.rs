@@ -57,7 +57,7 @@ pub enum Token {
     Lt, Gt, Lte, Gte, // < > <= >=
     And,        // &&
     Or,         // ||
-    Plus, Minus, Star, Slash, Percent,
+    Plus, Minus, Star, StarStar, Slash, Percent,
     Question,   // ?
     Colon,      // :
     Dot,        // .
@@ -108,7 +108,7 @@ impl Token {
             Token::Lte => "'<='", Token::Gte => "'>='",
             Token::And => "'&&'", Token::Or => "'||'",
             Token::Plus => "'+'", Token::Minus => "'-'",
-            Token::Star => "'*'", Token::Slash => "'/'",
+            Token::Star => "'*'", Token::StarStar => "'**'", Token::Slash => "'/'",
             Token::Percent => "'%'", Token::Question => "'?'",
             Token::Colon => "':'", Token::Dot => "'.'",
             Token::DotDot => "'..'", Token::Assign => "'='",

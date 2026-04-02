@@ -576,6 +576,16 @@ impl Evaluator {
                     _ => Err(err("% requires Int operands")),
                 }
             }
+            BinOp::Pow => {
+                match (&l, &r) {
+                    (Value::Int(a), Value::Int(b)) if *b >= 0 => Ok(Value::Int(a.pow(*b as u32))),
+                    (Value::Int(_), Value::Int(_)) => Err(err("** requires non-negative exponent for Int")),
+                    (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a.powf(*b))),
+                    (Value::Int(a), Value::Float(b)) => Ok(Value::Float((*a as f64).powf(*b))),
+                    (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a.powi(*b as i32))),
+                    _ => Err(err("** requires numeric operands")),
+                }
+            }
 
             // Comparison
             BinOp::Eq => Ok(Value::Bool(l == r)),
@@ -627,6 +637,8 @@ impl Evaluator {
             ("head", 1), ("tail", 1), ("even", 1), ("odd", 1),
             ("not", 1), ("sum", 1), ("filter", 2), ("map", 2),
             ("foldl", 3),
+            // Float math builtins
+            ("sqrt", 1), ("floor", 1), ("ceil", 1), ("round", 1), ("abs", 1),
         ] {
             env.insert(name.to_string(), Value::Builtin(name.to_string(), *arity));
         }
@@ -733,6 +745,28 @@ impl Evaluator {
                 let fx = self.apply(args[0].clone(), args[2].clone())?;
                 self.apply(args[1].clone(), fx)
             }
+            "sqrt" => match &args[0] {
+                Value::Float(f) => Ok(Value::Float(f.sqrt())),
+                Value::Int(n) => Ok(Value::Float((*n as f64).sqrt())),
+                _ => Err(err("sqrt requires Float")),
+            },
+            "floor" => match &args[0] {
+                Value::Float(f) => Ok(Value::Float(f.floor())),
+                _ => Err(err("floor requires Float")),
+            },
+            "ceil" => match &args[0] {
+                Value::Float(f) => Ok(Value::Float(f.ceil())),
+                _ => Err(err("ceil requires Float")),
+            },
+            "round" => match &args[0] {
+                Value::Float(f) => Ok(Value::Float(f.round())),
+                _ => Err(err("round requires Float")),
+            },
+            "abs" => match &args[0] {
+                Value::Int(n) => Ok(Value::Int(n.abs())),
+                Value::Float(f) => Ok(Value::Float(f.abs())),
+                _ => Err(err("abs requires Int or Float")),
+            },
             name if name.starts_with("ctor:") => {
                 let ctor_name = &name[5..];
                 Ok(Value::Con(ctor_name.to_string(), args.to_vec()))

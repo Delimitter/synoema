@@ -520,6 +520,7 @@ fn float_binop(op: &BinOp) -> PrimOp {
         BinOp::Sub => PrimOp::FSub,
         BinOp::Mul => PrimOp::FMul,
         BinOp::Div => PrimOp::FDiv,
+        BinOp::Pow => PrimOp::FPow,
         BinOp::Lt  => PrimOp::FLt,
         BinOp::Gt  => PrimOp::FGt,
         BinOp::Lte => PrimOp::FLte,

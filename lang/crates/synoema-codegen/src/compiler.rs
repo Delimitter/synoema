@@ -88,6 +88,14 @@ impl Compiler {
         builder.symbol("synoema_float_lte", runtime::synoema_float_lte as *const u8);
         builder.symbol("synoema_float_gte", runtime::synoema_float_gte as *const u8);
         builder.symbol("synoema_float_eq",  runtime::synoema_float_eq  as *const u8);
+        builder.symbol("synoema_float_pow", runtime::synoema_float_pow as *const u8);
+        builder.symbol("synoema_float_sqrt", runtime::synoema_float_sqrt as *const u8);
+        builder.symbol("synoema_float_abs", runtime::synoema_float_abs as *const u8);
+        builder.symbol("synoema_float_floor", runtime::synoema_float_floor as *const u8);
+        builder.symbol("synoema_float_ceil", runtime::synoema_float_ceil as *const u8);
+        builder.symbol("synoema_float_round", runtime::synoema_float_round as *const u8);
+        builder.symbol("synoema_int_pow", runtime::synoema_int_pow as *const u8);
+        builder.symbol("synoema_abs_int", runtime::synoema_abs_int as *const u8);
 
         let module = JITModule::new(builder);
 
@@ -202,6 +210,25 @@ impl Compiler {
         decl(self, "synoema_float_lte", "synoema_float_lte", &sig2)?;
         decl(self, "synoema_float_gte", "synoema_float_gte", &sig2)?;
         decl(self, "synoema_float_eq",  "synoema_float_eq",  &sig2)?;
+        // Float power: fn(i64, i64) -> i64
+        decl(self, "synoema_float_pow", "synoema_float_pow", &sig2)?;
+        // Float unary math: fn(i64) -> i64
+        decl(self, "synoema_float_sqrt",  "synoema_float_sqrt",  &sig1)?;
+        decl(self, "synoema_float_abs",   "synoema_float_abs",   &sig1)?;
+        decl(self, "synoema_float_floor", "synoema_float_floor", &sig1)?;
+        decl(self, "synoema_float_ceil",  "synoema_float_ceil",  &sig1)?;
+        decl(self, "synoema_float_round", "synoema_float_round", &sig1)?;
+        // Float math builtins exposed as named functions
+        decl(self, "synoema_float_sqrt",  "sqrt",  &sig1)?;
+        decl(self, "synoema_float_floor", "floor", &sig1)?;
+        decl(self, "synoema_float_ceil",  "ceil",  &sig1)?;
+        decl(self, "synoema_float_round", "round", &sig1)?;
+        decl(self, "synoema_float_abs",   "fabs",  &sig1)?;
+        // Integer power: fn(i64, i64) -> i64
+        decl(self, "synoema_int_pow", "synoema_int_pow", &sig2)?;
+        // Integer abs: fn(i64) -> i64
+        decl(self, "synoema_abs_int", "synoema_abs_int", &sig1)?;
+        decl(self, "synoema_abs_int", "abs", &sig1)?;
 
         Ok(())
     }
@@ -532,7 +559,7 @@ fn compile_expr(
                             return Ok(builder.ins().isub(one, eq_val));
                         }
                         // Float arithmetic and comparison: call float runtime functions
-                        PrimOp::FAdd | PrimOp::FSub | PrimOp::FMul | PrimOp::FDiv
+                        PrimOp::FAdd | PrimOp::FSub | PrimOp::FMul | PrimOp::FDiv | PrimOp::FPow
                         | PrimOp::FLt | PrimOp::FGt | PrimOp::FLte | PrimOp::FGte | PrimOp::FEq => {
                             let l = compile_expr(builder, vars, vc, funcs, module, ctor_tags, lhs)?;
                             let r = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg)?;
@@ -541,6 +568,7 @@ fn compile_expr(
                                 PrimOp::FSub  => "synoema_float_sub",
                                 PrimOp::FMul  => "synoema_float_mul",
                                 PrimOp::FDiv  => "synoema_float_div",
+                                PrimOp::FPow  => "synoema_float_pow",
                                 PrimOp::FLt   => "synoema_float_lt",
                                 PrimOp::FGt   => "synoema_float_gt",
                                 PrimOp::FLte  => "synoema_float_lte",
@@ -549,6 +577,15 @@ fn compile_expr(
                                 _ => unreachable!(),
                             };
                             let fid = *funcs.get(fn_name).ok_or_else(|| cerr(format!("{} not declared", fn_name)))?;
+                            let fref = module.declare_func_in_func(fid, builder.func);
+                            let call = builder.ins().call(fref, &[l, r]);
+                            return Ok(builder.inst_results(call)[0]);
+                        }
+                        // Integer power: call synoema_int_pow(base, exp)
+                        PrimOp::Pow => {
+                            let l = compile_expr(builder, vars, vc, funcs, module, ctor_tags, lhs)?;
+                            let r = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg)?;
+                            let fid = *funcs.get("synoema_int_pow").ok_or_else(|| cerr("synoema_int_pow not declared"))?;
                             let fref = module.declare_func_in_func(fid, builder.func);
                             let call = builder.ins().call(fref, &[l, r]);
                             return Ok(builder.inst_results(call)[0]);

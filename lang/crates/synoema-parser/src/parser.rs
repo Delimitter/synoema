@@ -473,6 +473,7 @@ impl Parser {
                 Token::Star      => (BinOp::Mul,     16, 17),
                 Token::Slash     => (BinOp::Div,     16, 17),
                 Token::Percent   => (BinOp::Mod,     16, 17),
+                Token::StarStar  => (BinOp::Pow,     17, 17), // right-assoc, higher than Mul/Div (rbp==lbp for right-assoc)
                 Token::Compose   => (BinOp::Compose, 18, 18), // right-assoc
 
                 // Field access (highest precedence for postfix)

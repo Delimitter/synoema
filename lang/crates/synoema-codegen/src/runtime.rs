@@ -200,6 +200,73 @@ pub extern "C" fn synoema_float_eq(a: i64, b: i64) -> i64 {
     if fa == fb { 1 } else { 0 }
 }
 
+/// Raise a tagged float to a tagged float power; returns a new tagged float.
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_float_pow(a: i64, b: i64) -> i64 {
+    let fa = synoema_float_get(a);
+    let fb = synoema_float_get(b);
+    synoema_float_new(fa.powf(fb).to_bits() as i64)
+}
+
+/// Square root of a tagged float; returns a new tagged float.
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_float_sqrt(x: i64) -> i64 {
+    let f = synoema_float_get(x);
+    synoema_float_new(f.sqrt().to_bits() as i64)
+}
+
+/// Absolute value of a tagged float; returns a new tagged float.
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_float_abs(x: i64) -> i64 {
+    let f = synoema_float_get(x);
+    synoema_float_new(f.abs().to_bits() as i64)
+}
+
+/// Floor of a tagged float; returns a new tagged float.
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_float_floor(x: i64) -> i64 {
+    let f = synoema_float_get(x);
+    synoema_float_new(f.floor().to_bits() as i64)
+}
+
+/// Ceiling of a tagged float; returns a new tagged float.
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_float_ceil(x: i64) -> i64 {
+    let f = synoema_float_get(x);
+    synoema_float_new(f.ceil().to_bits() as i64)
+}
+
+/// Round a tagged float to nearest integer (as float); returns a new tagged float.
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_float_round(x: i64) -> i64 {
+    let f = synoema_float_get(x);
+    synoema_float_new(f.round().to_bits() as i64)
+}
+
+/// Integer exponentiation: base^exp using a simple loop. Returns i64.
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_int_pow(base: i64, exp: i64) -> i64 {
+    if exp < 0 { return 0; } // negative exponent → 0 for integers
+    let mut result: i64 = 1;
+    let mut b = base;
+    let mut e = exp;
+    // Fast exponentiation (binary method)
+    while e > 0 {
+        if e & 1 == 1 {
+            result = result.wrapping_mul(b);
+        }
+        b = b.wrapping_mul(b);
+        e >>= 1;
+    }
+    result
+}
+
+/// Absolute value of an integer. Returns i64.
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_abs_int(x: i64) -> i64 {
+    x.abs()
+}
+
 /// Decode a tagged float pointer to f64 (for testing/display).
 pub fn decode_float(v: i64) -> Option<f64> {
     if !is_float(v) { return None; }

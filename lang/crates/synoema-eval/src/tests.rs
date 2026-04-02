@@ -562,3 +562,119 @@ main = show_color Green";
     let (val, _) = run_main(src);
     assert_eq!(val, Value::Str("Green".into()));
 }
+
+// ── Phase 13: Type class improvements ─────────────────
+
+// Eq for floats
+#[test]
+fn float_eq_true() {
+    assert_eq!(ev("1.5 == 1.5"), Value::Bool(true));
+}
+
+#[test]
+fn float_eq_false() {
+    assert_eq!(ev("1.5 == 2.0"), Value::Bool(false));
+}
+
+#[test]
+fn float_neq() {
+    assert_eq!(ev("1.5 != 2.0"), Value::Bool(true));
+}
+
+// Ord for floats
+#[test]
+fn float_lt_true() {
+    assert_eq!(ev("1.5 < 2.0"), Value::Bool(true));
+}
+
+#[test]
+fn float_lt_false() {
+    assert_eq!(ev("2.0 < 1.5"), Value::Bool(false));
+}
+
+#[test]
+fn float_gt_true() {
+    assert_eq!(ev("3.0 > 1.5"), Value::Bool(true));
+}
+
+#[test]
+fn float_gt_false() {
+    assert_eq!(ev("1.0 > 3.0"), Value::Bool(false));
+}
+
+#[test]
+fn float_lte_equal() {
+    assert_eq!(ev("1.0 <= 1.0"), Value::Bool(true));
+}
+
+#[test]
+fn float_lte_less() {
+    assert_eq!(ev("1.0 <= 2.0"), Value::Bool(true));
+}
+
+#[test]
+fn float_gte_equal() {
+    assert_eq!(ev("2.5 >= 2.5"), Value::Bool(true));
+}
+
+#[test]
+fn float_gte_greater() {
+    assert_eq!(ev("3.0 >= 1.5"), Value::Bool(true));
+}
+
+// Eq for records
+#[test]
+fn record_eq_true() {
+    assert_eq!(ev("{x = 1} == {x = 1}"), Value::Bool(true));
+}
+
+#[test]
+fn record_eq_false() {
+    assert_eq!(ev("{x = 1} == {x = 2}"), Value::Bool(false));
+}
+
+// Eq for lists
+#[test]
+fn list_eq_true() {
+    assert_eq!(ev("[1 2 3] == [1 2 3]"), Value::Bool(true));
+}
+
+#[test]
+fn list_eq_false() {
+    assert_eq!(ev("[1 2] == [1 3]"), Value::Bool(false));
+}
+
+// show for floats
+#[test]
+fn show_float_fractional() {
+    let src = "main = show 3.14";
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Str("3.14".into()));
+}
+
+#[test]
+fn show_float_whole() {
+    // whole-number float displays with one decimal place: "3.0"
+    let src = "main = show 3.0";
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Str("3.0".into()));
+}
+
+#[test]
+fn show_float_half() {
+    let src = "main = show 0.5";
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Str("0.5".into()));
+}
+
+// Comprehensive type class test: ADT with float fields
+#[test]
+fn typeclass_adt_float_eval() {
+    let src = "\
+Expr = Num Float | Add Expr Expr
+eval_expr (Num x) = x
+eval_expr (Add a b) = eval_expr a + eval_expr b
+main = eval_expr (Add (Num 1.5) (Num 2.5))";
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Float(4.0));
+}

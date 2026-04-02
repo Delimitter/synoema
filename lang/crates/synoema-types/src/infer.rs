@@ -189,6 +189,26 @@ impl Infer {
         // even: Int -> Bool
         env.insert("even".into(), Scheme::mono(Type::arrow(Type::int(), Type::bool())));
 
+        // Float math builtins: Float -> Float
+        for name in &["sqrt", "floor", "ceil", "round"] {
+            env.insert(name.to_string(), Scheme::mono(
+                Type::arrow(Type::float(), Type::float()),
+            ));
+        }
+
+        // abs: Int -> Int (also works on Float at runtime via tag dispatch)
+        env.insert("abs".into(), Scheme::mono(Type::arrow(Type::int(), Type::int())));
+
+        // pow#: Int -> Int -> Int
+        env.insert("pow#".into(), Scheme::mono(
+            Type::arrow(Type::int(), Type::arrow(Type::int(), Type::int())),
+        ));
+
+        // fpow#: Float -> Float -> Float
+        env.insert("fpow#".into(), Scheme::mono(
+            Type::arrow(Type::float(), Type::arrow(Type::float(), Type::float())),
+        ));
+
         env
     }
 
@@ -596,7 +616,7 @@ impl Infer {
 
         let (s3, result_ty) = match op {
             // Arithmetic: Int -> Int -> Int
-            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
+            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::Pow => {
                 let sa = unify(&t1.apply(&s2), &Type::int(), &mut self.gen)?;
                 let sb = unify(&t2.apply(&sa), &Type::int(), &mut self.gen)?;
                 (sa.compose(&sb), Type::int())
