@@ -956,4 +956,42 @@ main = check (Just \"fail\")
         // List comprehension over range
         assert_eq!(jit("main = sum [x * 2 | x <- [1..5]]"), 30);
     }
+
+    // ── Phase 15b: show Bool, show List ────────────────────
+
+    #[test]
+    fn jit_show_bool_true() {
+        assert_eq!(jit_str("main = show true"), "true");
+    }
+
+    #[test]
+    fn jit_show_bool_false() {
+        assert_eq!(jit_str("main = show false"), "false");
+    }
+
+    #[test]
+    fn jit_show_list_ints() {
+        assert_eq!(jit_str("main = show [1 2 3]"), "[1 2 3]");
+    }
+
+    #[test]
+    fn jit_show_list_cons() {
+        assert_eq!(jit_str("main = show (1 : 2 : 3 : [])"), "[1 2 3]");
+    }
+
+    #[test]
+    fn jit_show_list_floats() {
+        assert_eq!(jit_str("main = show [1.5 2.5]"), "[1.5 2.5]");
+    }
+
+    #[test]
+    fn jit_show_list_single() {
+        assert_eq!(jit_str("main = show [42]"), "[42]");
+    }
+
+    #[test]
+    fn jit_show_in_concat() {
+        // show can be used in string concatenation
+        assert_eq!(jit_str(r#"main = "len=" ++ show (length [1 2 3])"#), "len=3");
+    }
 }

@@ -601,37 +601,77 @@ pub extern "C" fn synoema_val_eq(a: i64, b: i64) -> i64 {
     }
 }
 
+/// Format a single JIT value as a Rust String (for building show strings).
+fn format_val(val: i64) -> String {
+    let is_heap = (val as u64) >= 0x10000;
+    if is_str(val) && is_heap {
+        let p = str_ptr(val);
+        let len = unsafe { (*p).len } as usize;
+        let data = unsafe { std::slice::from_raw_parts(p.add(1) as *const u8, len) };
+        std::str::from_utf8(data).unwrap_or("<invalid utf8>").to_string()
+    } else if is_float(val) && is_heap {
+        let f = synoema_float_get(val);
+        if f.fract() == 0.0 && f.abs() < 1e15 { format!("{:.1}", f) } else { format!("{}", f) }
+    } else if is_likely_list_ptr(val) {
+        format_list(val)
+    } else {
+        val.to_string()
+    }
+}
+
+/// Format a list pointer as "[a b c]"
+fn format_list(list: i64) -> String {
+    let mut s = String::from("[");
+    let mut cur = list;
+    let mut first = true;
+    while cur != 0 {
+        if !first { s.push(' '); }
+        first = false;
+        let node = unsafe { &*(cur as *const ListNode) };
+        s.push_str(&format_val(node.head));
+        cur = node.tail;
+    }
+    s.push(']');
+    s
+}
+
+/// Allocate a tagged string from a Rust String.
+fn alloc_str(s: &str) -> i64 {
+    let bytes = s.as_bytes();
+    let len = bytes.len();
+    let total = std::mem::size_of::<StrNode>() + len;
+    let ptr = arena_alloc(total, std::mem::align_of::<StrNode>()) as *mut StrNode;
+    if ptr.is_null() { panic!("alloc_str: allocation failed"); }
+    unsafe {
+        (*ptr).len = len as i64;
+        let dst = ptr.add(1) as *mut u8;
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), dst, len);
+        (ptr as i64) | STR_TAG
+    }
+}
+
 /// Convert any JIT value to a tagged string. Returns a tagged string pointer.
 /// - int → decimal digits
 /// - float → decimal representation
-/// - bool (0/1) → "false"/"true"
 /// - string → identity (already a string)
+/// - list → "[a b c]" format
 pub extern "C" fn synoema_show_any(val: i64) -> i64 {
     let is_heap = (val as u64) >= 0x10000;
     if is_str(val) && is_heap {
         val // already a string, return as-is
     } else if is_float(val) && is_heap {
-        let f = synoema_float_get(val);
-        let s = if f.fract() == 0.0 && f.abs() < 1e15 {
-            format!("{:.1}", f) // show 3.0 not 3
-        } else {
-            format!("{}", f)
-        };
-        let bytes = s.as_bytes();
-        let len = bytes.len();
-        let total = std::mem::size_of::<StrNode>() + len;
-        let ptr = arena_alloc(total, std::mem::align_of::<StrNode>()) as *mut StrNode;
-        if ptr.is_null() { panic!("synoema_show_any: allocation failed"); }
-        unsafe {
-            (*ptr).len = len as i64;
-            let dst = ptr.add(1) as *mut u8;
-            std::ptr::copy_nonoverlapping(bytes.as_ptr(), dst, len);
-            (ptr as i64) | STR_TAG
-        }
+        alloc_str(&format_val(val))
+    } else if is_likely_list_ptr(val) {
+        alloc_str(&format_list(val))
     } else {
-        // Plain int or bool
+        // Plain int (including 0=nil/false, 1=true — indistinguishable at runtime)
         synoema_show_int(val)
     }
+}
+
+/// Convert a list to its string representation "[a b c]". Returns a tagged string.
+pub extern "C" fn synoema_show_list(list: i64) -> i64 {
+    alloc_str(&format_list(list))
 }
 
 /// Recursively compare two lists for equality. Returns 1 if equal, 0 otherwise.
