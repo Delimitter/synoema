@@ -470,6 +470,10 @@ fn desugar_expr(fresh: &mut Fresh, expr: &Expr) -> CoreExpr {
         ExprKind::Field(obj, field) => {
             CoreExpr::FieldAccess(Box::new(desugar_expr(fresh, obj)), field.clone())
         }
+
+        // ── Concurrency (Phase BC) ───────────────────
+        ExprKind::Scope(body) => CoreExpr::Scope(Box::new(desugar_expr(fresh, body))),
+        ExprKind::Spawn(expr) => CoreExpr::Spawn(Box::new(desugar_expr(fresh, expr))),
     }
 }
 

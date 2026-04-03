@@ -133,6 +133,15 @@ pub enum ExprKind {
 
     /// Parenthesized expression
     Paren(Box<Expr>),
+
+    /// Structured concurrency scope: `scope { body }`
+    /// All threads spawned within body are joined before scope returns.
+    Scope(Box<Expr>),
+
+    /// Spawn expression: `spawn expr`
+    /// Runs expr in a new OS thread within the nearest enclosing scope.
+    /// Returns Unit.
+    Spawn(Box<Expr>),
 }
 
 /// Local binding inside a block: `name = expr`
@@ -174,6 +183,8 @@ pub enum TypeExprKind {
     Con(String),
     /// Function type: `a -> b`
     Arrow(Box<TypeExpr>, Box<TypeExpr>),
+    /// Linear function type: `a -o b` (argument used exactly once)
+    LinearArrow(Box<TypeExpr>, Box<TypeExpr>),
     /// Type application: `Maybe Int`, `List a`
     App(Box<TypeExpr>, Box<TypeExpr>),
     /// Parenthesized

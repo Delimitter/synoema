@@ -59,10 +59,13 @@ qsort (p:xs) = qsort lo ++ [p] ++ qsort hi
   hi = [x | x <- xs , x > p]
 
 -- Higher-order functions, pipes, lambdas
-result = [1 2 3 4 5] |> filter even |> map (\x -> x * 2) |> sum
+result = [1..10] |> filter (\x -> x % 2 == 0) |> map (\x -> x * x) |> sum
 
--- Algebraic data types
+-- Algebraic data types with pattern matching
 Maybe a = Just a | None
+
+safe_div x 0 = None
+safe_div x y = Just (x / y)
 
 -- Conditional: ? -> : (3 tokens vs if/else's 4-5)
 abs x = ? x < 0 -> -x : x
@@ -78,17 +81,26 @@ fizzbuzz n =
 point x y = {x = x, y = y}
 dist_sq p = p.x * p.x + p.y * p.y
 
--- Record pattern matching
-get_x {x = v, y = _} = v
+-- Type classes
+trait Show a
+  show : a -> String
+
+Color = Red | Green | Blue
+
+impl Show Color
+  show Red   = "red"
+  show Green = "green"
+  show Blue  = "blue"
 
 -- Modules: namespace isolation
 mod Math
   square x = x * x
-  abs x = ? x < 0 -> 0 - x : x
+  pi = 3.14159
 
-use Math (square abs)
+use Math (square pi)
 
-main = square 5 + abs (0 - 3)   -- 25 + 3 = 28
+-- IO
+main = print "Hello, world!"
 
 -- Type signatures (optional — types are inferred)
 map : (a -> b) -> List a -> List b
@@ -98,15 +110,19 @@ No `def`. No `return`. No commas in lists. No `if`/`else`. Every operator is a s
 
 ## Getting Started
 
-### Prerequisites
-
-- Rust toolchain (stable) — install via [rustup.rs](https://rustup.rs)
-
-### Build
+### Install
 
 ```bash
-git clone https://github.com/synoema/synoema
-cd synoema
+cargo install synoema-repl
+synoema jit examples/factorial.sno   # 3628800
+synoema run examples/quicksort.sno   # [1 2 3 4 5 6 7 8 9]
+```
+
+### Build from source
+
+```bash
+git clone https://github.com/Delimitter/synoema
+cd synoema/lang
 cargo build
 ```
 
@@ -125,27 +141,35 @@ cargo run -p synoema-repl -- eval "6 * 7"
 # Interactive REPL
 cargo run -p synoema-repl
 
-# Release build (for benchmarks)
-cargo build --release -p synoema-repl
-./target/release/synoema-repl jit examples/factorial.sno
+# Structured error output (JSON for LLM toolchains)
+cargo run -p synoema-repl -- --errors json run file.sno
 ```
 
 ### Test
 
 ```bash
-cargo test        # 373 tests across all crates — all green
+cargo test        # 634 tests across all crates — all green
 ```
+
+Full testing guide: [../docs/testing.md](../docs/testing.md)
+
+### Stress Test Dashboard
+
+```bash
+cargo run -p synoema-repl -- run examples/stress_server.sno
+# Open: http://localhost:8765/stress_tests.html
+```
+
+Server guide: [../docs/stress-server.md](../docs/stress-server.md)
 
 ### Try the examples
 
 ```bash
-cargo run -p synoema-repl -- run examples/quicksort.sno    # [1 2 3 4 5 6 7 8 9]
-cargo run -p synoema-repl -- jit examples/factorial.sno    # 3628800
-cargo run -p synoema-repl -- run examples/fizzbuzz.sno     # FizzBuzz
-cargo run -p synoema-repl -- jit examples/euler1.sno       # 233168
-cargo run -p synoema-repl -- jit examples/modules.sno      # 59  (mod + use)
-cargo run -p synoema-repl -- jit examples/geometry.sno     # 52  (records + modules)
-cargo run -p synoema-repl -- run examples/records.sno      # 25  (record fields)
+cargo run -p synoema-repl -- run  examples/quicksort.sno    # [1 2 3 4 5 6 7 8 9]
+cargo run -p synoema-repl -- jit  examples/factorial.sno    # 3628800
+cargo run -p synoema-repl -- run  examples/fizzbuzz.sno     # FizzBuzz
+cargo run -p synoema-repl -- jit  examples/euler1.sno       # 233168
+cargo run -p synoema-repl -- run  examples/higher_order.sno # 12
 ```
 
 ## Key Design Principles
@@ -164,23 +188,24 @@ cargo run -p synoema-repl -- run examples/records.sno      # 25  (record fields)
 
 ```
 Source → Lexer → Parser → Type Check → Core IR ─┬→ Interpreter (all features)
-  .sno                                  System F  │    Closures, ADTs, strings
+  .sno                                  System F  │    Closures, ADTs, strings, IO
         Offside  Pratt   HM infer.               │
         rule     parser  Algorithm W             └→ Cranelift JIT (4.4× faster)
                                                        Native x86-64
-                                                       Pattern match, recursion
+                                                       Full feature parity
 ```
 
 | Crate | Lines | Tests | Purpose |
 |-------|------:|------:|---------|
-| synoema-lexer | ~800 | 51 | Tokenization + offside rule |
-| synoema-parser | ~1600 | 43 | Pratt parsing, 15 ExprKind |
-| synoema-types | ~1700 | 51 | Hindley-Milner + row polymorphism |
-| synoema-core | ~1100 | 31 | Core IR + desugaring + optimizer |
-| synoema-eval | ~1500 | 63 | Tree-walking interpreter |
-| synoema-codegen | ~1500 | 92 | Cranelift JIT compiler |
+| synoema-lexer | ~800 | 82 | Tokenization + offside rule |
+| synoema-parser | ~1700 | 43 | Pratt parsing, 15 ExprKind |
+| synoema-types | ~1900 | 61 | Hindley-Milner + row polymorphism |
+| synoema-core | ~1600 | 44 | Core IR + desugaring + optimizer |
+| synoema-eval | ~1900 | 137 | Tree-walking interpreter |
+| synoema-codegen | ~3100 | 191 | Cranelift JIT compiler + runtime |
+| synoema-diagnostic | ~400 | — | Structured errors (human + JSON) |
 | synoema-repl | ~300 | — | CLI: run / jit / eval / REPL |
-| **Total** | **~9500** | **373** | |
+| **Total** | **~12000** | **634** | |
 
 ## Language Reference
 
@@ -200,6 +225,10 @@ Source → Lexer → Parser → Type Check → Core IR ─┬→ Interpreter (al
 | Record patterns | `get_x {x = v} = v` | Destructuring |
 | Modules | `mod Math` / `use Math (f g)` | Lexical namespaces |
 | Algebraic data types | `Shape = Circle r \| Rect w h` | Sum types |
+| Type classes | `trait Show a` / `impl Show Color` | Ad-hoc polymorphism |
+| IO | `print "hello"` / `readline ()` | Effect primitives |
+| Float | `3.14`, `sqrt`, `floor`, `ceil` | FloatNode heap-alloc |
+| Power | `2 ** 10` | 1 BPE token |
 | Type signature | `f : Int -> Int` | Optional annotation |
 | Where-binding | indented below definition | Block scope |
 
@@ -208,16 +237,21 @@ Source → Lexer → Parser → Type Check → Core IR ─┬→ Interpreter (al
 | Capability | `run` (interpreter) | `jit` (Cranelift) |
 |------------|:-------------------:|:-----------------:|
 | Integers & arithmetic | ✓ | ✓ |
-| Pattern matching | ✓ | ✓ |
-| Recursion | ✓ | ✓ |
-| Lists | ✓ | ✓ |
-| Strings + `==` / `!=` | ✓ | ✓ |
+| Booleans | ✓ | ✓ |
+| Float (`3.14`, `**`, `sqrt`) | ✓ | ✓ |
+| Strings + `show` + `==` | ✓ | ✓ |
+| Pattern matching (nested) | ✓ | ✓ |
+| Recursion + TCO | ✓ | ✓ |
+| Lists + comprehensions | ✓ | ✓ |
+| Ranges `[a..b]` | ✓ | ✓ |
 | Closures / HOF | ✓ | ✓ |
-| List comprehensions | ✓ | ✓ |
+| `map` / `filter` / `foldl` | ✓ | ✓ |
 | Records + field access | ✓ | ✓ |
 | Modules (`mod`/`use`) | ✓ | ✓ |
+| ADTs + pattern matching | ✓ | ✓ |
+| Type classes (`trait`/`impl`) | ✓ | ✓ |
+| IO (`print`/`readline`) | ✓ | ✓ |
 | Constant folding / DCE | — | ✓ |
-| ADTs | ✓ | ✓ |
 
 ## Constrained Decoding (LLM Integration)
 
@@ -241,6 +275,17 @@ response = client.chat.completions.create(
 
 Properties: deterministic CFG, BPE-aligned (zero bridge tokens), compiles to FSM in closed form.
 
+## Structured Diagnostics
+
+Synoema produces LLM-friendly structured errors via the `synoema-diagnostic` crate:
+
+```bash
+$ synoema --errors json run broken.sno
+{"severity":"error","code":"E0012","message":"type mismatch","span":{"line":3,"col":5},"expected":"Int","got":"String"}
+```
+
+Human-readable by default, JSON on `--errors json`. Designed for the generate → check → fix loop.
+
 ## Scientific Foundations
 
 Synoema's design is grounded in peer-reviewed research:
@@ -259,24 +304,25 @@ Full bibliography: [docs/research/scientific_foundations.md](../docs/research/sc
 - [x] Lexer, parser, Hindley-Milner type inference
 - [x] Tree-walking interpreter with closures, ADTs, strings
 - [x] BPE benchmarks — 46% savings vs Python on 12 programs
-- [x] Core IR (System F + 10 desugaring transforms)
+- [x] Core IR (System F + desugaring transforms + constant folding / DCE)
 - [x] Cranelift JIT — native x86-64, 4.4× faster than Python
 - [x] Constrained decoding — GBNF for SGLang / XGrammar / llama.cpp
-- [x] Lists in JIT — heap-allocated linked list runtime
-- [x] **Phase 9.2** — Closures in JIT (`map`, `filter`, comprehensions via native code)
-- [x] **Phase 9.3** — Strings in JIT (tagged pointer, `show`, `++`, `==`, `!=`)
-- [x] **Phase 9.4** — Records + field access in JIT (FNV-hash field lookup)
-- [x] **Phase 9.5** — Modules (`mod` / `use`, lexical namespacing, works in JIT)
-- [x] **Phase 10.1** — Tail call optimization (64MB stack thread, iterative eval)
-- [x] **Phase 10.2** — Constant folding / DCE in Core IR optimizer
-- [x] **Phase 10.3** — Arena-based memory (8MB bump allocator, no leaks)
-- [x] **Phase 11.1** — ADTs in JIT (ConNode, tag comparison, field extraction)
-- [x] **Phase 11.2** — Row polymorphism for records (Rémy-style row unification)
-- [x] **Phase 11.3** — Nested ADT patterns in JIT (nested constructor matching)
-- [x] **Phase 11.4** — Full ADT pattern matching (literal sub-patterns, triple nesting, recursive bind)
-- [x] **Phase 11.5** — String literal patterns in JIT (top-level + inside constructors)
-- [ ] Phase 12 — Effects / IO monad (`<-`, `@io`)
-- [ ] Phase 13 — Type classes (`trait`, `impl`)
+- [x] Closures in JIT — `map`, `filter`, list comprehensions via native code
+- [x] Strings in JIT — tagged pointer, `show`, `++`, `==`
+- [x] Records in JIT — FNV-hash field lookup, record pattern matching
+- [x] Modules — `mod` / `use`, lexical namespacing
+- [x] Tail call optimization — iterative eval, 64MB stack thread
+- [x] Arena-based memory — 8MB bump allocator, no leaks
+- [x] ADTs in JIT — full nested pattern matching, string literal patterns
+- [x] Float in JIT — `3.14`, arithmetic, comparisons, `sqrt`/`floor`/`ceil`/`**`
+- [x] IO in JIT — `print` / `readline` via FFI
+- [x] `show` for all types in JIT — int, bool, float, string, list, ADT, record
+- [x] Type class dispatch in JIT — user-defined `impl Show` overrides built-in
+- [x] Higher-order stdlib in JIT — `map` / `filter` / `foldl` with closure ABI
+- [x] Structured diagnostics — `synoema-diagnostic` crate, JSON + human renderers
+- [ ] LSP server — autocomplete, go-to-definition, inline errors
+- [ ] Web playground — WASM-compiled interpreter in the browser
+- [ ] LLVM backend — `--backend llvm` for maximum optimization
 
 ## License
 

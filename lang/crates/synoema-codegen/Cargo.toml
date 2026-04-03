@@ -3,12 +3,18 @@ name = "synoema-codegen"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
-synoema-lexer = { path = "../synoema-lexer" }
-synoema-parser = { path = "../synoema-parser" }
-synoema-core = { path = "../synoema-core" }
-synoema-types = { path = "../synoema-types" }
+synoema-lexer = { path = "../synoema-lexer", version = "0.1.0" }
+synoema-parser = { path = "../synoema-parser", version = "0.1.0" }
+synoema-core = { path = "../synoema-core", version = "0.1.0" }
+synoema-types = { path = "../synoema-types", version = "0.1.0" }
+synoema-diagnostic = { path = "../synoema-diagnostic", version = "0.1.0" }
 cranelift-codegen = "0.104"
 cranelift-frontend = "0.104"
 cranelift-module = "0.104"

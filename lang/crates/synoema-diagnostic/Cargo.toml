@@ -1,5 +1,5 @@
 [package]
-name = "synoema-core"
+name = "synoema-diagnostic"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,7 +11,6 @@ categories.workspace = true
 
 [dependencies]
 synoema-lexer = { path = "../synoema-lexer", version = "0.1.0" }
-synoema-parser = { path = "../synoema-parser", version = "0.1.0" }
 
 [dev-dependencies]
 pretty_assertions = "1"

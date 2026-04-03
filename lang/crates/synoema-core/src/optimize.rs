@@ -88,6 +88,9 @@ fn fold_expr(expr: CoreExpr) -> CoreExpr {
             CoreExpr::FieldAccess(Box::new(expr), name)
         }
 
+        CoreExpr::Scope(body) => CoreExpr::Scope(Box::new(fold_expr(*body))),
+        CoreExpr::Spawn(expr) => CoreExpr::Spawn(Box::new(fold_expr(*expr))),
+
         // Terminals — nothing to fold
         other => other,
     }
@@ -276,6 +279,9 @@ fn is_free(name: &str, expr: &CoreExpr) -> bool {
         CoreExpr::Record(fields) => fields.iter().any(|(_, e)| is_free(name, e)),
 
         CoreExpr::FieldAccess(expr, _) => is_free(name, expr),
+
+        CoreExpr::Scope(body) => is_free(name, body),
+        CoreExpr::Spawn(expr) => is_free(name, expr),
     }
 }
 

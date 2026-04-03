@@ -1,85 +1,68 @@
-# CLAUDE.md — Synoema Project
+# Synoema
 
-## Quick Reference
+Язык программирования для LLM code generation. ~12000 LOC Rust, 634 tests, 8 crates, Cranelift JIT.
 
-Synoema — programming language for LLM code generation.
-~11500 lines Rust, 518 tests, 7 crates, Cranelift JIT backend.
-
-## Commands
+## Команды
 
 ```bash
-cargo build                     # Build all
-cargo test                      # Run 518 tests
+# Из директории lang/ (workspace root)
+cargo build                     # Сборка
+cargo test                      # Все тесты
 cargo run -p synoema-repl -- run examples/quicksort.sno  # Interpreter
-cargo run -p synoema-repl -- jit examples/factorial.sno   # JIT compile
-cargo run -p synoema-repl -- eval "6 * 7"                 # Eval expression
+cargo run -p synoema-repl -- jit examples/factorial.sno   # JIT
+cargo run -p synoema-repl -- eval "6 * 7"                 # Eval выражения
+cargo run -p synoema-repl -- --errors json run file.sno   # JSON ошибки
 ```
 
-NOTE: run cargo from `lang/` subdirectory (workspace root).
+## Иерархия документов (по приоритету)
 
-## Key Files
+1. **CLAUDE.md** (этот файл) — правила и точка входа. Высший приоритет, перекрывает всё ниже
+2. **Правила** — `context/RULES.md`. При конфликте с п.3–4 побеждают правила
+3. **Архитектура и цели** — `context/ARCHITECTURE.md`, `context/PROJECT_STATE.md`, `context/PHASES.md`
+4. **Документация OpenSpec** — specs/changes если есть. Низший приоритет, не перекрывает п.1–3
 
-- `context/PROJECT_STATE.md` — FULL project state, read first
-- `context/DEVELOPMENT_GUIDE.md` — How to add features, roadmap, patterns
-- `lang/crates/` — All compiler source code
-- `docs/articles/` — 14 articles (7 RU + 7 EN)
-- `docs/research/scientific_foundations.md` — 23 verified scientific facts
-- `docs/specs/language_reference.md` — Full language specification
+При противоречии между уровнями — верхний уровень побеждает.
+**ОБЯЗАТЕЛЬНО:** перед принятием решения на основе документа — проверь, нет ли противоречия с документом выше по иерархии. Если есть — следуй верхнему. Никогда не применяй указания нижнего уровня, если они конфликтуют с верхним.
 
-## Architecture
+## Документация: три аудитории
 
-```
-Source (.sno) → Lexer → Parser → Types (HM) → Core IR → Optimizer → Eval (interpreter)
-                                                                   → Codegen (Cranelift JIT)
-```
+| Аудитория | Директория | Назначение |
+|-----------|-----------|-----------|
+| **Человек-пользователь** | `docs/user/` | Туториалы, синтаксис, примеры |
+| **LLM-пользователь** | `docs/llm/` | Quick reference ≤1800 токенов, таблицы, аксиомы |
+| **LLM-разработчик** (Claude agent) | `context/` | Rules, Architecture, Project State, Dev Guide |
 
-## Completed Phases
+Подробнее: `context/RULES.md` → секция 7.
 
-- **Phase 9.2** ✅ Closures in JIT (lambda lifting, indirect calls, map/filter)
-- **Phase 9.3** ✅ Strings in JIT (tagged ptr bit 1, StrNode, show/++/length, fizzbuzz)
-- **Phase 9.4** ✅ Records (interpreter + JIT: RecordNode heap, FNV-hash field access)
-- **Phase 9.5** ✅ Modules (`mod Name` + `use Name (...)` — lexical namespacing, desugaring pass)
-- **Phase 10.1** ✅ TCO in interpreter (iterative eval loop + 64MB stack thread)
-- **Phase 10.2** ✅ Constant folding/DCE in Core IR optimizer
-- **Phase 10.3** ✅ Region-based arena allocator (no malloc leaks, arena_reset after each run)
-- **String ==** ✅ `synoema_val_eq` runtime dispatch — works for int and string
-- **Phase 11.1** ✅ ADTs in JIT (ConNode heap alloc, tag comparison, field extraction, 6 tests)
-- **Phase 11.2** ✅ Row polymorphism for records (Rémy-style row unification, 7 type tests)
-- **Phase 11.3** ✅ Nested ADT patterns in JIT (nested constructor matching, 2 codegen tests)
-- **Phase 11.4** ✅ Full ADT pattern matching in JIT (literal sub-patterns, triple nesting, recursive `bind_sub_pat`)
-- **Phase 11.5** ✅ String literal patterns in JIT (top-level + sub-patterns inside constructors, 5 tests)
-- **Phase 12a** ✅ Float in JIT (FloatNode heap-alloc, tag=0x04, 10 tests: arithmetic + comparisons + cond)
-- **Phase 12b** ✅ Record patterns in JIT (CorePat::Record in compile_case + bind_sub_pat, 5 tests)
-- **Phase 13** ✅ Float Eq/Ord/Show in interpreter + 19 tests (float ==, <, >, show, ADT+float)
-- **`**` operator** ✅ Power operator + float math builtins (sqrt, floor, ceil, abs, round) — interpreter + JIT, 28 tests
-- **VS Code extension** ✅ TextMate grammar for .sno files (`tools/vscode-extension/`)
-- **Phase 14a** ✅ IO/Effects in interpreter: `()` unit, `print` (∀a. a → ()), `;` sequence op, `readline` (stdin), 11 tests
-- **Phase 14b** ✅ IO in JIT: `synoema_print_val` (any tagged val via FFI), `synoema_readline` (stdin → tagged str), `Lit::Unit` → `iconst(0)`, 8 tests
-- **Phase 15a** ✅ JIT completeness: `show` for all types (float/str/bool/int), `list ==` (recursive), `[a..b]` ranges via `synoema_range`, fixed `synoema_val_eq` address validation, 13 tests
-- **Phase 15b** ✅ `show` for Bool/List in JIT: compile-time fold `show true/false`, `synoema_show_list` ("[1 2 3]" format, recursive elements), `show` in concat, 8 tests
-- **Phase 15c** ✅ `show` for ADTs/Records in JIT: CON_TAG=1/RECORD_TAG=5 pointer tagging, `synoema_show_con` (reads stored name+arity), compile-time `show {record}` expansion, 8 tests
-- **Phase 16** ✅ Type class `Show` dispatch in JIT: user-defined `impl Show Color` works in JIT (overrides built-in), `synoema_show_bool` + `show_bool` built-in, `is_bool_expr` heuristic (`show (x>y)` → "true"/"false"), 10 tests
-- **Phase 17** ✅ Higher-order stdlib in JIT: `synoema_map`/`synoema_filter`/`synoema_foldl` via closure ABI (`fn_ptr(env, arg)`), curried foldl (partial application), old non-closure `synoema_filter` removed, 8 tests
+## Навигация
 
-## Current Priorities
+| Файл | Содержимое |
+|------|-----------|
+| `context/RULES.md` | Правила проекта (BPE, тесты, зависимости, ABI, документация) |
+| `context/ARCHITECTURE.md` | Pipeline, crates, tagged pointer ABI, FFI-паттерн |
+| `context/PHASES.md` | Все завершённые фазы (9.2–18) |
+| `context/PROJECT_STATE.md` | Полное состояние проекта (RU) |
+| `context/DEVELOPMENT_GUIDE.md` | Как добавлять фичи, roadmap, паттерны кодирования |
+| `docs/user/README.md` | Точка входа для человека-пользователя |
+| `docs/llm/synoema.md` | Quick reference для LLM-генерации кода |
+| `docs/specs/language_reference.md` | Формальная спецификация языка |
+| `docs/specs/compiler_roadmap.md` | Roadmap компилятора (фазы, архитектура) |
+| `docs/research/scientific_foundations.md` | 23 научных факта |
+| `docs/mcp.md` | MCP-сервер (интеграция в LLM-тулчейн) |
+| `docs/articles/` | Образовательная серия (7 статей, EN+RU) |
+| `docs/testing.md` | Тестирование: 634 теста, как запускать |
+| `docs/stress-server.md` | HTTP-дэшборд стресс-тестов |
+| `lang/crates/` | Исходный код компилятора |
 
-1. Publication: GitHub + Habr articles + HN launch
-2. Phase 18: next JIT feature (operator sections, `zip`/`zipWith`, or string stdlib)
+## Правила (кратко)
 
-## Known Bugs
+- Каждый оператор — ровно 1 BPE-токен (cl100k_base)
+- `cargo test` чистый перед каждым коммитом (0 failures, 0 warnings)
+- Новые фичи: interpreter → JIT
+- Зависимости: только Cranelift + pretty_assertions
+- Подробнее: `context/RULES.md`
 
-- 0 warnings, 0 known bugs (518/518 tests passing)
+## Статус
 
-Note: the "Ackermann JIT bug" was a false positive. `ack 3 4 = 125` is correct (2^7 − 3).
-
-## Syntax Note: Ternary vs Cons
-
-The `?` ternary uses `:` as else separator — SAME symbol as cons.
-Cons in then-branch MUST use explicit parens: `? cond -> (x : xs) : rest`
-
-## Rules
-
-- Every operator MUST be exactly 1 BPE token (cl100k_base)
-- Tests must pass before any commit (cargo test)
-- New features: interpreter first, JIT second
-- Minimal dependencies (only Cranelift + pretty_assertions)
+- 0 warnings, 0 known bugs, 634/634 tests
+- Текущий приоритет: Phase 18 (сетевые примитивы + строковый stdlib) и расширение диагностики

@@ -1,7 +1,7 @@
 //! Robinson's unification algorithm for Synoema types.
 
 use crate::types::*;
-use crate::error::TypeError;
+use crate::error::{TypeError, TypeErrorKind};
 
 /// Unify two types, returning a substitution that makes them equal.
 ///
@@ -20,11 +20,27 @@ pub fn unify(t1: &Type, t2: &Type, gen: &mut TyVarGen) -> Result<Subst, TypeErro
         // Same constructor — trivially unified
         (Type::Con(a), Type::Con(b)) if a == b => Ok(Subst::new()),
 
-        // Arrow types — unify both sides
+        // Unrestricted arrow types — unify both sides
         (Type::Arrow(a1, b1), Type::Arrow(a2, b2)) => {
             let s1 = unify(a1, a2, gen)?;
             let s2 = unify(&b1.apply(&s1), &b2.apply(&s1), gen)?;
             Ok(s1.compose(&s2))
+        }
+
+        // Linear arrow types — unify both sides (multiplicities must match)
+        (Type::LinearArrow(a1, b1), Type::LinearArrow(a2, b2)) => {
+            let s1 = unify(a1, a2, gen)?;
+            let s2 = unify(&b1.apply(&s1), &b2.apply(&s1), gen)?;
+            Ok(s1.compose(&s2))
+        }
+
+        // Linear and unrestricted arrows are distinct types
+        (Type::Arrow(_, _), Type::LinearArrow(_, _))
+        | (Type::LinearArrow(_, _), Type::Arrow(_, _)) => {
+            Err(TypeError::bare(TypeErrorKind::Mismatch {
+                expected: t1.clone(),
+                found: t2.clone(),
+            }))
         }
 
         // Type applications — unify both parts
@@ -40,10 +56,10 @@ pub fn unify(t1: &Type, t2: &Type, gen: &mut TyVarGen) -> Result<Subst, TypeErro
         }
 
         // Mismatch
-        _ => Err(TypeError::Mismatch {
+        _ => Err(TypeError::bare(TypeErrorKind::Mismatch {
             expected: t1.clone(),
             found: t2.clone(),
-        }),
+        })),
     }
 }
 
@@ -93,7 +109,7 @@ fn unify_records(
         // Both closed: must have identical field sets
         (None, None) => {
             if !extra_in_1.is_empty() || !extra_in_2.is_empty() {
-                return Err(TypeError::Mismatch { expected: orig1.clone(), found: orig2.clone() });
+                return Err(TypeError::bare(TypeErrorKind::Mismatch { expected: orig1.clone(), found: orig2.clone() }));
             }
         }
 
@@ -102,7 +118,7 @@ fn unify_records(
         // fs1 must not have fields that fs2 doesn't have (fs2 is the concrete closed type).
         (Some(r1), None) => {
             if !extra_in_1.is_empty() {
-                return Err(TypeError::Mismatch { expected: orig1.clone(), found: orig2.clone() });
+                return Err(TypeError::bare(TypeErrorKind::Mismatch { expected: orig1.clone(), found: orig2.clone() }));
             }
             let row_ty = Type::Record(extra_in_2, None);
             let s = bind(r1, &row_ty)?;
@@ -113,7 +129,7 @@ fn unify_records(
         // r2 must absorb fields in fs1 not in fs2.
         (None, Some(r2)) => {
             if !extra_in_2.is_empty() {
-                return Err(TypeError::Mismatch { expected: orig1.clone(), found: orig2.clone() });
+                return Err(TypeError::bare(TypeErrorKind::Mismatch { expected: orig1.clone(), found: orig2.clone() }));
             }
             let row_ty = Type::Record(extra_in_1, None);
             let s = bind(r2, &row_ty)?;
@@ -177,10 +193,10 @@ fn bind(var: TyVarId, ty: &Type) -> Result<Subst, TypeError> {
 
     // Occurs check: prevent infinite types like α = List α
     if ty.ftv().contains(&var) {
-        return Err(TypeError::InfiniteType {
+        return Err(TypeError::bare(TypeErrorKind::InfiniteType {
             var,
             ty: ty.clone(),
-        });
+        }));
     }
 
     Ok(Subst::single(var, ty.clone()))
@@ -229,7 +245,7 @@ mod tests {
     fn unify_occurs_check() {
         // α = List α should fail
         let result = unify(&Type::Var(0), &Type::list(Type::Var(0)), &mut gen());
-        assert!(matches!(result, Err(TypeError::InfiniteType { .. })));
+        assert!(matches!(result, Err(TypeError { kind: TypeErrorKind::InfiniteType { .. }, .. })));
     }
 
     #[test]

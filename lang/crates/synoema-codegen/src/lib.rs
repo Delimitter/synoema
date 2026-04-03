@@ -8,25 +8,36 @@ pub mod runtime;
 pub use compiler::{Compiler, CompileError};
 pub use runtime::arena_reset;
 
-/// Parse, desugar, and JIT-compile an Synoema program, returning main() result as i64.
+use synoema_diagnostic::{Diagnostic, codes};
+
+fn parse_err(e: &synoema_parser::ParseError) -> Diagnostic {
+    Diagnostic::error(codes::PARSE_UNEXPECTED_TOKEN, e.message.clone())
+        .with_span(e.span)
+}
+
+fn compile_err(e: CompileError) -> Diagnostic {
+    Diagnostic::error(codes::COMPILE_ERROR, format!("{}", e))
+}
+
+/// Parse, desugar, and JIT-compile a Synoema program, returning main() result as i64.
 /// Strings are returned as tagged i64 pointers (use `display_result` for human-readable output).
-pub fn compile_and_run(source: &str) -> Result<i64, String> {
+pub fn compile_and_run(source: &str) -> Result<i64, Diagnostic> {
     let program = synoema_parser::parse(source)
-        .map_err(|e| format!("Parse error: {}", e))?;
+        .map_err(|e| parse_err(&e))?;
     let program = synoema_types::resolve_modules(program);
     let core = synoema_core::desugar_program(&program);
     let core = synoema_core::optimize_program(core);
     let mut compiler = Compiler::new()
-        .map_err(|e| format!("{}", e))?;
+        .map_err(compile_err)?;
     let result = compiler.compile_and_run(&core)
-        .map_err(|e| format!("{}", e));
+        .map_err(compile_err);
     crate::runtime::arena_reset(); // Free all heap allocations from this run
     result
 }
 
 /// Parse, desugar, JIT-compile and return main() result as a display string.
 /// Handles both integer results and tagged string results.
-pub fn compile_and_display(source: &str) -> Result<String, String> {
+pub fn compile_and_display(source: &str) -> Result<String, Diagnostic> {
     let result = compile_and_run(source)?;
     Ok(runtime::display_value(result))
 }
@@ -481,7 +492,7 @@ main = get_first {x = 7, y = 0, z = 0}
     // ── ADT (Algebraic Data Types) in JIT ────────────────────
 
     fn run_jit(src: &str) -> Result<i64, String> {
-        compile_and_run(src)
+        compile_and_run(src).map_err(|e| e.to_string())
     }
 
     #[test]

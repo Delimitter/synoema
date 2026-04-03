@@ -883,14 +883,14 @@ fn run_string_concat() {
 fn div_int_by_float_zero() {
     let result = eval_expr("5 / 0.0");
     assert!(result.is_err());
-    assert!(result.unwrap_err().contains("Division by zero"));
+    assert!(result.unwrap_err().message.contains("Division by zero"));
 }
 
 #[test]
 fn div_float_by_int_zero() {
     let result = eval_expr("5.0 / 0");
     assert!(result.is_err());
-    assert!(result.unwrap_err().contains("Division by zero"));
+    assert!(result.unwrap_err().message.contains("Division by zero"));
 }
 
 // ── Power overflow protection ─────────────────────────
@@ -899,7 +899,7 @@ fn div_float_by_int_zero() {
 fn pow_int_overflow() {
     let result = eval_expr("10 ** 20");
     assert!(result.is_err());
-    assert!(result.unwrap_err().contains("overflow"));
+    assert!(result.unwrap_err().message.contains("overflow"));
 }
 
 #[test]
@@ -1069,4 +1069,389 @@ fn foldl_builtin() {
         ev("foldl (\\acc x -> acc + x) 0 [1 2 3 4 5]"),
         Value::Int(15)
     );
+}
+
+// ── Phase 18: String stdlib ───────────────────────────────────────────────────
+
+#[test]
+fn str_len_basic() {
+    assert_eq!(ev("str_len \"hello\""), Value::Int(5));
+    assert_eq!(ev("str_len \"\""), Value::Int(0));
+}
+
+#[test]
+fn str_slice_basic() {
+    assert_eq!(ev("str_slice \"hello world\" 0 5"), Value::Str("hello".into()));
+    assert_eq!(ev("str_slice \"hello world\" 6 11"), Value::Str("world".into()));
+}
+
+#[test]
+fn str_slice_out_of_bounds() {
+    // Clamps to string length
+    assert_eq!(ev("str_slice \"hi\" 0 100"), Value::Str("hi".into()));
+    assert_eq!(ev("str_slice \"hi\" 5 10"), Value::Str("".into()));
+}
+
+#[test]
+fn str_find_found() {
+    assert_eq!(ev("str_find \"hello world\" \" \" 0"), Value::Int(5));
+    assert_eq!(ev("str_find \"abcabc\" \"bc\" 0"), Value::Int(1));
+}
+
+#[test]
+fn str_find_not_found() {
+    assert_eq!(ev("str_find \"hello\" \"xyz\" 0"), Value::Int(-1));
+}
+
+#[test]
+fn str_find_from_offset() {
+    // Search from position 2 — skips first "bc"
+    assert_eq!(ev("str_find \"abcabc\" \"bc\" 2"), Value::Int(4));
+}
+
+#[test]
+fn str_find_empty_needle() {
+    // Empty needle returns `from` position
+    assert_eq!(ev("str_find \"hello\" \"\" 3"), Value::Int(3));
+}
+
+#[test]
+fn str_starts_with_true() {
+    assert_eq!(ev("str_starts_with \"hello\" \"hel\""), Value::Bool(true));
+    assert_eq!(ev("str_starts_with \"hello\" \"\""), Value::Bool(true));
+}
+
+#[test]
+fn str_starts_with_false() {
+    assert_eq!(ev("str_starts_with \"hello\" \"world\""), Value::Bool(false));
+}
+
+#[test]
+fn str_trim_basic() {
+    assert_eq!(ev("str_trim \"  hello  \""), Value::Str("hello".into()));
+    assert_eq!(ev("str_trim \"\\thello\\n\""), Value::Str("hello".into()));
+    assert_eq!(ev("str_trim \"nospace\""), Value::Str("nospace".into()));
+}
+
+// ── Phase 18: json_escape ─────────────────────────────────────────────────────
+
+#[test]
+fn json_escape_quotes() {
+    assert_eq!(
+        ev("json_escape \"say \\\"hello\\\"\""),
+        Value::Str("say \\\"hello\\\"".into())
+    );
+}
+
+#[test]
+fn json_escape_newline() {
+    assert_eq!(
+        ev("json_escape \"line1\\nline2\""),
+        Value::Str("line1\\nline2".into())
+    );
+}
+
+#[test]
+fn json_escape_backslash() {
+    assert_eq!(
+        ev("json_escape \"a\\\\b\""),
+        Value::Str("a\\\\b".into())
+    );
+}
+
+#[test]
+fn json_escape_plain() {
+    assert_eq!(ev("json_escape \"hello\""), Value::Str("hello".into()));
+}
+
+// ── Phase 18: str builtins in programs ────────────────────────────────────────
+
+#[test]
+fn str_parse_path() {
+    // Replicate parse_path from stress_server.sno
+    let src = r#"
+parse_path req =
+  sp1 = str_find req " " 0
+  sp2 = str_find req " " (sp1 + 1)
+  ? sp1 < 0 -> "/" : ? sp2 < 0 -> str_slice req (sp1 + 1) (str_len req) : str_slice req (sp1 + 1) sp2
+main = parse_path "GET /run/lexer HTTP/1.0"
+"#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Str("/run/lexer".into()));
+}
+
+#[test]
+fn str_suite_extraction() {
+    let src = r#"
+parse_suite path =
+  raw  = str_slice path 5 (str_len path)
+  qpos = str_find raw "?" 0
+  ? qpos < 0 -> raw : str_slice raw 0 qpos
+main = parse_suite "/run/lexer"
+"#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Str("lexer".into()));
+}
+
+#[test]
+fn str_suite_with_query() {
+    let src = r#"
+parse_suite path =
+  raw  = str_slice path 5 (str_len path)
+  qpos = str_find raw "?" 0
+  ? qpos < 0 -> raw : str_slice raw 0 qpos
+main = parse_suite "/run/lexer?slow=1"
+"#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Str("lexer".into()));
+}
+
+#[test]
+fn str_sse_data_format() {
+    let src = r#"
+sse_data text = "data: {\"line\":\"" ++ json_escape text ++ "\"}\n\n"
+main = sse_data "hello world"
+"#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Str("data: {\"line\":\"hello world\"}\n\n".into()));
+}
+
+// ── Phase 18: file_read ───────────────────────────────────────────────────────
+
+#[test]
+fn file_read_existing() {
+    // Read Cargo.toml (always exists in workspace root, which is the test cwd)
+    let src = "main = str_len (file_read \"Cargo.toml\")";
+    let (val, _) = run_main(src);
+    // File exists and is non-empty
+    match val {
+        Value::Int(n) => assert!(n > 10, "Expected non-trivial file size, got {}", n),
+        _ => panic!("Expected Int, got {:?}", val),
+    }
+}
+
+// ── Phase B: scope / spawn ────────────────────────────────────────────────────
+
+#[test]
+fn scope_returns_result() {
+    // scope { expr } returns the value of expr
+    let (val, _) = run_main("main = scope { 42 }");
+    assert_eq!(val, Value::Int(42));
+}
+
+#[test]
+fn scope_unit_result() {
+    // scope with only spawn expressions returns Unit
+    let src = "
+f x = x
+main = scope { spawn (f 1) }
+";
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Unit);
+}
+
+#[test]
+fn scope_sequential_seq() {
+    // scope { e1 ; e2 } returns e2
+    let (val, _) = run_main("main = scope { 10 ; 20 }");
+    assert_eq!(val, Value::Int(20));
+}
+
+#[test]
+fn scope_with_spawn_runs() {
+    // spawn executes side effects; scope waits for completion
+    let src = r#"
+f x = print (show x)
+main = scope { spawn (f 1) ; spawn (f 2) }
+"#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Unit);
+}
+
+#[test]
+fn scope_nested() {
+    // Nested scopes work correctly
+    let src = "
+f x = x * 2
+main = scope { scope { spawn (f 3) } ; 99 }
+";
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Int(99));
+}
+
+#[test]
+fn spawn_returns_unit() {
+    let src = "
+f x = x
+main = scope { spawn (f 5) }
+";
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Unit);
+}
+
+#[test]
+fn scope_spawn_with_channel() {
+    // Producer spawns, main thread receives — real concurrency test
+    let src = r#"
+producer ch = send ch 42
+
+main =
+  ch = chan
+  scope {
+    spawn (producer ch)
+    recv ch
+  }
+"#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Int(42));
+}
+
+#[test]
+fn scope_spawn_multiple_sends() {
+    // Multiple sends, one recv per message
+    let src = r#"
+producer ch =
+  send ch 10
+  send ch 20
+  send ch 30
+
+main =
+  ch = chan
+  scope {
+    spawn (producer ch)
+    a = recv ch
+    b = recv ch
+    c = recv ch
+    a + b + c
+  }
+"#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Int(60));
+}
+
+#[test]
+fn file_read_missing_is_err() {
+    let result = eval_main("main = file_read \"/nonexistent/path/xyz.txt\"");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().message.contains("file_read"));
+}
+
+// ── Phase C: chan / send / recv ────────────────────────────────────────────────
+
+#[test]
+fn chan_send_recv_basic() {
+    // Same-thread send+recv (channel is buffered / async)
+    let src = r#"
+main =
+  ch = chan
+  send ch 99
+  recv ch
+"#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Int(99));
+}
+
+#[test]
+fn chan_send_recv_string() {
+    let src = r#"
+main =
+  ch = chan
+  send ch "hello"
+  recv ch
+"#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Str("hello".into()));
+}
+
+#[test]
+fn chan_multiple_values() {
+    let src = r#"
+main =
+  ch = chan
+  send ch 1
+  send ch 2
+  send ch 3
+  a = recv ch
+  b = recv ch
+  c = recv ch
+  a + b + c
+"#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Int(6));
+}
+
+#[test]
+fn chan_type_polymorphism() {
+    // send/recv works for any type (Bool)
+    let src = r#"
+main =
+  ch = chan
+  send ch true
+  recv ch
+"#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Bool(true));
+}
+
+#[test]
+fn chan_type_check_passes() {
+    // Type checker accepts correctly typed code
+    let src = r#"
+main =
+  ch = chan
+  send ch 42
+  recv ch
+"#;
+    let _ = run_main(src); // should not panic
+}
+
+#[test]
+fn chan_in_scope_concurrent() {
+    // Real producer-consumer concurrency
+    let src = r#"
+producer ch =
+  send ch 100
+
+main =
+  ch = chan
+  scope {
+    spawn (producer ch)
+    recv ch
+  }
+"#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Int(100));
+}
+
+#[test]
+fn chan_two_producers() {
+    let src = r#"
+p1 ch = send ch 10
+p2 ch = send ch 20
+
+main =
+  ch = chan
+  scope {
+    spawn (p1 ch)
+    spawn (p2 ch)
+    a = recv ch
+    b = recv ch
+    a + b
+  }
+"#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Int(30));
+}
+
+#[test]
+fn chan_list_value() {
+    // Channels can carry list values
+    let src = r#"
+main =
+  ch = chan
+  send ch [1 2 3]
+  recv ch
+"#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)]));
 }

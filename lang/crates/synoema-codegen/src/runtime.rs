@@ -1036,3 +1036,52 @@ pub extern "C" fn synoema_concatmap(closure_ptr: i64, list: i64) -> i64 {
     }
     result
 }
+
+// ── Concurrency: Channel Primitives (Phase C) ─────────────────────────────────
+//
+// JIT channels are Phase C sequential stubs: chan/send/recv work in
+// a single-threaded JIT context. Concurrent JIT spawn is Phase D.
+//
+// ChanNodeRt is heap-allocated via Box and leaked (Box::into_raw) so the
+// channel survives for the lifetime of the program. arena_reset() does NOT
+// free channel memory — a known limitation of Phase C.
+
+use std::sync::{Mutex as SyncMutex};
+use std::sync::mpsc as mpsc_rt;
+
+#[repr(C)]
+struct ChanNodeRt {
+    sender:   SyncMutex<mpsc_rt::Sender<i64>>,
+    receiver: SyncMutex<mpsc_rt::Receiver<i64>>,
+}
+
+/// Create a new channel. Returns a raw pointer (as i64) to the ChanNodeRt.
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_chan_new() -> i64 {
+    let (tx, rx) = mpsc_rt::channel::<i64>();
+    let node = Box::new(ChanNodeRt {
+        sender:   SyncMutex::new(tx),
+        receiver: SyncMutex::new(rx),
+    });
+    Box::into_raw(node) as i64
+}
+
+/// Send a value on a channel. Returns 0 (Unit).
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_chan_send(chan: i64, val: i64) -> i64 {
+    let node = chan as *const ChanNodeRt;
+    if let Ok(guard) = unsafe { (*node).sender.lock() } {
+        let _ = guard.send(val);
+    }
+    0 // Unit
+}
+
+/// Receive a value from a channel (blocking). Returns the received i64.
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_chan_recv(chan: i64) -> i64 {
+    let node = chan as *const ChanNodeRt;
+    match unsafe { (*node).receiver.lock() } {
+        Ok(guard) => guard.recv().unwrap_or(0),
+        Err(_) => 0,
+    }
+}

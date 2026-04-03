@@ -557,6 +557,28 @@ impl Parser {
                 ), span))
             }
 
+            // scope { body }  — body can be single-line or a multi-line INDENT block
+            Token::KwScope => {
+                self.advance();
+                self.expect(&Token::LBrace)?;
+                let body = if self.eat(&Token::Indent) {
+                    let b = self.parse_block_body()?;
+                    self.skip_newlines();
+                    b
+                } else {
+                    self.parse_expr()?
+                };
+                self.expect(&Token::RBrace)?;
+                Ok(Expr::new(ExprKind::Scope(Box::new(body)), span))
+            }
+
+            // spawn expr  (parses one application-level expression)
+            Token::KwSpawn => {
+                self.advance();
+                let expr = self.parse_pratt(20)?;
+                Ok(Expr::new(ExprKind::Spawn(Box::new(expr)), span))
+            }
+
             _ => self.parse_atom(),
         }
     }
@@ -706,21 +728,21 @@ impl Parser {
     }
 
     /// Parse a block body (after INDENT):
-    /// bindings... then final expression, then DEDENT
+    /// mix of `name = expr` bindings and standalone effect expressions,
+    /// ending with a final expression, then DEDENT.
+    /// Standalone effects are desugared to `BinOp::Seq` chains.
     fn parse_block_body(&mut self) -> PResult<Expr> {
         let span = self.peek_span();
         self.skip_newlines();
 
-        let mut bindings = Vec::new();
+        enum Stmt { Bind(Binding), Effect(Expr) }
+        let mut stmts: Vec<Stmt> = Vec::new();
 
-        // Parse bindings: `name = expr` followed by newline
-        // The last expression (without `=`) is the block's value
         loop {
             if self.peek() == &Token::Dedent || self.peek() == &Token::Eof {
                 break;
             }
 
-            // Try to parse as binding: look for `lower =`
             if self.is_binding_ahead() {
                 let bspan = self.peek_span();
                 let name = self.expect_lower_id()?;
@@ -731,25 +753,55 @@ impl Parser {
                     self.parse_expr()?
                 };
                 self.skip_newlines();
-                bindings.push(Binding { name, value, span: bspan });
+                stmts.push(Stmt::Bind(Binding { name, value, span: bspan }));
             } else {
-                // Final expression
                 let expr = self.parse_expr()?;
                 self.skip_newlines();
-                self.eat(&Token::Dedent);
-
-                if bindings.is_empty() {
-                    return Ok(expr);
-                } else {
-                    return Ok(Expr::new(ExprKind::Block(bindings, Box::new(expr)), span));
-                }
+                stmts.push(Stmt::Effect(expr));
             }
         }
 
         self.eat(&Token::Dedent);
 
-        // If we only got bindings and no final expression, error
-        Err(self.error("Block must end with an expression"))
+        // Last stmt must be an expression (the block's value)
+        if stmts.is_empty() || matches!(stmts.last(), Some(Stmt::Bind(_))) {
+            return Err(self.error("Block must end with an expression"));
+        }
+
+        // Extract the final expression
+        let final_expr = match stmts.pop().unwrap() {
+            Stmt::Effect(e) => e,
+            Stmt::Bind(_) => unreachable!(),
+        };
+
+        // Build AST from remaining stmts (right to left):
+        // consecutive Binds → Block; Effects → Seq chain
+        let mut result = final_expr;
+        let mut pending: Vec<Binding> = Vec::new();
+
+        for stmt in stmts.into_iter().rev() {
+            match stmt {
+                Stmt::Bind(b) => pending.insert(0, b),
+                Stmt::Effect(e) => {
+                    if !pending.is_empty() {
+                        result = Expr::new(
+                            ExprKind::Block(std::mem::take(&mut pending), Box::new(result)),
+                            span,
+                        );
+                    }
+                    result = Expr::new(
+                        ExprKind::BinOp(BinOp::Seq, Box::new(e), Box::new(result)),
+                        span,
+                    );
+                }
+            }
+        }
+
+        if !pending.is_empty() {
+            result = Expr::new(ExprKind::Block(pending, Box::new(result)), span);
+        }
+
+        Ok(result)
     }
 
     /// Look ahead to see if current position is `lowerId =` (binding)
@@ -772,6 +824,9 @@ impl Parser {
         if self.eat(&Token::Arrow) {
             let rhs = self.parse_type()?; // right-associative
             Ok(TypeExpr::new(TypeExprKind::Arrow(Box::new(t), Box::new(rhs)), span))
+        } else if self.eat(&Token::LinearArrow) {
+            let rhs = self.parse_type()?; // right-associative
+            Ok(TypeExpr::new(TypeExprKind::LinearArrow(Box::new(t), Box::new(rhs)), span))
         } else {
             Ok(t)
         }

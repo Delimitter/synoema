@@ -5,33 +5,75 @@
 //!   synoema run file.sno  — interpret a file
 //!   synoema jit file.sno  — JIT-compile and run via Cranelift
 //!   synoema eval "expr"  — evaluate an expression
+//!
+//! Error format:
+//!   --errors human       — human-readable with source snippets (default)
+//!   --errors json        — JSON for LLM/tool consumption
 
 use std::io::{self, Write, BufRead};
+use synoema_diagnostic::{Diagnostic, render_human, render_json};
+
+// ── Error output ─────────────────────────────────────────
+
+#[derive(Clone, Copy, PartialEq)]
+enum ErrorFormat { Human, Json }
+
+fn print_diag(diag: &Diagnostic, source: Option<&str>, format: ErrorFormat) {
+    match format {
+        ErrorFormat::Human => eprint!("{}", render_human(diag, source)),
+        ErrorFormat::Json => eprintln!("{}", render_json(diag)),
+    }
+}
+
+// ── CLI ──────────────────────────────────────────────────
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
-    match args.get(1).map(|s| s.as_str()) {
+    // Parse --errors flag anywhere in args
+    let format = if args.iter().any(|a| a == "--errors" || a == "--error-format") {
+        let pos = args.iter().position(|a| a == "--errors" || a == "--error-format");
+        match pos.and_then(|i| args.get(i + 1)).map(|s| s.as_str()) {
+            Some("json") => ErrorFormat::Json,
+            _ => ErrorFormat::Human,
+        }
+    } else {
+        ErrorFormat::Human
+    };
+
+    // Filter out --errors <val> from positional args
+    let positional: Vec<&str> = {
+        let mut result = Vec::new();
+        let mut skip_next = false;
+        for arg in args.iter().skip(1) {
+            if skip_next { skip_next = false; continue; }
+            if arg == "--errors" || arg == "--error-format" { skip_next = true; continue; }
+            result.push(arg.as_str());
+        }
+        result
+    };
+
+    match positional.first().copied() {
         Some("run") => {
-            let path = args.get(2).unwrap_or_else(|| {
+            let path = positional.get(1).unwrap_or_else(|| {
                 eprintln!("Usage: synoema run <file.sno>");
                 std::process::exit(1);
             });
-            run_file(path);
+            run_file(path, format);
         }
         Some("jit") => {
-            let path = args.get(2).unwrap_or_else(|| {
+            let path = positional.get(1).unwrap_or_else(|| {
                 eprintln!("Usage: synoema jit <file.sno>");
                 std::process::exit(1);
             });
-            jit_file(path);
+            jit_file(path, format);
         }
         Some("eval") => {
-            let expr = args.get(2).unwrap_or_else(|| {
+            let expr = positional.get(1).unwrap_or_else(|| {
                 eprintln!("Usage: synoema eval \"<expression>\"");
                 std::process::exit(1);
             });
-            eval_one(expr);
+            eval_one(expr, format);
         }
         Some("--help") | Some("-h") => {
             println!("Synoema v0.1 — A BPE-aligned programming language for LLM code generation");
@@ -42,16 +84,20 @@ fn main() {
             println!("  synoema jit <file>   JIT-compile and run via Cranelift (native speed)");
             println!("  synoema eval <expr>  Evaluate an expression");
             println!();
+            println!("Options:");
+            println!("  --errors human       Human-readable errors with source snippets (default)");
+            println!("  --errors json        JSON errors for LLM/tool consumption");
+            println!();
             println!("REPL commands:");
             println!("  :type <expr>       Show inferred type");
             println!("  :load <file>       Load a source file");
             println!("  :quit              Exit REPL");
         }
-        _ => repl(),
+        _ => repl(format),
     }
 }
 
-fn run_file(path: &str) {
+fn run_file(path: &str, format: ErrorFormat) {
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
@@ -67,14 +113,14 @@ fn run_file(path: &str) {
             }
             println!("{}", val);
         }
-        Err(e) => {
-            eprintln!("{}", e);
+        Err(diag) => {
+            print_diag(&diag, Some(&source), format);
             std::process::exit(1);
         }
     }
 }
 
-fn jit_file(path: &str) {
+fn jit_file(path: &str, format: ErrorFormat) {
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
@@ -83,30 +129,31 @@ fn jit_file(path: &str) {
         }
     };
 
-    // Type check first
+    // Type check first (use the same precise code dispatch as the interpreter path)
     if let Err(e) = synoema_types::typecheck(&source) {
-        eprintln!("{}", e);
+        let diag = synoema_eval::type_err_to_diagnostic(e);
+        print_diag(&diag, Some(&source), format);
         std::process::exit(1);
     }
 
     // JIT compile and run via Cranelift
     match synoema_codegen::compile_and_display(&source) {
         Ok(result) => println!("{}", result),
-        Err(e) => {
-            eprintln!("{}", e);
+        Err(diag) => {
+            print_diag(&diag, Some(&source), format);
             std::process::exit(1);
         }
     }
 }
 
-fn eval_one(expr: &str) {
+fn eval_one(expr: &str, format: ErrorFormat) {
     match synoema_eval::eval_expr(expr) {
         Ok(val) => println!("{}", val),
-        Err(e) => eprintln!("{}", e),
+        Err(diag) => print_diag(&diag, Some(expr), format),
     }
 }
 
-fn repl() {
+fn repl(format: ErrorFormat) {
     println!("Synoema v0.1 — Type :help for commands, :quit to exit");
     println!();
 
@@ -149,7 +196,7 @@ fn repl() {
         }
 
         if let Some(expr) = trimmed.strip_prefix(":type ").or_else(|| trimmed.strip_prefix(":t ")) {
-            type_of(expr, &env_source);
+            type_of(expr, &env_source, format);
             continue;
         }
 
@@ -250,12 +297,12 @@ fn repl() {
                     Err(_) => println!("{}", val),
                 }
             }
-            Err(e) => eprintln!("Error: {}", e),
+            Err(diag) => print_diag(&diag, Some(&expr_source), format),
         }
     }
 }
 
-fn type_of(expr: &str, env_source: &str) {
+fn type_of(expr: &str, env_source: &str, format: ErrorFormat) {
     let source = format!("{}\n__type_query = {}", env_source, expr.trim());
     match synoema_types::typecheck(&source) {
         Ok(tenv) => {
@@ -265,6 +312,12 @@ fn type_of(expr: &str, env_source: &str) {
                 eprintln!("Could not infer type");
             }
         }
-        Err(e) => eprintln!("Type error: {}", e),
+        Err(e) => {
+            let diag = Diagnostic::error(
+                synoema_diagnostic::codes::TYPE_OTHER,
+                format!("{}", e),
+            ).maybe_span(e.span);
+            print_diag(&diag, Some(&source), format);
+        }
     }
 }

@@ -13,8 +13,10 @@ pub enum Type {
     Var(TyVarId),
     /// Type constant: Int, Float, Bool, String, Char
     Con(String),
-    /// Function type: τ₁ → τ₂
+    /// Unrestricted function type: τ₁ → τ₂  (argument may be used 0..n times)
     Arrow(Box<Type>, Box<Type>),
+    /// Linear function type: τ₁ -o τ₂  (argument must be used exactly once)
+    LinearArrow(Box<Type>, Box<Type>),
     /// Type constructor application: T τ₁ ... τₙ  (e.g. List Int, Maybe a)
     App(Box<Type>, Box<Type>),
     /// Structural record type: {name: T1, age: T2}
@@ -33,8 +35,21 @@ impl Type {
     pub fn list(elem: Type) -> Self {
         Type::App(Box::new(Type::Con("List".into())), Box::new(elem))
     }
+    pub fn chan(elem: Type) -> Self {
+        Type::App(Box::new(Type::Con("Chan".into())), Box::new(elem))
+    }
     pub fn arrow(from: Type, to: Type) -> Self {
         Type::Arrow(Box::new(from), Box::new(to))
+    }
+
+    /// Linear function arrow: argument must be used exactly once.
+    pub fn linear_arrow(from: Type, to: Type) -> Self {
+        Type::LinearArrow(Box::new(from), Box::new(to))
+    }
+
+    /// Returns true if this is a linear arrow (at the top level).
+    pub fn is_linear_arrow(&self) -> bool {
+        matches!(self, Type::LinearArrow(_, _))
     }
 
     /// Collect all free type variables in this type
@@ -46,7 +61,7 @@ impl Type {
                 s
             }
             Type::Con(_) => HashSet::new(),
-            Type::Arrow(a, b) | Type::App(a, b) => {
+            Type::Arrow(a, b) | Type::LinearArrow(a, b) | Type::App(a, b) => {
                 let mut s = a.ftv();
                 s.extend(b.ftv());
                 s
@@ -75,6 +90,10 @@ impl Type {
             }
             Type::Con(_) => self.clone(),
             Type::Arrow(a, b) => Type::Arrow(
+                Box::new(a.apply(subst)),
+                Box::new(b.apply(subst)),
+            ),
+            Type::LinearArrow(a, b) => Type::LinearArrow(
                 Box::new(a.apply(subst)),
                 Box::new(b.apply(subst)),
             ),
@@ -135,8 +154,14 @@ impl fmt::Display for Type {
             Type::Con(name) => write!(f, "{}", name),
             Type::Arrow(a, b) => {
                 match a.as_ref() {
-                    Type::Arrow(_, _) => write!(f, "({}) -> {}", a, b),
+                    Type::Arrow(_, _) | Type::LinearArrow(_, _) => write!(f, "({}) -> {}", a, b),
                     _ => write!(f, "{} -> {}", a, b),
+                }
+            }
+            Type::LinearArrow(a, b) => {
+                match a.as_ref() {
+                    Type::Arrow(_, _) | Type::LinearArrow(_, _) => write!(f, "({}) -o {}", a, b),
+                    _ => write!(f, "{} -o {}", a, b),
                 }
             }
             Type::App(con, arg) => {

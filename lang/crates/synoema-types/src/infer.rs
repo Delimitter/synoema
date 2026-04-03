@@ -8,9 +8,10 @@
 //! - Block expressions with local bindings (let-polymorphism)
 
 use synoema_parser::*;
+use synoema_lexer::Span;
 use crate::types::*;
 use crate::unify::unify;
-use crate::error::TypeError;
+use crate::error::{TypeError, TypeErrorKind};
 
 type TResult<T> = Result<T, TypeError>;
 
@@ -63,6 +64,17 @@ impl Infer {
                 env.remove(name);
                 let scheme = env.generalize(&final_ty);
                 env.insert(name.clone(), scheme);
+            }
+        }
+
+        // Fourth pass: linearity check
+        // For each function whose type signature contains -o arrows, verify that
+        // linear parameters are used exactly once in every equation body.
+        for decl in &program.decls {
+            if let Decl::Func { name, equations, .. } = decl {
+                if let Some(ty_sig) = sigs.get(name) {
+                    check_linear_func(equations, ty_sig)?;
+                }
             }
         }
 
@@ -216,6 +228,61 @@ impl Infer {
             Type::arrow(Type::float(), Type::arrow(Type::float(), Type::float())),
         ));
 
+        // String builtins
+        // str_slice: String -> Int -> Int -> String
+        env.insert("str_slice".into(), Scheme::mono(
+            Type::arrow(Type::string(), Type::arrow(Type::int(), Type::arrow(Type::int(), Type::string()))),
+        ));
+        // str_find: String -> String -> Int -> Int
+        env.insert("str_find".into(), Scheme::mono(
+            Type::arrow(Type::string(), Type::arrow(Type::string(), Type::arrow(Type::int(), Type::int()))),
+        ));
+        // str_starts_with: String -> String -> Bool
+        env.insert("str_starts_with".into(), Scheme::mono(
+            Type::arrow(Type::string(), Type::arrow(Type::string(), Type::bool())),
+        ));
+        // str_trim: String -> String
+        env.insert("str_trim".into(), Scheme::mono(Type::arrow(Type::string(), Type::string())));
+        // str_len: String -> Int
+        env.insert("str_len".into(), Scheme::mono(Type::arrow(Type::string(), Type::int())));
+        // json_escape: String -> String
+        env.insert("json_escape".into(), Scheme::mono(Type::arrow(Type::string(), Type::string())));
+        // file_read: String -> String
+        env.insert("file_read".into(), Scheme::mono(Type::arrow(Type::string(), Type::string())));
+
+        // I/O builtins (fd-based networking)
+        // tcp_listen: Int -> Int
+        env.insert("tcp_listen".into(), Scheme::mono(Type::arrow(Type::int(), Type::int())));
+        // tcp_accept: Int -> Int
+        env.insert("tcp_accept".into(), Scheme::mono(Type::arrow(Type::int(), Type::int())));
+        // fd_readline: Int -> String
+        env.insert("fd_readline".into(), Scheme::mono(Type::arrow(Type::int(), Type::string())));
+        // fd_write: Int -> String -> ()
+        env.insert("fd_write".into(), Scheme::mono(
+            Type::arrow(Type::int(), Type::arrow(Type::string(), Type::unit())),
+        ));
+        // fd_close: Int -> ()
+        env.insert("fd_close".into(), Scheme::mono(Type::arrow(Type::int(), Type::unit())));
+        // fd_popen: String -> Int
+        env.insert("fd_popen".into(), Scheme::mono(Type::arrow(Type::string(), Type::int())));
+
+        // Concurrency builtins (Phase BC)
+        // chan: ∀a. Chan a  (0-arity — fresh channel on each evaluation)
+        let ca = self.gen.fresh();
+        env.insert("chan".into(), Scheme { vars: vec![ca], ty: Type::chan(Type::Var(ca)) });
+        // send: ∀a. Chan a -> a -> Unit
+        let sa = self.gen.fresh();
+        env.insert("send".into(), Scheme {
+            vars: vec![sa],
+            ty: Type::arrow(Type::chan(Type::Var(sa)), Type::arrow(Type::Var(sa), Type::unit())),
+        });
+        // recv: ∀a. Chan a -> a
+        let ra = self.gen.fresh();
+        env.insert("recv".into(), Scheme {
+            vars: vec![ra],
+            ty: Type::arrow(Type::chan(Type::Var(ra)), Type::Var(ra)),
+        });
+
         env
     }
 
@@ -270,7 +337,7 @@ impl Infer {
                 if let Some((_, id)) = params.iter().find(|(n, _)| n == name) {
                     Ok(Type::Var(*id))
                 } else {
-                    Err(TypeError::UnboundType { name: name.clone() })
+                    Err(TypeError::bare(TypeErrorKind::UnboundType { name: name.clone() }))
                 }
             }
             TypeExprKind::Con(name) => Ok(Type::Con(name.clone())),
@@ -278,6 +345,11 @@ impl Infer {
                 let a_ty = self.resolve_type_expr(a, params)?;
                 let b_ty = self.resolve_type_expr(b, params)?;
                 Ok(Type::arrow(a_ty, b_ty))
+            }
+            TypeExprKind::LinearArrow(a, b) => {
+                let a_ty = self.resolve_type_expr(a, params)?;
+                let b_ty = self.resolve_type_expr(b, params)?;
+                Ok(Type::linear_arrow(a_ty, b_ty))
             }
             TypeExprKind::App(f, a) => {
                 let f_ty = self.resolve_type_expr(f, params)?;
@@ -306,20 +378,25 @@ impl Infer {
     // ── Core Inference (Algorithm W) ────────────────────
 
     fn infer(&mut self, env: &TypeEnv, expr: &Expr) -> TResult<(Subst, Type)> {
+        self.infer_inner(env, expr)
+            .map_err(|e| e.or_span(expr.span))
+    }
+
+    fn infer_inner(&mut self, env: &TypeEnv, expr: &Expr) -> TResult<(Subst, Type)> {
         match &expr.kind {
             ExprKind::Lit(lit) => Ok((Subst::new(), self.lit_type(lit))),
 
             ExprKind::Var(name) => {
                 match env.lookup(name) {
                     Some(scheme) => Ok((Subst::new(), self.instantiate(scheme))),
-                    None => Err(TypeError::Unbound { name: name.clone() }),
+                    None => Err(TypeError::new(TypeErrorKind::Unbound { name: name.clone() }, Some(expr.span))),
                 }
             }
 
             ExprKind::Con(name) => {
                 match env.lookup(name) {
                     Some(scheme) => Ok((Subst::new(), self.instantiate(scheme))),
-                    None => Err(TypeError::Unbound { name: name.clone() }),
+                    None => Err(TypeError::new(TypeErrorKind::Unbound { name: name.clone() }, Some(expr.span))),
                 }
             }
 
@@ -461,6 +538,13 @@ impl Infer {
 
             // PAREN: transparent
             ExprKind::Paren(inner) => self.infer(env, inner),
+
+            // CONCURRENCY (Phase BC — not yet type-checked)
+            ExprKind::Scope(body) => self.infer(env, body),
+            ExprKind::Spawn(body) => {
+                self.infer(env, body)?;
+                Ok((Subst::new(), Type::Con("Unit".into())))
+            }
         }
     }
 
@@ -502,7 +586,7 @@ impl Infer {
         equations: &[Equation],
     ) -> TResult<(Subst, Type)> {
         if equations.is_empty() {
-            return Err(TypeError::Other("Empty function definition".into()));
+            return Err(TypeError::other("Empty function definition"));
         }
 
         // Infer type of first equation
@@ -757,4 +841,226 @@ impl Infer {
             Lit::Unit => Type::unit(),
         }
     }
+}
+
+// ── Linearity Checker ────────────────────────────────────
+//
+// A separate post-typecheck pass that enforces linear usage discipline.
+// Runs only for functions with explicit `-o` type signatures.
+// Linearity is opt-in: programs without `-o` annotations are unaffected.
+
+use std::collections::{HashMap, HashSet};
+type UsageMap = HashMap<String, usize>;
+
+/// Walk a TypeExpr and return a list of booleans: true = that arrow position is linear.
+/// E.g. `Int -o String -> Bool` → [true, false]
+fn linear_positions_from_type_expr(texpr: &TypeExpr) -> Vec<bool> {
+    let mut result = Vec::new();
+    let mut cur = texpr;
+    loop {
+        match &cur.kind {
+            TypeExprKind::Arrow(_, b) => { result.push(false); cur = b; }
+            TypeExprKind::LinearArrow(_, b) => { result.push(true); cur = b; }
+            TypeExprKind::Paren(inner) => { cur = inner; }
+            _ => break,
+        }
+    }
+    result
+}
+
+/// Collect all variable names bound by a pattern.
+fn pat_bound_names(pat: &Pat) -> Vec<String> {
+    match pat {
+        Pat::Var(name) => vec![name.clone()],
+        Pat::Cons(h, t) => {
+            let mut v = pat_bound_names(h);
+            v.extend(pat_bound_names(t));
+            v
+        }
+        Pat::Con(_, sub_pats) => sub_pats.iter().flat_map(pat_bound_names).collect(),
+        Pat::Paren(p) => pat_bound_names(p),
+        Pat::Record(fields) => fields.iter().flat_map(|(_, p)| pat_bound_names(p)).collect(),
+        Pat::Wildcard | Pat::Lit(_) => vec![],
+    }
+}
+
+/// Merge two usage maps for sequential composition.
+/// Returns an error if any linear variable is used more than once in total.
+fn seq_usages(m1: UsageMap, m2: UsageMap, span: Span) -> TResult<UsageMap> {
+    let mut result = m1;
+    for (name, count) in m2 {
+        let entry = result.entry(name.clone()).or_insert(0);
+        *entry += count;
+        if *entry > 1 {
+            return Err(TypeError::new(
+                TypeErrorKind::LinearDuplicate { name },
+                Some(span),
+            ));
+        }
+    }
+    Ok(result)
+}
+
+/// Verify that two conditional branches use linear variables the same number of times.
+/// This ensures that both execution paths consume the same linear resources.
+fn check_branches_agree(m1: &UsageMap, m2: &UsageMap, span: Span) -> TResult<()> {
+    let all_names: HashSet<&String> = m1.keys().chain(m2.keys()).collect();
+    for name in all_names {
+        let c1 = m1.get(name).copied().unwrap_or(0);
+        let c2 = m2.get(name).copied().unwrap_or(0);
+        if c1 != c2 {
+            return Err(TypeError::new(
+                TypeErrorKind::LinearUnused { name: name.clone() },
+                Some(span),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Walk an expression, tracking how many times each linear variable is used.
+/// Returns the usage map, or an error if a linear variable is used more than once.
+fn check_linear_in_expr(expr: &Expr, linear_vars: &HashSet<String>) -> TResult<UsageMap> {
+    if linear_vars.is_empty() {
+        return Ok(HashMap::new());
+    }
+    match &expr.kind {
+        ExprKind::Lit(_) | ExprKind::Con(_) => Ok(HashMap::new()),
+
+        ExprKind::Var(name) => {
+            let mut m = HashMap::new();
+            if linear_vars.contains(name) {
+                m.insert(name.clone(), 1);
+            }
+            Ok(m)
+        }
+
+        ExprKind::App(f, x) => {
+            let mf = check_linear_in_expr(f, linear_vars)?;
+            let mx = check_linear_in_expr(x, linear_vars)?;
+            seq_usages(mf, mx, x.span)
+        }
+
+        ExprKind::Lam(pats, body) => {
+            // Lambda parameters shadow enclosing linear vars
+            let bound: HashSet<String> = pats.iter()
+                .flat_map(pat_bound_names)
+                .collect();
+            let inner: HashSet<String> = linear_vars.difference(&bound).cloned().collect();
+            check_linear_in_expr(body, &inner)
+        }
+
+        ExprKind::Cond(cond, then, else_) => {
+            let mc = check_linear_in_expr(cond, linear_vars)?;
+            let mt = check_linear_in_expr(then, linear_vars)?;
+            let me = check_linear_in_expr(else_, linear_vars)?;
+            // Both branches must use linear vars the same number of times
+            check_branches_agree(&mt, &me, else_.span)?;
+            seq_usages(mc, mt, then.span)
+        }
+
+        ExprKind::BinOp(_, l, r) => {
+            let ml = check_linear_in_expr(l, linear_vars)?;
+            let mr = check_linear_in_expr(r, linear_vars)?;
+            seq_usages(ml, mr, r.span)
+        }
+
+        ExprKind::Neg(e) | ExprKind::Paren(e) => check_linear_in_expr(e, linear_vars),
+
+        ExprKind::Field(e, _) => check_linear_in_expr(e, linear_vars),
+
+        ExprKind::Record(fields) => {
+            let mut acc: UsageMap = HashMap::new();
+            for (_, e) in fields {
+                let m = check_linear_in_expr(e, linear_vars)?;
+                acc = seq_usages(acc, m, e.span)?;
+            }
+            Ok(acc)
+        }
+
+        ExprKind::List(elems) => {
+            let mut acc: UsageMap = HashMap::new();
+            for e in elems {
+                let m = check_linear_in_expr(e, linear_vars)?;
+                acc = seq_usages(acc, m, e.span)?;
+            }
+            Ok(acc)
+        }
+
+        ExprKind::Block(bindings, body) => {
+            // Bindings may shadow linear vars; walk each binding value
+            let mut acc: UsageMap = HashMap::new();
+            let mut shadowed = linear_vars.clone();
+            for binding in bindings {
+                let m = check_linear_in_expr(&binding.value, &shadowed)?;
+                acc = seq_usages(acc, m, binding.value.span)?;
+                // After this binding is defined, its name shadows enclosing scope
+                shadowed.remove(&binding.name);
+            }
+            let mb = check_linear_in_expr(body, &shadowed)?;
+            seq_usages(acc, mb, body.span)
+        }
+
+        ExprKind::ListComp(e, generators) => {
+            let mut acc = check_linear_in_expr(e, linear_vars)?;
+            for gen in generators {
+                let ge = match gen {
+                    Generator::Guard(e) => e,
+                    Generator::Bind(_, e) => e,
+                };
+                let mg = check_linear_in_expr(ge, linear_vars)?;
+                acc = seq_usages(acc, mg, ge.span)?;
+            }
+            Ok(acc)
+        }
+
+        ExprKind::Range(lo, hi) => {
+            let ml = check_linear_in_expr(lo, linear_vars)?;
+            let mh = check_linear_in_expr(hi, linear_vars)?;
+            seq_usages(ml, mh, hi.span)
+        }
+
+        // CONCURRENCY (Phase BC — linearity not yet analysed)
+        ExprKind::Scope(body) => check_linear_in_expr(body, linear_vars),
+        ExprKind::Spawn(body) => check_linear_in_expr(body, linear_vars),
+    }
+}
+
+/// Run linearity check for one function (all equations) given its type signature.
+fn check_linear_func(equations: &[Equation], ty_sig: &TypeExpr) -> TResult<()> {
+    let positions = linear_positions_from_type_expr(ty_sig);
+    // Skip if there are no linear positions
+    if positions.iter().all(|&lin| !lin) {
+        return Ok(());
+    }
+
+    for eq in equations {
+        // Map each positional pattern to a linear variable name (if applicable)
+        let linear_vars: HashSet<String> = positions.iter()
+            .zip(eq.pats.iter())
+            .filter(|(&lin, _)| lin)
+            .flat_map(|(_, pat)| pat_bound_names(pat))
+            .collect();
+
+        if linear_vars.is_empty() {
+            // Wildcard / literal patterns in linear positions — nothing to track
+            continue;
+        }
+
+        // Check that each linear variable is used exactly once in the body
+        let usages = check_linear_in_expr(&eq.body, &linear_vars)?;
+
+        for var_name in &linear_vars {
+            match usages.get(var_name).copied().unwrap_or(0) {
+                0 => return Err(TypeError::new(
+                    TypeErrorKind::LinearUnused { name: var_name.clone() },
+                    Some(eq.body.span),
+                )),
+                // count > 1 already caught by seq_usages → LinearDuplicate
+                _ => {}
+            }
+        }
+    }
+
+    Ok(())
 }

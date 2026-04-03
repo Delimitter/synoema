@@ -108,6 +108,10 @@ impl Compiler {
         builder.symbol("synoema_map", runtime::synoema_map as *const u8);
         builder.symbol("synoema_filter", runtime::synoema_filter as *const u8);
         builder.symbol("synoema_foldl", runtime::synoema_foldl as *const u8);
+        // Concurrency channel functions
+        builder.symbol("synoema_chan_new",  runtime::synoema_chan_new  as *const u8);
+        builder.symbol("synoema_chan_send", runtime::synoema_chan_send as *const u8);
+        builder.symbol("synoema_chan_recv", runtime::synoema_chan_recv as *const u8);
 
         let module = JITModule::new(builder);
 
@@ -274,6 +278,11 @@ impl Compiler {
         // Integer abs: fn(i64) -> i64
         decl(self, "synoema_abs_int", "synoema_abs_int", &sig1)?;
         decl(self, "synoema_abs_int", "abs", &sig1)?;
+
+        // Concurrency (Phase C): channel primitives
+        decl(self, "synoema_chan_new",  "chan",  &sig0)?;   // fn() -> i64
+        decl(self, "synoema_chan_send", "send",  &sig2)?;   // fn(i64, i64) -> i64
+        decl(self, "synoema_chan_recv", "recv",  &sig1)?;   // fn(i64) -> i64
 
         Ok(())
     }
@@ -856,6 +865,18 @@ fn compile_expr(
             let rec_get_ref = module.declare_func_in_func(rec_get_id, builder.func);
             let get_call = builder.ins().call(rec_get_ref, &[rec_ptr, hash_val]);
             Ok(builder.inst_results(get_call)[0])
+        }
+
+        // ── Concurrency — Phase B sequential stubs ───────────────────────────────
+        // Scope: evaluate body sequentially (no thread management in JIT yet).
+        CoreExpr::Scope(body) => {
+            compile_expr(builder, vars, vc, funcs, module, ctor_tags, body)
+        }
+
+        // Spawn: evaluate expr sequentially, discard result → return Unit (0).
+        CoreExpr::Spawn(expr) => {
+            compile_expr(builder, vars, vc, funcs, module, ctor_tags, expr)?;
+            Ok(builder.ins().iconst(types::I64, 0))
         }
 
         _ => Err(cerr(format!("Unsupported in codegen: {}", expr))),
@@ -1443,6 +1464,13 @@ fn lift_expr(
             field.clone(),
         ),
 
+        CoreExpr::Scope(body) => CoreExpr::Scope(Box::new(
+            lift_expr(body, bound, globals, lifted, counter)
+        )),
+        CoreExpr::Spawn(expr) => CoreExpr::Spawn(Box::new(
+            lift_expr(expr, bound, globals, lifted, counter)
+        )),
+
         // Leaf nodes — no lambdas inside
         other => other.clone(),
     }
@@ -1524,6 +1552,12 @@ fn collect_free_vars_inner(
         }
         CoreExpr::FieldAccess(obj, _) => {
             collect_free_vars_inner(obj, outer_bound, globals, locally_bound, result);
+        }
+        CoreExpr::Scope(body) => {
+            collect_free_vars_inner(body, outer_bound, globals, locally_bound, result);
+        }
+        CoreExpr::Spawn(expr) => {
+            collect_free_vars_inner(expr, outer_bound, globals, locally_bound, result);
         }
         _ => {} // Lit, Con, PrimOp
     }

@@ -5,7 +5,7 @@ fn check(src: &str) -> TypeEnv {
 }
 
 fn check_err(src: &str) -> String {
-    typecheck(src).unwrap_err()
+    typecheck(src).unwrap_err().to_string()
 }
 
 fn infer(src: &str) -> Type {
@@ -533,4 +533,119 @@ fn seq_right_type() {
     // a ; b has the type of b
     let ty = infer("x = 42 ; 99");
     assert_eq!(ty, Type::int());
+}
+
+// ── Linear types (-o) ─────────────────────────────────────────────────────────
+
+#[test]
+fn linear_arrow_display() {
+    let ty = Type::linear_arrow(Type::int(), Type::int());
+    assert_eq!(format!("{}", ty), "Int -o Int");
+}
+
+#[test]
+fn linear_arrow_nested_display() {
+    let ty = Type::linear_arrow(Type::int(), Type::arrow(Type::bool(), Type::string()));
+    assert_eq!(format!("{}", ty), "Int -o Bool -> String");
+}
+
+#[test]
+fn linear_type_sig_parses_and_checks() {
+    // A function with a linear type sig that correctly uses its arg once
+    check("f : Int -o Int\nf x = x + 1");
+}
+
+#[test]
+fn linear_correct_identity() {
+    // Linear identity: returns the argument exactly once
+    check("f : Int -o Int\nf x = x");
+}
+
+#[test]
+fn linear_unused_error() {
+    // Linear variable never used → error
+    let err = check_err("f : Int -o Int\nf x = 42");
+    assert!(
+        err.contains("linear_unused") || err.contains("never used") || err.contains("x"),
+        "Expected linear_unused error, got: {}", err
+    );
+}
+
+#[test]
+fn linear_duplicate_error() {
+    // Linear variable used twice → error
+    let err = check_err("f : Int -o Int\nf x = x + x");
+    assert!(
+        err.contains("linear_duplicate") || err.contains("more than once") || err.contains("x"),
+        "Expected linear_duplicate error, got: {}", err
+    );
+}
+
+#[test]
+fn unrestricted_unaffected() {
+    // Normal (unrestricted) functions work as before — using arg twice is fine
+    check("f : Int -> Int\nf x = x + x");
+}
+
+#[test]
+fn unrestricted_unused_ok() {
+    // Normal functions can drop an argument
+    check("f : Int -> Int\nf x = 42");
+}
+
+#[test]
+fn linear_cond_both_branches_ok() {
+    // Ternary where cond does NOT use x: both branches use x exactly once → ok
+    // (at runtime only one branch executes, so x is consumed exactly once)
+    check("f : Int -o Int\nf x = ? true -> x : x + 1");
+}
+
+#[test]
+fn linear_cond_in_scrutinee_is_two_uses() {
+    // Using x in condition AND a branch = 2 uses = linearity violation
+    let err = check_err("f : Int -o Int\nf x = ? x == 0 -> x : x + 1");
+    assert!(
+        err.contains("linear") || err.contains("x"),
+        "Expected linearity error, got: {}", err
+    );
+}
+
+#[test]
+fn linear_cond_only_then_error() {
+    // One branch uses x, other does not → branches disagree → error
+    let err = check_err("f : Int -o Int\nf x = ? true -> x : 42");
+    assert!(
+        err.contains("linear") || err.contains("x"),
+        "Expected linearity error, got: {}", err
+    );
+}
+
+#[test]
+fn linear_arrow_type_distinct_from_arrow() {
+    // Int -o Int and Int -> Int are different types
+    let lin = Type::linear_arrow(Type::int(), Type::int());
+    let unr = Type::arrow(Type::int(), Type::int());
+    assert_ne!(lin, unr);
+}
+
+#[test]
+fn linear_unify_linear_with_linear() {
+    // Two linear arrows with matching types unify ok
+    use crate::unify::unify;
+    let t1 = Type::linear_arrow(Type::Var(0), Type::int());
+    let t2 = Type::linear_arrow(Type::bool(), Type::Var(1));
+    let mut gen = TyVarGen::new();
+    let s = unify(&t1, &t2, &mut gen).unwrap();
+    assert_eq!(s.0.get(&0), Some(&Type::bool()));
+    assert_eq!(s.0.get(&1), Some(&Type::int()));
+}
+
+#[test]
+fn linear_unify_linear_with_unrestricted_fails() {
+    // Linear arrow cannot unify with unrestricted arrow
+    use crate::unify::unify;
+    let lin = Type::linear_arrow(Type::int(), Type::int());
+    let unr = Type::arrow(Type::int(), Type::int());
+    let mut gen = TyVarGen::new();
+    assert!(unify(&lin, &unr, &mut gen).is_err());
 }

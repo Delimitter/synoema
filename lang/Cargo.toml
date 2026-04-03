@@ -5,6 +5,7 @@ members = [
     "crates/synoema-parser",
     "crates/synoema-types",
     "crates/synoema-core",
+    "crates/synoema-diagnostic",
     "crates/synoema-eval",
     "crates/synoema-codegen",
     "crates/synoema-repl",
@@ -14,3 +15,8 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+description = "Synoema — programming language optimized for LLM code generation"
+repository = "https://github.com/Delimitter/synoema"
+homepage = "https://github.com/Delimitter/synoema"
+keywords = ["language", "compiler", "llm", "jit", "cranelift"]
+categories = ["compilers", "development-tools"]

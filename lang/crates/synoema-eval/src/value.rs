@@ -1,7 +1,22 @@
 //! Runtime values for the Synoema tree-walking interpreter.
 
 use std::fmt;
+use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{Sender, Receiver};
 use synoema_parser::{Pat, Expr, Equation};
+
+/// Shared state for a typed channel (Phase C).
+/// Wrapped in Arc so Value::Chan is Clone.
+pub struct ChanInner {
+    pub sender:   Mutex<Sender<Value>>,
+    pub receiver: Mutex<Receiver<Value>>,
+}
+
+impl std::fmt::Debug for ChanInner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ChanInner {{ .. }}")
+    }
+}
 
 /// Runtime value
 #[derive(Debug, Clone)]
@@ -35,6 +50,8 @@ pub enum Value {
     Record(Vec<(String, Value)>),
     /// Unit (void)
     Unit,
+    /// Typed channel (Phase C): send/recv values across threads.
+    Chan(Arc<ChanInner>),
 }
 
 impl PartialEq for Value {
@@ -49,6 +66,8 @@ impl PartialEq for Value {
             (Value::Con(na, fa), Value::Con(nb, fb)) => na == nb && fa == fb,
             (Value::Record(a), Value::Record(b)) => a == b,
             (Value::Unit, Value::Unit) => true,
+            // Channels are compared by pointer identity (two different chans are never equal)
+            (Value::Chan(a), Value::Chan(b)) => Arc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -113,6 +132,7 @@ impl fmt::Display for Value {
             Value::Builtin(name, _) => write!(f, "<builtin {}>", name),
             Value::PartialBuiltin(name, _, _) => write!(f, "<partial {}>", name),
             Value::Unit => write!(f, "()"),
+            Value::Chan(_) => write!(f, "<chan>"),
         }
     }
 }

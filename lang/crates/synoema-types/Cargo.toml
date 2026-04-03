@@ -3,10 +3,15 @@ name = "synoema-types"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
-synoema-parser = { path = "../synoema-parser" }
-synoema-lexer = { path = "../synoema-lexer" }
+synoema-parser = { path = "../synoema-parser", version = "0.1.0" }
+synoema-lexer = { path = "../synoema-lexer", version = "0.1.0" }
 
 [dev-dependencies]
 pretty_assertions = "1"

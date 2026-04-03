@@ -78,7 +78,7 @@ impl<'src> Scanner<'src> {
             if ch == b'\\' {
                 if self.at_end() { return Err(self.error("unterminated escape")); }
                 match self.advance() {
-                    b'n' => s.push('\n'), b't' => s.push('\t'),
+                    b'n' => s.push('\n'), b'r' => s.push('\r'), b't' => s.push('\t'),
                     b'\\' => s.push('\\'), b'"' => s.push('"'), b'0' => s.push('\0'),
                     e => return Err(self.error(format!("unknown escape \\{}", e as char))),
                 }
@@ -110,6 +110,7 @@ impl<'src> Scanner<'src> {
             "trait" => Token::KwTrait, "impl" => Token::KwImpl,
             "true" => Token::KwTrue, "false" => Token::KwFalse,
             "lazy" => Token::KwLazy,
+            "scope" => Token::KwScope, "spawn" => Token::KwSpawn,
             _ if first.is_ascii_uppercase() => Token::UpperId(text.to_string()),
             _ => Token::LowerId(text.to_string()),
         };
@@ -137,6 +138,9 @@ impl<'src> Scanner<'src> {
             }
             b'-' => if self.match_char(b'>') { Token::Arrow }
                     else if self.peek() == b'-' { self.advance(); self.skip_comment(); Token::Newline }
+                    else if self.peek() == b'o' && !self.peek_at(1).is_ascii_alphanumeric() && self.peek_at(1) != b'_' {
+                        self.advance(); Token::LinearArrow
+                    }
                     else { Token::Minus },
             b'<' => if self.match_char(b'-') { Token::BackArrow }
                     else if self.match_char(b'=') { Token::Lte } else { Token::Lt },

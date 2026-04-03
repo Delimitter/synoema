@@ -1,0 +1,73 @@
+-- Synoema HTTP server for the stress test dashboard
+--
+-- Run:
+--   cd lang/
+--   cargo run -p synoema-repl -- run examples/stress_server.sno
+--
+-- Then open: http://localhost:8765/stress_tests.html
+
+-- ── SSE helpers ──────────────────────────────────────────────────────────────
+
+sse_data text = "data: {\"line\":\"" ++ json_escape text ++ "\"}\n\n"
+sse_exit      = "data: {\"exit\":0}\n\n"
+
+-- ── Stream subprocess output line by line via SSE ────────────────────────────
+
+stream_proc proc_fd client_fd =
+  line = fd_readline proc_fd
+  ? line == "" -> (fd_write client_fd sse_exit ; fd_close proc_fd ; fd_close client_fd) : (fd_write client_fd (sse_data line) ; stream_proc proc_fd client_fd)
+
+-- ── Route: GET /run/<suite> ──────────────────────────────────────────────────
+
+handle_run client_fd suite =
+  hdr = "HTTP/1.0 200 OK\r\nContent-Type: text/event-stream\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-cache\r\n\r\n"
+  cmd = "cargo test --test stress -p synoema-" ++ suite ++ " -- --nocapture --test-threads=1 2>&1"
+  fd_write client_fd hdr ; stream_proc (fd_popen cmd) client_fd
+
+-- ── Route: static file ───────────────────────────────────────────────────────
+
+handle_file client_fd path =
+  body = file_read path
+  hdr  = "HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nAccess-Control-Allow-Origin: *\r\n\r\n"
+  fd_write client_fd (hdr ++ body) ; fd_close client_fd
+
+handle_404 client_fd =
+  fd_write client_fd "HTTP/1.0 404 Not Found\r\nContent-Length: 9\r\n\r\nNot Found" ; fd_close client_fd
+
+-- ── Parse HTTP request line ───────────────────────────────────────────────────
+-- Input:  "GET /run/lexer HTTP/1.0"
+-- Output: "/run/lexer"
+
+parse_path req =
+  sp1 = str_find req " " 0
+  sp2 = str_find req " " (sp1 + 1)
+  ? sp1 < 0 -> "/" : ? sp2 < 0 -> str_slice req (sp1 + 1) (str_len req) : str_slice req (sp1 + 1) sp2
+
+-- Extract suite name from "/run/lexer" or "/run/lexer?slow=1"
+
+parse_suite path =
+  raw  = str_slice path 5 (str_len path)
+  qpos = str_find raw "?" 0
+  ? qpos < 0 -> raw : str_slice raw 0 qpos
+
+-- ── Dispatch ─────────────────────────────────────────────────────────────────
+
+dispatch client_fd path =
+  ? str_starts_with path "/run/" -> handle_run client_fd (parse_suite path) : ? path == "/" -> handle_file client_fd "stress_tests.html" : ? path == "/stress_tests.html" -> handle_file client_fd "stress_tests.html" : handle_404 client_fd
+
+-- ── Connection handler ────────────────────────────────────────────────────────
+
+handle_client client_fd =
+  req = fd_readline client_fd
+  ? req == "" -> fd_close client_fd : dispatch client_fd (parse_path req)
+
+-- ── Accept loop (tail-recursive) ─────────────────────────────────────────────
+
+server_loop listener_fd =
+  client = tcp_accept listener_fd
+  handle_client client ; server_loop listener_fd
+
+-- ── Entry point ───────────────────────────────────────────────────────────────
+
+main =
+  print "Synoema stress server" ; print "Open: http://localhost:8765/stress_tests.html" ; print "Stop: Ctrl-C" ; server_loop (tcp_listen 8765)

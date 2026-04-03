@@ -45,10 +45,12 @@ pub enum Token {
 
     // Keywords
     KwMod, KwUse, KwTrait, KwImpl, KwTrue, KwFalse, KwLazy,
+    KwScope, KwSpawn,
 
     // Operators (all BPE-aligned: 1 token each)
-    Arrow,      // ->
-    BackArrow,  // <-
+    Arrow,       // ->
+    LinearArrow, // -o  (linear function type)
+    BackArrow,   // <-
     Pipe,       // |>
     Concat,     // ++
     Compose,    // >>
@@ -84,7 +86,8 @@ pub enum Token {
 impl Token {
     pub fn is_keyword(&self) -> bool {
         matches!(self, Token::KwMod | Token::KwUse | Token::KwTrait
-            | Token::KwImpl | Token::KwTrue | Token::KwFalse | Token::KwLazy)
+            | Token::KwImpl | Token::KwTrue | Token::KwFalse | Token::KwLazy
+            | Token::KwScope | Token::KwSpawn)
     }
 
     pub fn is_literal(&self) -> bool {
@@ -101,7 +104,8 @@ impl Token {
             Token::KwTrait => "'trait'", Token::KwImpl => "'impl'",
             Token::KwTrue => "'true'", Token::KwFalse => "'false'",
             Token::KwLazy => "'lazy'",
-            Token::Arrow => "'->'", Token::BackArrow => "'<-'",
+            Token::KwScope => "'scope'", Token::KwSpawn => "'spawn'",
+            Token::Arrow => "'->'", Token::LinearArrow => "'-o'", Token::BackArrow => "'<-'",
             Token::Pipe => "'|>'", Token::Concat => "'++'",
             Token::Compose => "'>>'",
             Token::Eq => "'=='", Token::Neq => "'!='",
