@@ -1,0 +1,14 @@
+{
+  "name": "@delimitter/mcp-linux-x64",
+  "version": "0.1.0-alpha.1",
+  "description": "Synoema MCP server binary — Linux x86_64",
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "files": ["synoema-mcp", "synoema-mcp.exe"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Delimitter/synoema",
+    "directory": "npm/platforms/linux-x64"
+  }
+}

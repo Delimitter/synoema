@@ -7,12 +7,14 @@
 
 ## 0. Быстрый статус (апрель 2026)
 
-- **488 тестов**, все зелёные, 0 warnings
-- **Phases 9.2–9.5 + 10.1–10.3 + 11.1–11.5 + 12a–12b + 13 + 14a–14b** завершены
-- JIT поддерживает: int, bool, float, string, list, closures, records, record patterns, modules, ADTs, ==, !=, list comprehensions, IO (print/readline)
-- Interpreter: всё вышеперечисленное + полный pattern matching + type classes (trait/impl)
-- Type checker: float арифметика (+, -, *, /, **), string concat (++), overflow-safe **
-- Arena allocator: нет утечек памяти
+**Версия: 0.1.0-alpha.1** — alpha-стадия, синтаксис и API могут меняться. Политика версий: [docs/versioning.md](../docs/versioning.md)
+
+- **634 теста**, все зелёные, 0 warnings
+- **Phases 9.2–18** завершены
+- JIT поддерживает: int, bool, float, string, list, closures, records, record patterns, modules, ADTs, ==, !=, list comprehensions, IO (print/readline), show (все типы), type class dispatch, higher-order stdlib
+- Interpreter: всё вышеперечисленное + строковый stdlib (str_slice/find/trim/...) + сетевые примитивы (tcp_listen/accept, fd_*/popen)
+- Type checker: Hindley-Milner + row polymorphism + linear types (LinearArrow)
+- Система диагностики: synoema-diagnostic, структурированные ошибки с span, JSON/human рендереры
 
 ---
 
@@ -72,15 +74,15 @@ synoema-repo/
 
 | Метрика | Значение |
 |---------|----------|
-| Строк Rust | ~11500 |
-| Тестов | 475 (все зелёные) |
+| Строк Rust | ~12000 |
+| Тестов | 634 (все зелёные) |
 | Warnings | 0 |
-| Примеров | 12 программ (.sno) |
+| Крейтов | 8 (добавлен synoema-diagnostic) |
+| Примеров | 14 программ (.sno) |
 | BPE-aligned операторов | 33/33 |
 | Экономия токенов vs Python | 46% |
 | Ускорение vs Python (JIT) | 4.4× среднее |
 | GBNF-грамматика | 162 строки, 48 правил |
-| Статей написано | 14 (7 RU + 7 EN) |
 
 ## 4. Что работает
 

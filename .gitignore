@@ -1,5 +1,10 @@
 # Rust build artifacts
 lang/target/
+mcp/target/
+
+# npm platform binaries (copied by CI at release time, not committed)
+npm/platforms/*/synoema-mcp
+npm/platforms/*/synoema-mcp.exe
 
 # IDE and editor files
 .idea/

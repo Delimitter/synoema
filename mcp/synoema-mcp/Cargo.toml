@@ -1,0 +1,16 @@
+[package]
+name = "synoema-mcp"
+version.workspace = true
+edition.workspace = true
+description = "MCP server for the Synoema programming language"
+
+[[bin]]
+name = "synoema-mcp"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+synoema-eval       = { path = "../../lang/crates/synoema-eval" }
+synoema-types      = { path = "../../lang/crates/synoema-types" }
+synoema-diagnostic = { path = "../../lang/crates/synoema-diagnostic" }

@@ -1,0 +1,176 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform.name }}
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      matrix:
+        platform:
+          - name: darwin-arm64
+            os: macos-14
+            target: aarch64-apple-darwin
+            ext: ""
+          - name: darwin-x64
+            os: macos-13
+            target: x86_64-apple-darwin
+            ext: ""
+          - name: linux-x64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            ext: ""
+          - name: win32-x64
+            os: windows-2022
+            target: x86_64-pc-windows-msvc
+            ext: ".exe"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform.target }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build synoema (repl)
+        working-directory: lang
+        run: cargo build --release --target ${{ matrix.platform.target }} -p synoema-repl
+
+      - name: Build synoema-mcp
+        working-directory: mcp
+        run: cargo build --release --target ${{ matrix.platform.target }}
+
+      - name: Get version from tag
+        id: version
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Rename binaries
+        shell: bash
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          PLATFORM=${{ matrix.platform.name }}
+          EXT=${{ matrix.platform.ext }}
+          TARGET=${{ matrix.platform.target }}
+
+          cp lang/target/$TARGET/release/synoema$EXT \
+             synoema-${VERSION}-${PLATFORM}${EXT}
+          cp mcp/target/$TARGET/release/synoema-mcp$EXT \
+             synoema-mcp-${VERSION}-${PLATFORM}${EXT}
+
+      - name: Copy MCP binary to npm platform dir
+        shell: bash
+        run: |
+          PLATFORM=${{ matrix.platform.name }}
+          EXT=${{ matrix.platform.ext }}
+          cp mcp/target/${{ matrix.platform.target }}/release/synoema-mcp$EXT \
+             npm/platforms/$PLATFORM/synoema-mcp$EXT
+          chmod +x npm/platforms/$PLATFORM/synoema-mcp$EXT || true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Publish platform npm package
+        working-directory: npm/platforms/${{ matrix.platform.name }}
+        run: npm publish --access public --tag alpha
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.platform.name }}
+          path: |
+            synoema-*
+            synoema-mcp-*
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Synoema v${{ steps.version.outputs.VERSION }}
+          body: |
+            ## Synoema ${{ github.ref_name }}
+
+            Pre-built binaries for all platforms. See [releases/${{ github.ref_name }}/](releases/${{ github.ref_name }}/) for platform-specific instructions.
+
+            ### Install via npx (recommended)
+
+            ```bash
+            npx synoema-mcp
+            ```
+
+            ### Install via npm
+
+            ```bash
+            npm install -g synoema-mcp
+            synoema-mcp
+            ```
+
+            ### Download binary
+
+            | Platform | synoema | synoema-mcp |
+            |----------|---------|-------------|
+            | macOS Apple Silicon | `synoema-${{ steps.version.outputs.VERSION }}-darwin-arm64` | `synoema-mcp-${{ steps.version.outputs.VERSION }}-darwin-arm64` |
+            | macOS Intel | `synoema-${{ steps.version.outputs.VERSION }}-darwin-x64` | `synoema-mcp-${{ steps.version.outputs.VERSION }}-darwin-x64` |
+            | Linux x86_64 | `synoema-${{ steps.version.outputs.VERSION }}-linux-x64` | `synoema-mcp-${{ steps.version.outputs.VERSION }}-linux-x64` |
+            | Windows x64 | `synoema-${{ steps.version.outputs.VERSION }}-win32-x64.exe` | `synoema-mcp-${{ steps.version.outputs.VERSION }}-win32-x64.exe` |
+
+            Full instructions: [docs/install.md](https://github.com/Delimitter/synoema/blob/main/docs/install.md)
+          files: artifacts/*
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') }}
+
+  publish-main-npm:
+    name: Publish main npm package
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Publish synoema-mcp to npm
+        working-directory: npm/synoema-mcp
+        run: npm publish --access public --tag alpha
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

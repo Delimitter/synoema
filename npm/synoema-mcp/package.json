@@ -1,0 +1,21 @@
+{
+  "name": "synoema-mcp",
+  "version": "0.1.0-alpha.4",
+  "description": "MCP server for the Synoema programming language — eval, typecheck, run",
+  "bin": { "synoema-mcp": "./bin/run.js" },
+  "files": ["bin/"],
+  "optionalDependencies": {
+    "@delimitter/mcp-darwin-arm64": "0.1.0-alpha.1",
+    "@delimitter/mcp-darwin-x64":   "0.1.0-alpha.1",
+    "@delimitter/mcp-linux-x64":    "0.1.0-alpha.1",
+    "@delimitter/mcp-win32-x64":    "0.1.0-alpha.1"
+  },
+  "engines": { "node": ">=16" },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Delimitter/synoema",
+    "directory": "npm/synoema-mcp"
+  },
+  "keywords": ["mcp", "synoema", "llm", "language-server", "code-generation"]
+}
