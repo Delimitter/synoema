@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: BUSL-1.1
+// Copyright (c) 2025-present Andrey Bubnov
+
 //! Synoema JIT Runtime Library
 //!
 //! Provides heap-allocated data structures for JIT-compiled code.
@@ -17,19 +20,27 @@
 //! All JIT heap objects are allocated from a thread-local arena.
 //! Call `arena_reset()` after each top-level program run to reclaim all memory.
 
-use std::alloc::{alloc, Layout};
+use std::alloc::{alloc, dealloc, Layout};
 use std::cell::RefCell;
 
 // ── Bump Allocator (Arena) ───────────────────────────────
 
 const ARENA_SIZE: usize = 8 * 1024 * 1024; // 8 MB
 const ARENA_ALIGN: usize = 8; // All JIT objects need at most 8-byte alignment
+const MAX_REGION_DEPTH: usize = 64;
 
 struct Arena {
     // Backing store: allocated with ARENA_ALIGN alignment so that
     // relative bump offsets produce correctly aligned pointers.
     ptr: *mut u8,
     offset: usize,
+    // Overflow tracking: system-allocated blocks that arena_reset() must free.
+    overflow_allocs: Vec<(*mut u8, Layout)>,
+    overflow_warned: bool,
+    // Region stack: saved offsets for automatic region-based memory reclamation.
+    // region_enter() pushes current offset, region_exit() pops and restores.
+    region_stack: [usize; MAX_REGION_DEPTH],
+    region_depth: usize,
 }
 
 impl Arena {
@@ -37,7 +48,11 @@ impl Arena {
         let layout = Layout::from_size_align(ARENA_SIZE, ARENA_ALIGN).unwrap();
         let ptr = unsafe { alloc(layout) };
         if ptr.is_null() { panic!("Arena: allocation failed"); }
-        Arena { ptr, offset: 0 }
+        Arena {
+            ptr, offset: 0,
+            overflow_allocs: Vec::new(), overflow_warned: false,
+            region_stack: [0; MAX_REGION_DEPTH], region_depth: 0,
+        }
     }
 
     fn alloc(&mut self, size: usize, align: usize) -> *mut u8 {
@@ -46,10 +61,19 @@ impl Arena {
         let aligned_abs = (base + align - 1) & !(align - 1);
         let new_offset = (aligned_abs - self.ptr as usize) + size;
         if new_offset > ARENA_SIZE {
-            // Arena full: fall back to system allocator
-            unsafe {
-                alloc(Layout::from_size_align(size, align).unwrap())
+            // Arena full: fall back to system allocator with tracking
+            if !self.overflow_warned {
+                eprintln!(
+                    "[synoema] arena overflow: {} bytes requested, {}/{} used. \
+                     Falling back to system allocator.",
+                    size, self.offset, ARENA_SIZE
+                );
+                self.overflow_warned = true;
             }
+            let layout = Layout::from_size_align(size, align).unwrap();
+            let ptr = unsafe { alloc(layout) };
+            self.overflow_allocs.push((ptr, layout));
+            ptr
         } else {
             self.offset = new_offset;
             aligned_abs as *mut u8
@@ -58,6 +82,27 @@ impl Arena {
 
     fn reset(&mut self) {
         self.offset = 0;
+        self.overflow_warned = false;
+        self.region_depth = 0;
+        // Free all tracked overflow allocations
+        for (ptr, layout) in self.overflow_allocs.drain(..) {
+            unsafe { dealloc(ptr, layout); }
+        }
+    }
+
+    fn region_enter(&mut self) {
+        if self.region_depth >= MAX_REGION_DEPTH {
+            eprintln!("[synoema] region depth limit ({}) reached, skipping", MAX_REGION_DEPTH);
+            return;
+        }
+        self.region_stack[self.region_depth] = self.offset;
+        self.region_depth += 1;
+    }
+
+    fn region_exit(&mut self) {
+        if self.region_depth == 0 { return; }
+        self.region_depth -= 1;
+        self.offset = self.region_stack[self.region_depth];
     }
 }
 
@@ -73,6 +118,37 @@ thread_local! {
 /// This reclaims all memory allocated since the last reset.
 pub fn arena_reset() {
     ARENA.with(|a| a.borrow_mut().reset());
+}
+
+/// Save current arena offset (for per-scope reset in server loops).
+pub extern "C" fn arena_save() -> i64 {
+    ARENA.with(|a| a.borrow().offset as i64)
+}
+
+/// Restore arena to a previously saved offset (frees everything allocated since save).
+/// WARNING: all pointers allocated after save become invalid.
+pub extern "C" fn arena_restore(saved: i64) {
+    ARENA.with(|a| {
+        let mut arena = a.borrow_mut();
+        let saved = saved as usize;
+        if saved <= arena.offset {
+            arena.offset = saved;
+        }
+    });
+}
+
+/// Enter a new memory region (push arena checkpoint).
+/// Used by region inference to automatically manage per-scope allocations.
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_region_enter() -> i64 {
+    ARENA.with(|a| { a.borrow_mut().region_enter(); 0 })
+}
+
+/// Exit current memory region (pop and restore arena offset).
+/// All allocations since the matching region_enter become invalid.
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_region_exit() -> i64 {
+    ARENA.with(|a| { a.borrow_mut().region_exit(); 0 })
 }
 
 #[inline]
@@ -586,6 +662,92 @@ pub extern "C" fn synoema_str_eq(a: i64, b: i64) -> i64 {
     if sa == sb { 1 } else { 0 }
 }
 
+// ── String Stdlib ────────────────────────────────────────
+
+/// Helper: extract (data_ptr, len) from a tagged string value.
+#[inline]
+unsafe fn str_data(v: i64) -> (*const u8, usize) {
+    let p = str_ptr(v);
+    let len = (*p).len as usize;
+    let data = p.add(1) as *const u8;
+    (data, len)
+}
+
+/// Substring extraction. Clamps from/to to [0, len], ensures to >= from.
+pub extern "C" fn synoema_str_slice(s: i64, from: i64, to: i64) -> i64 {
+    let (data, len) = unsafe { str_data(s) };
+    let f = (from as usize).min(len);
+    let t = (to as usize).min(len).max(f);
+    let slice = unsafe { std::slice::from_raw_parts(data.add(f), t - f) };
+    let result = unsafe { std::str::from_utf8_unchecked(slice) };
+    alloc_str(result)
+}
+
+/// Byte-based substring search starting at `from`. Returns index or -1.
+pub extern "C" fn synoema_str_find(s: i64, sub: i64, from: i64) -> i64 {
+    let (s_data, s_len) = unsafe { str_data(s) };
+    let (sub_data, sub_len) = unsafe { str_data(sub) };
+    let f = from as usize;
+    if f > s_len { return -1; }
+    if sub_len == 0 { return f as i64; }
+    let haystack = unsafe { std::slice::from_raw_parts(s_data.add(f), s_len - f) };
+    let needle = unsafe { std::slice::from_raw_parts(sub_data, sub_len) };
+    // Simple byte search
+    for i in 0..=(haystack.len().saturating_sub(needle.len())) {
+        if &haystack[i..i + needle.len()] == needle {
+            return (f + i) as i64;
+        }
+    }
+    -1
+}
+
+/// Returns 1 if `s` starts with `prefix`, 0 otherwise.
+pub extern "C" fn synoema_str_starts_with(s: i64, prefix: i64) -> i64 {
+    let (s_data, s_len) = unsafe { str_data(s) };
+    let (p_data, p_len) = unsafe { str_data(prefix) };
+    if p_len == 0 { return 1; }
+    if p_len > s_len { return 0; }
+    let s_slice = unsafe { std::slice::from_raw_parts(s_data, p_len) };
+    let p_slice = unsafe { std::slice::from_raw_parts(p_data, p_len) };
+    if s_slice == p_slice { 1 } else { 0 }
+}
+
+/// Trim leading and trailing ASCII whitespace.
+pub extern "C" fn synoema_str_trim(s: i64) -> i64 {
+    let (data, len) = unsafe { str_data(s) };
+    let bytes = unsafe { std::slice::from_raw_parts(data, len) };
+    let trimmed = match std::str::from_utf8(bytes) {
+        Ok(s) => s.trim(),
+        Err(_) => return s,
+    };
+    alloc_str(trimmed)
+}
+
+/// Return byte length of string as untagged i64.
+pub extern "C" fn synoema_str_len(s: i64) -> i64 {
+    let p = str_ptr(s);
+    unsafe { (*p).len }
+}
+
+/// Escape string for JSON: \, ", \n, \r, \t.
+pub extern "C" fn synoema_json_escape(s: i64) -> i64 {
+    let (data, len) = unsafe { str_data(s) };
+    let bytes = unsafe { std::slice::from_raw_parts(data, len) };
+    let mut out = Vec::with_capacity(len + len / 4);
+    for &b in bytes {
+        match b {
+            b'\\' => { out.push(b'\\'); out.push(b'\\'); }
+            b'"'  => { out.push(b'\\'); out.push(b'"'); }
+            b'\n' => { out.push(b'\\'); out.push(b'n'); }
+            b'\r' => { out.push(b'\\'); out.push(b'r'); }
+            b'\t' => { out.push(b'\\'); out.push(b't'); }
+            _ => out.push(b),
+        }
+    }
+    let result = unsafe { std::str::from_utf8_unchecked(&out) };
+    alloc_str(result)
+}
+
 /// Universal equality: dispatches on string/float tag at runtime.
 /// Returns 1 if equal, 0 otherwise. Works for ints, bools, strings, and floats.
 #[unsafe(no_mangle)]
@@ -606,8 +768,21 @@ pub extern "C" fn synoema_val_eq(a: i64, b: i64) -> i64 {
         } else {
             0
         }
+    } else if is_con(a) && is_con(b) {
+        // Structural Con equality: compare tag + fields recursively
+        let base_a = (a & !CON_TAG) as *const i64;
+        let base_b = (b & !CON_TAG) as *const i64;
+        let tag_a = unsafe { *base_a };
+        let tag_b = unsafe { *base_b };
+        if tag_a != tag_b { return 0; }
+        let arity = unsafe { *base_a.add(1) } as usize;
+        for i in 0..arity {
+            let fa = unsafe { *base_a.add(4 + i) };
+            let fb = unsafe { *base_b.add(4 + i) };
+            if synoema_val_eq(fa, fb) == 0 { return 0; }
+        }
+        1
     } else if is_con(a) || is_con(b) || is_record(a) || is_record(b) {
-        // Con/Record equality: pointer identity (structural eq not supported yet)
         if a == b { 1 } else { 0 }
     } else if is_likely_list_ptr(a) || is_likely_list_ptr(b) {
         synoema_list_eq(a, b)
@@ -1084,4 +1259,17 @@ pub extern "C" fn synoema_chan_recv(chan: i64) -> i64 {
         Ok(guard) => guard.recv().unwrap_or(0),
         Err(_) => 0,
     }
+}
+
+/// Runtime error handler for non-exhaustive patterns and similar failures.
+/// Prints the error message to stderr and exits with code 1.
+pub extern "C" fn synoema_match_error(ptr: i64, len: i64) -> i64 {
+    let msg = if ptr != 0 && len > 0 {
+        let slice = unsafe { std::slice::from_raw_parts(ptr as *const u8, len as usize) };
+        std::str::from_utf8(slice).unwrap_or("runtime error")
+    } else {
+        "runtime error"
+    };
+    eprintln!("Runtime error: {}", msg);
+    std::process::exit(1);
 }

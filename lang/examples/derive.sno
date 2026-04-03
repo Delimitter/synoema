@@ -1,0 +1,21 @@
+-- SPDX-License-Identifier: MIT-0
+
+--- derive(Show, Eq) for ADT types
+--- Show is built-in; Eq uses ==
+
+trait Eq a
+  eq : a -> a -> Bool
+
+--- Simple enum
+Color = Red | Green | Blue derive (Show, Eq)
+
+--- ADT with fields
+Maybe a = Just a | Nothing derive (Show, Eq)
+
+main =
+  s1 = show Red ++ " " ++ show Green ++ " " ++ show Blue
+  s2 = ? eq Red Red -> "eq:yes" : "eq:no"
+  s3 = ? eq Red Blue -> "eq:yes" : "eq:no"
+  s4 = show (Just 42) ++ " " ++ show Nothing
+  s5 = ? eq (Just 1) (Just 1) -> "eq:yes" : "eq:no"
+  s1 ++ "\n" ++ s2 ++ " " ++ s3 ++ "\n" ++ s4 ++ "\n" ++ s5

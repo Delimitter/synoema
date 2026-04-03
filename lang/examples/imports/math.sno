@@ -1,0 +1,12 @@
+-- SPDX-License-Identifier: MIT-0
+
+--- Math utilities module (imported by main.sno).
+mod Math
+  --- Square a number.
+  --- example: square 5 == 25
+  square x = x * x
+  --- Cube a number.
+  --- example: cube 3 == 27
+  cube x = x * x * x
+  --- Absolute value.
+  abs x = ? x < 0 -> 0 - x : x

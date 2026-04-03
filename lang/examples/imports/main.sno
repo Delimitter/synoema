@@ -1,0 +1,9 @@
+-- SPDX-License-Identifier: MIT-0
+
+--- Multi-file import example.
+--- Imports Math module from math.sno.
+import "math.sno"
+
+use Math (square cube abs)
+
+main = square 5 + cube 3 + abs (0 - 7)

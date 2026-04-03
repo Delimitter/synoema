@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 /// Token types for the Synoema programming language.
 /// Every operator is chosen to be a single BPE token in cl100k_base.
 
@@ -44,8 +47,9 @@ pub enum Token {
     UpperId(String),
 
     // Keywords
-    KwMod, KwUse, KwTrait, KwImpl, KwTrue, KwFalse, KwLazy,
-    KwScope, KwSpawn,
+    KwMod, KwUse, KwImport, KwTrait, KwImpl, KwTrue, KwFalse, KwLazy, KwType,
+    KwScope, KwSpawn, KwDerive,
+    KwTest, KwProp, KwWhen,
 
     // Operators (all BPE-aligned: 1 token each)
     Arrow,       // ->
@@ -79,15 +83,24 @@ pub enum Token {
     // Layout
     Newline, Indent, Dedent,
 
+    // String interpolation
+    StringFragment(String),  // text segment of interpolated string
+    InterpStart,             // ${ — begins interpolation expression
+    InterpEnd,               // } that closes interpolation (not regular })
+
+    // Documentation
+    DocComment(String),  // --- text (preserved in AST, unlike -- which is stripped)
+
     // Special
     Eof,
 }
 
 impl Token {
     pub fn is_keyword(&self) -> bool {
-        matches!(self, Token::KwMod | Token::KwUse | Token::KwTrait
+        matches!(self, Token::KwMod | Token::KwUse | Token::KwImport | Token::KwTrait
             | Token::KwImpl | Token::KwTrue | Token::KwFalse | Token::KwLazy
-            | Token::KwScope | Token::KwSpawn)
+            | Token::KwType | Token::KwScope | Token::KwSpawn | Token::KwDerive
+            | Token::KwTest | Token::KwProp | Token::KwWhen)
     }
 
     pub fn is_literal(&self) -> bool {
@@ -100,11 +113,15 @@ impl Token {
             Token::Int(_) => "integer", Token::Float(_) => "float",
             Token::Str(_) => "string", Token::Char(_) => "char",
             Token::LowerId(_) => "identifier", Token::UpperId(_) => "constructor",
-            Token::KwMod => "'mod'", Token::KwUse => "'use'",
+            Token::KwMod => "'mod'", Token::KwUse => "'use'", Token::KwImport => "'import'",
             Token::KwTrait => "'trait'", Token::KwImpl => "'impl'",
+            Token::KwType => "'type'",
             Token::KwTrue => "'true'", Token::KwFalse => "'false'",
             Token::KwLazy => "'lazy'",
             Token::KwScope => "'scope'", Token::KwSpawn => "'spawn'",
+            Token::KwDerive => "'deriving'",
+            Token::KwTest => "'test'", Token::KwProp => "'prop'",
+            Token::KwWhen => "'when'",
             Token::Arrow => "'->'", Token::LinearArrow => "'-o'", Token::BackArrow => "'<-'",
             Token::Pipe => "'|>'", Token::Concat => "'++'",
             Token::Compose => "'>>'",
@@ -124,6 +141,10 @@ impl Token {
             Token::LParen => "'('", Token::RParen => "')'",
             Token::LBracket => "'['", Token::RBracket => "']'",
             Token::LBrace => "'{'", Token::RBrace => "'}'",
+            Token::StringFragment(_) => "string fragment",
+            Token::InterpStart => "'${'",
+            Token::InterpEnd => "'}'",
+            Token::DocComment(_) => "doc comment",
             Token::Newline => "newline", Token::Indent => "indent",
             Token::Dedent => "dedent", Token::Eof => "end of file",
         }
@@ -137,7 +158,10 @@ impl std::fmt::Display for Token {
             Token::Float(n) => write!(f, "{n}"),
             Token::Str(s) => write!(f, "\"{s}\""),
             Token::Char(c) => write!(f, "'{c}'"),
-            Token::LowerId(s) | Token::UpperId(s) => write!(f, "{s}"),
+            Token::StringFragment(s) => write!(f, "\"{s}\""),
+            Token::InterpStart => write!(f, "${{"),
+            Token::InterpEnd => write!(f, "}}"),
+            Token::LowerId(s) | Token::UpperId(s) | Token::DocComment(s) => write!(f, "{s}"),
             _ => write!(f, "{}", self.describe()),
         }
     }

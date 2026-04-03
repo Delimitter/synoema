@@ -1,6 +1,6 @@
 # Synoema
 
-Язык программирования для LLM code generation. ~12000 LOC Rust, 634 tests, 8 crates, Cranelift JIT.
+Язык программирования для LLM code generation. ~12000 LOC Rust, 864 tests, 8 crates, Cranelift JIT.
 
 ## Команды
 
@@ -12,6 +12,8 @@ cargo run -p synoema-repl -- run examples/quicksort.sno  # Interpreter
 cargo run -p synoema-repl -- jit examples/factorial.sno   # JIT
 cargo run -p synoema-repl -- eval "6 * 7"                 # Eval выражения
 cargo run -p synoema-repl -- --errors json run file.sno   # JSON ошибки
+cargo run -p synoema-repl -- test examples/               # Doctests
+cargo run -p synoema-repl -- doc examples/quicksort.sno   # Генерация docs
 ```
 
 ## Иерархия документов (по приоритету)
@@ -50,7 +52,7 @@ cargo run -p synoema-repl -- --errors json run file.sno   # JSON ошибки
 | `docs/research/scientific_foundations.md` | 23 научных факта |
 | `docs/mcp.md` | MCP-сервер (интеграция в LLM-тулчейн) |
 | `docs/articles/` | Образовательная серия (7 статей, EN+RU) |
-| `docs/testing.md` | Тестирование: 634 теста, как запускать |
+| `docs/testing.md` | Тестирование: 702 теста, как запускать |
 | `docs/stress-server.md` | HTTP-дэшборд стресс-тестов |
 | `lang/crates/` | Исходный код компилятора |
 
@@ -64,5 +66,5 @@ cargo run -p synoema-repl -- --errors json run file.sno   # JSON ошибки
 
 ## Статус
 
-- 0 warnings, 0 known bugs, 634/634 tests
-- Текущий приоритет: Phase 18 (сетевые примитивы + строковый stdlib) и расширение диагностики
+- 0 warnings, 0 known bugs, 864/864 tests
+- Завершено: Phases 9.2–21 + TCO в JIT + String stdlib в JIT + Doc-as-Code + LLM Cost Reduction v1 + Region Inference

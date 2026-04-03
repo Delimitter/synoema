@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 //! Core IR for Synoema — a simplified System F-like representation.
 //!
 //! All surface syntax is desugared into a small set of core constructs:
@@ -70,6 +73,16 @@ pub enum CoreExpr {
     /// Phase B: sequential stub in JIT (expr evaluated, result discarded).
     /// Phase C: real OS-thread spawn via runtime FFI.
     Spawn(Box<CoreExpr>),
+
+    /// Memory region scope (region inference).
+    /// body is evaluated in a new arena region; region is freed after body.
+    /// JIT: emits region_enter/region_exit FFI calls around body.
+    /// Interpreter: no-op (Rust RAII handles memory).
+    Region(Box<CoreExpr>),
+
+    /// Runtime error (e.g. non-exhaustive pattern match).
+    /// Interpreter: panic with message. JIT: FFI call to abort.
+    RuntimeError(String),
 }
 
 /// A case alternative: `pattern -> expression`
@@ -237,8 +250,10 @@ impl std::fmt::Display for CoreExpr {
             CoreExpr::FieldAccess(expr, name) => {
                 write!(f, "({}).{}", expr, name)
             }
+            CoreExpr::Region(body) => write!(f, "(region {})", body),
             CoreExpr::Scope(body) => write!(f, "(scope {})", body),
             CoreExpr::Spawn(expr) => write!(f, "(spawn {})", expr),
+            CoreExpr::RuntimeError(msg) => write!(f, "(error! \"{}\")", msg),
         }
     }
 }

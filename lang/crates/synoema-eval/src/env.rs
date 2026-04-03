@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 //! Environment: maps names to runtime values with nested scopes.
 
 use std::collections::HashMap;

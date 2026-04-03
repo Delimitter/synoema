@@ -1,0 +1,41 @@
+-- SPDX-License-Identifier: MIT-0
+
+--- Built-in testing examples.
+--- Demonstrates test declarations and property-based testing.
+
+--- Compute factorial.
+--- example: fact 5 == 120
+fact 0 = 1
+fact n = n * fact (n - 1)
+
+--- Reverse a list.
+--- example: reverse [1 2 3] == [3 2 1]
+reverse [] = []
+reverse (x:xs) = reverse xs ++ [x]
+
+--- Compute list length.
+--- example: length [1 2 3] == 3
+length [] = 0
+length (_:xs) = 1 + length xs
+
+--- Sort a list using quicksort.
+--- example: qsort [3 1 2] == [1 2 3]
+qsort [] = []
+qsort (p:xs) = qsort lo ++ [p] ++ qsort hi
+  lo = [x | x <- xs, x < p]
+  hi = [x | x <- xs, x >= p]
+
+-- ── Unit tests ──────────────────────────────────────────
+
+test "fact base" = fact 0 == 1
+test "fact 10" = fact 10 == 3628800
+test "reverse empty" = reverse [] == []
+test "sort then reverse" = reverse (qsort [3 1 2]) == [3 2 1]
+
+-- ── Property tests ──────────────────────────────────────
+
+test "reverse involution" = prop xs -> reverse (reverse xs) == xs
+test "reverse preserves length" = prop xs -> length (reverse xs) == length xs
+test "sort idempotent" = prop xs -> qsort (qsort xs) == qsort xs
+test "sort preserves length" = prop xs -> length (qsort xs) == length xs
+test "fact base holds" = prop n -> fact n >= 1 when n >= 0 && n <= 10

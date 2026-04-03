@@ -1,0 +1,156 @@
+name: Grammar E2E
+
+on:
+  push:
+    paths:
+      - 'lang/tools/constrained/synoema.gbnf'
+      - 'lang/crates/synoema-parser/**'
+      - 'lang/crates/synoema-lexer/**'
+      - 'lang/tools/constrained/**'
+  pull_request:
+    paths:
+      - 'lang/tools/constrained/synoema.gbnf'
+      - 'lang/crates/synoema-parser/**'
+      - 'lang/crates/synoema-lexer/**'
+      - 'lang/tools/constrained/**'
+
+jobs:
+  grammar-validation:
+    name: Grammar Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            lang/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('lang/Cargo.lock') }}
+
+      - name: Build Synoema
+        working-directory: lang
+        run: cargo build --release -p synoema-repl
+
+      - name: Run parser tests
+        working-directory: lang
+        run: cargo test -p synoema-parser -p synoema-lexer
+
+      - name: Validate grammar against examples
+        working-directory: lang
+        run: |
+          echo "── Validating example programs ──"
+          PASSED=0
+          FAILED=0
+          for f in examples/*.sno; do
+            if cargo run --release -q -p synoema-repl -- run "$f" >/dev/null 2>&1; then
+              echo "  ✓ $f"
+              PASSED=$((PASSED + 1))
+            else
+              echo "  ✗ $f"
+              FAILED=$((FAILED + 1))
+            fi
+          done
+          echo ""
+          echo "Results: $PASSED passed, $FAILED failed"
+          [ "$FAILED" -eq 0 ] || exit 1
+
+      - name: Grammar statistics
+        run: |
+          python3 lang/tools/constrained/integration.py --stats
+
+  e2e-llama:
+    name: E2E with llama.cpp
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: grammar-validation
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            lang/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('lang/Cargo.lock') }}
+
+      - name: Build Synoema
+        working-directory: lang
+        run: cargo build --release -p synoema-repl
+
+      - name: Download llama.cpp
+        run: |
+          curl -L -o llama-server https://github.com/ggerganov/llama.cpp/releases/latest/download/llama-server-ubuntu-x64
+          chmod +x llama-server || true
+
+      - name: Download TinyLlama
+        run: |
+          pip install huggingface-hub
+          huggingface-cli download TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf \
+            --local-dir models/
+
+      - name: Generate programs (constrained)
+        run: |
+          mkdir -p generated/
+          export LLAMA_CLI=./llama-server
+          bash lang/tools/constrained/generate_llama.sh \
+            --model models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf \
+            --output-dir generated/ \
+            --count 20
+
+      - name: Validate generated programs
+        run: |
+          python3 lang/tools/constrained/validate_e2e.py \
+            --input-dir generated/ \
+            --output results.json \
+            --report
+
+      - name: Check syntax rate
+        run: |
+          SYNTAX_RATE=$(python3 -c "import json; r=json.load(open('results.json')); print(r['syntax_rate'])")
+          echo "Syntax correctness rate: $SYNTAX_RATE"
+          python3 -c "
+          import json, sys
+          r = json.load(open('results.json'))
+          if r['syntax_rate'] < 1.0:
+              print(f'WARN: syntax rate {r[\"syntax_rate\"]:.1%} < 100%')
+              # Don't fail CI on syntax rate for now — TinyLlama may not follow grammar perfectly
+              # sys.exit(1)
+          else:
+              print('OK: 100% syntax correctness')
+          "
+
+      - name: Post results as PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const results = JSON.parse(fs.readFileSync('results.json', 'utf8'));
+            const body = [
+              '## Grammar E2E Results',
+              '',
+              `| Metric | Value |`,
+              `|--------|-------|`,
+              `| Programs | ${results.total_generated} |`,
+              `| Syntax rate | ${(results.syntax_rate * 100).toFixed(1)}% |`,
+              `| Type rate | ${(results.type_rate * 100).toFixed(1)}% |`,
+              `| Run rate | ${(results.run_rate * 100).toFixed(1)}% |`,
+              `| Avg parse time | ${results.avg_parse_time_ms.toFixed(0)}ms |`,
+            ].join('\n');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });

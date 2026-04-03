@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 //! Abstract Syntax Tree for Synoema.
 //!
 //! Every node carries a `Span` for error reporting.
@@ -142,6 +145,12 @@ pub enum ExprKind {
     /// Runs expr in a new OS thread within the nearest enclosing scope.
     /// Returns Unit.
     Spawn(Box<Expr>),
+
+    /// Property generator: `prop x y -> body`
+    Prop(Vec<String>, Box<Expr>),
+
+    /// Conditional property: `body when cond` (if cond false, test discarded)
+    When(Box<Expr>, Box<Expr>),
 }
 
 /// Local binding inside a block: `name = expr`
@@ -229,6 +238,7 @@ pub enum Decl {
         name: String,
         equations: Vec<Equation>,
         span: Span,
+        doc: Vec<String>,
     },
 
     /// Type signature: `add : Int -> Int -> Int`
@@ -240,6 +250,8 @@ pub enum Decl {
         params: Vec<String>,
         variants: Vec<Variant>,
         span: Span,
+        doc: Vec<String>,
+        derives: Vec<String>,
     },
 
     /// Type class declaration: `trait Show a\n  show : a -> String`
@@ -248,6 +260,7 @@ pub enum Decl {
         ty_param: String,
         methods: Vec<TypeSig>,
         span: Span,
+        doc: Vec<String>,
     },
 
     /// Type class implementation: `impl Show Color\n  show Red = "Red"`
@@ -255,6 +268,21 @@ pub enum Decl {
         trait_name: String,
         ty_name: String,
         methods: Vec<(String, Vec<Equation>)>,
+        span: Span,
+    },
+
+    /// Type alias: `type Pos = {x : Int, y : Int}`
+    TypeAlias {
+        name: String,
+        params: Vec<String>,
+        body: TypeExpr,
+        span: Span,
+    },
+
+    /// Test declaration: `test "name" = expr`
+    Test {
+        name: String,
+        body: Expr,
         span: Span,
     },
 }
@@ -266,6 +294,7 @@ pub enum Decl {
 pub struct ModuleDecl {
     pub name: String,
     pub body: Vec<Decl>,
+    pub doc: Vec<String>,
 }
 
 /// A `use Module (name1 name2)` import
@@ -276,11 +305,19 @@ pub struct UseDecl {
     pub span: Span,
 }
 
+/// An `import "path.sno"` file import
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportDecl {
+    pub path: String,
+    pub span: Span,
+}
+
 // ── Program ──────────────────────────────────────────────
 
 /// A complete Synoema program
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
+    pub imports: Vec<ImportDecl>,
     pub decls: Vec<Decl>,
     pub modules: Vec<ModuleDecl>,
     pub uses: Vec<UseDecl>,

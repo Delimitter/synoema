@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 //! Algorithm W — Hindley-Milner type inference for Synoema.
 //!
 //! Implements the classic Damas-Milner algorithm (1982) extended for:
@@ -15,19 +18,48 @@ use crate::error::{TypeError, TypeErrorKind};
 
 type TResult<T> = Result<T, TypeError>;
 
+/// Decompose a curried function type `T1 -> T2 -> ... -> R` into
+/// argument types and the result type.
+fn unroll_arrows(ty: &Type) -> (Vec<Type>, Type) {
+    let mut args = Vec::new();
+    let mut current = ty.clone();
+    while let Type::Arrow(param, ret) = current {
+        args.push(*param);
+        current = *ret;
+    }
+    (args, current)
+}
+
+/// A collected type alias: name, params, body
+type AliasMap = std::collections::HashMap<String, (Vec<String>, TypeExpr)>;
+
 /// Main type inference engine
 pub struct Infer {
     gen: TyVarGen,
+    /// Type aliases collected from the program (expanded during type resolution)
+    aliases: AliasMap,
 }
 
 impl Infer {
     pub fn new() -> Self {
-        Infer { gen: TyVarGen::new() }
+        Infer { gen: TyVarGen::new(), aliases: AliasMap::new() }
     }
 
     /// Infer the type of a complete program, returning the final environment
     pub fn infer_program(&mut self, program: &Program) -> TResult<TypeEnv> {
         let mut env = self.builtin_env();
+
+        // Pass 0: collect type aliases
+        self.aliases.clear();
+        for decl in &program.decls {
+            if let Decl::TypeAlias { name, params, body, .. } = decl {
+                // Check for recursive aliases (simple: alias body mentions its own name)
+                if type_expr_mentions(body, name) {
+                    return Err(TypeError::bare(TypeErrorKind::RecursiveAlias { name: name.clone() }));
+                }
+                self.aliases.insert(name.clone(), (params.clone(), body.clone()));
+            }
+        }
 
         // First pass: collect ADT constructors
         for decl in &program.decls {
@@ -44,7 +76,30 @@ impl Infer {
             }
         }
 
-        // Third pass: infer function types
+        // Third pass: infer impl method types (before Func, so derived methods are available)
+        for decl in &program.decls {
+            if let Decl::ImplDecl { methods, .. } = decl {
+                for (method_name, equations) in methods {
+                    if env.lookup(method_name).is_some() {
+                        continue; // already known (builtin or previously defined)
+                    }
+                    let self_tv = self.gen.fresh_var();
+                    env.insert(method_name.clone(), Scheme::mono(self_tv.clone()));
+
+                    let (subst, ty) = self.infer_func(&env, equations)?;
+                    let su = unify(&self_tv.apply(&subst), &ty, &mut self.gen)?;
+                    let final_ty = ty.apply(&su);
+                    let final_subst = subst.compose(&su);
+
+                    env = env.apply(&final_subst);
+                    env.remove(method_name);
+                    let scheme = env.generalize(&final_ty);
+                    env.insert(method_name.clone(), scheme);
+                }
+            }
+        }
+
+        // Fourth pass: infer function types
         for decl in &program.decls {
             if let Decl::Func { name, equations, .. } = decl {
                 // Pre-register with a fresh type variable to enable recursion
@@ -79,6 +134,131 @@ impl Infer {
         }
 
         Ok(env)
+    }
+
+    /// Type-check with error recovery: continues past errors, collecting them.
+    pub fn infer_program_recovering(&mut self, program: &Program) -> (Result<TypeEnv, TypeError>, Vec<TypeError>) {
+        let mut env = self.builtin_env();
+        let mut errors = Vec::new();
+
+        // Pass 0: collect type aliases
+        self.aliases.clear();
+        for decl in &program.decls {
+            if let Decl::TypeAlias { name, params, body, .. } = decl {
+                if type_expr_mentions(body, name) {
+                    errors.push(TypeError::bare(TypeErrorKind::RecursiveAlias { name: name.clone() }));
+                    continue;
+                }
+                self.aliases.insert(name.clone(), (params.clone(), body.clone()));
+            }
+        }
+
+        // First pass: collect ADT constructors
+        for decl in &program.decls {
+            if let Decl::TypeDef { name, params, variants, .. } = decl {
+                if let Err(e) = self.register_adt(&mut env, name, params, variants) {
+                    errors.push(e);
+                }
+            }
+        }
+
+        // Second pass: collect explicit type signatures
+        let mut sigs: std::collections::HashMap<String, TypeExpr> = std::collections::HashMap::new();
+        for decl in &program.decls {
+            if let Decl::TypeSig(sig) = decl {
+                sigs.insert(sig.name.clone(), sig.ty.clone());
+            }
+        }
+
+        // Third pass: infer impl method types (before Func, so derived methods are available)
+        for decl in &program.decls {
+            if let Decl::ImplDecl { methods, .. } = decl {
+                for (method_name, equations) in methods {
+                    if env.lookup(method_name).is_some() {
+                        continue;
+                    }
+                    let self_tv = self.gen.fresh_var();
+                    env.insert(method_name.clone(), Scheme::mono(self_tv.clone()));
+
+                    match self.infer_func(&env, equations) {
+                        Ok((subst, ty)) => {
+                            match unify(&self_tv.apply(&subst), &ty, &mut self.gen) {
+                                Ok(su) => {
+                                    let final_subst = subst.compose(&su);
+                                    let final_ty = ty.apply(&su);
+                                    env = env.apply(&final_subst);
+                                    env.remove(method_name);
+                                    let scheme = env.generalize(&final_ty);
+                                    env.insert(method_name.clone(), scheme);
+                                }
+                                Err(e) => errors.push(e),
+                            }
+                        }
+                        Err(e) => errors.push(e),
+                    }
+                }
+            }
+        }
+
+        // Fourth pass: infer function types (with recovery)
+        for decl in &program.decls {
+            if let Decl::Func { name, equations, .. } = decl {
+                let self_tv = self.gen.fresh_var();
+                env.insert(name.clone(), Scheme::mono(self_tv.clone()));
+
+                match self.infer_func(&env, equations) {
+                    Ok((subst, ty)) => {
+                        match unify(&self_tv.apply(&subst), &ty, &mut self.gen) {
+                            Ok(su) => {
+                                let final_subst = subst.compose(&su);
+                                let final_ty = ty.apply(&su);
+                                env = env.apply(&final_subst);
+                                env.remove(name);
+                                let scheme = env.generalize(&final_ty);
+                                env.insert(name.clone(), scheme);
+                            }
+                            Err(e) => {
+                                errors.push(e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        errors.push(e);
+                    }
+                }
+            }
+        }
+
+        // Test declarations: infer body as Bool
+        for decl in &program.decls {
+            if let Decl::Test { body, .. } = decl {
+                match self.infer_expr(&env, body) {
+                    Ok((s, ty)) => {
+                        if let Err(e) = unify(&ty.apply(&s), &Type::Con("Bool".into()), &mut self.gen) {
+                            errors.push(e);
+                        }
+                    }
+                    Err(e) => errors.push(e),
+                }
+            }
+        }
+
+        // Fourth pass: linearity check
+        for decl in &program.decls {
+            if let Decl::Func { name, equations, .. } = decl {
+                if let Some(ty_sig) = sigs.get(name) {
+                    if let Err(e) = check_linear_func(equations, ty_sig) {
+                        errors.push(e);
+                    }
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            (Ok(env), errors)
+        } else {
+            (Ok(env), errors)
+        }
     }
 
     /// Infer the type of a single expression
@@ -265,6 +445,10 @@ impl Infer {
         env.insert("fd_close".into(), Scheme::mono(Type::arrow(Type::int(), Type::unit())));
         // fd_popen: String -> Int
         env.insert("fd_popen".into(), Scheme::mono(Type::arrow(Type::string(), Type::int())));
+        // fd_open: String -> Int (open file for reading)
+        env.insert("fd_open".into(), Scheme::mono(Type::arrow(Type::string(), Type::int())));
+        // fd_open_write: String -> Int (open file for writing)
+        env.insert("fd_open_write".into(), Scheme::mono(Type::arrow(Type::string(), Type::int())));
 
         // Concurrency builtins (Phase BC)
         // chan: ∀a. Chan a  (0-arity — fresh channel on each evaluation)
@@ -340,7 +524,18 @@ impl Infer {
                     Err(TypeError::bare(TypeErrorKind::UnboundType { name: name.clone() }))
                 }
             }
-            TypeExprKind::Con(name) => Ok(Type::Con(name.clone())),
+            TypeExprKind::Con(name) => {
+                // Check if this is a type alias
+                if let Some((alias_params, alias_body)) = self.aliases.get(name).cloned() {
+                    if alias_params.is_empty() {
+                        // Non-parametric alias: just resolve the body
+                        return self.resolve_type_expr(&alias_body, params);
+                    }
+                    // Parametric alias without arguments applied — treat as type constructor
+                    // (will be handled in App case when arguments are provided)
+                }
+                Ok(Type::Con(name.clone()))
+            }
             TypeExprKind::Arrow(a, b) => {
                 let a_ty = self.resolve_type_expr(a, params)?;
                 let b_ty = self.resolve_type_expr(b, params)?;
@@ -352,6 +547,17 @@ impl Infer {
                 Ok(Type::linear_arrow(a_ty, b_ty))
             }
             TypeExprKind::App(f, a) => {
+                // Check for parametric type alias: collect all applied args
+                let (head, args) = collect_type_app(texpr);
+                if let TypeExprKind::Con(ref head_name) = head.kind {
+                    if let Some((alias_params, alias_body)) = self.aliases.get(head_name).cloned() {
+                        if args.len() == alias_params.len() {
+                            // Substitute alias params with the actual type arguments
+                            let expanded = substitute_type_expr(&alias_body, &alias_params, &args);
+                            return self.resolve_type_expr(&expanded, params);
+                        }
+                    }
+                }
                 let f_ty = self.resolve_type_expr(f, params)?;
                 let a_ty = self.resolve_type_expr(a, params)?;
                 Ok(Type::App(Box::new(f_ty), Box::new(a_ty)))
@@ -545,6 +751,28 @@ impl Infer {
                 self.infer(env, body)?;
                 Ok((Subst::new(), Type::Con("Unit".into())))
             }
+
+            ExprKind::Prop(vars, body) => {
+                let mut env = env.clone();
+                for var in vars {
+                    let tv = self.gen.fresh_var();
+                    env.insert(var.clone(), Scheme::mono(tv));
+                }
+                let (s, body_ty) = self.infer(&env, body)?;
+                let s2 = unify(&body_ty.apply(&s), &Type::Con("Bool".into()), &mut self.gen)?;
+                Ok((s.compose(&s2), Type::Con("Bool".into())))
+            }
+
+            ExprKind::When(cond, body) => {
+                let (s1, cond_ty) = self.infer(env, cond)?;
+                let s1b = unify(&cond_ty.apply(&s1), &Type::Con("Bool".into()), &mut self.gen)?;
+                let s1c = s1.compose(&s1b);
+                let env2 = env.apply(&s1c);
+                let (s2, body_ty) = self.infer(&env2, body)?;
+                let s2b = unify(&body_ty.apply(&s2), &Type::Con("Bool".into()), &mut self.gen)?;
+                let s_final = s1c.compose(&s2).compose(&s2b);
+                Ok((s_final, Type::Con("Bool".into())))
+            }
         }
     }
 
@@ -560,7 +788,7 @@ impl Infer {
         let mut param_types = Vec::new();
 
         for pat in pats {
-            let (pat_ty, bindings) = self.infer_pattern(pat)?;
+            let (pat_ty, bindings) = self.infer_pattern(env, pat)?;
             param_types.push(pat_ty);
             for (name, ty) in bindings {
                 env_ext.insert(name, Scheme::mono(ty));
@@ -615,7 +843,7 @@ impl Infer {
         let mut param_types = Vec::new();
 
         for pat in &eq.pats {
-            let (pat_ty, bindings) = self.infer_pattern(pat)?;
+            let (pat_ty, bindings) = self.infer_pattern(env, pat)?;
             param_types.push(pat_ty);
             for (name, ty) in bindings {
                 env_ext.insert(name, Scheme::mono(ty));
@@ -636,7 +864,7 @@ impl Infer {
     // ── Pattern Inference ───────────────────────────────
 
     /// Infer the type of a pattern and return variable bindings
-    fn infer_pattern(&mut self, pat: &Pat) -> TResult<(Type, Vec<(String, Type)>)> {
+    fn infer_pattern(&mut self, env: &TypeEnv, pat: &Pat) -> TResult<(Type, Vec<(String, Type)>)> {
         match pat {
             Pat::Wildcard => {
                 let tv = self.gen.fresh_var();
@@ -649,45 +877,61 @@ impl Infer {
             Pat::Lit(lit) => {
                 Ok((self.lit_type(lit), Vec::new()))
             }
-            Pat::Con(_name, sub_pats) => {
-                // Look up constructor from a dummy env — not ideal but works for now
-                // In practice, constructor types should be looked up from env
-                let con_tv = self.gen.fresh_var();
+            Pat::Con(name, sub_pats) => {
                 let mut bindings = Vec::new();
                 let mut arg_types = Vec::new();
                 for sp in sub_pats {
-                    let (ty, bs) = self.infer_pattern(sp)?;
+                    let (ty, bs) = self.infer_pattern(env, sp)?;
                     arg_types.push(ty);
                     bindings.extend(bs);
                 }
-                // The constructor type is: arg1 → arg2 → ... → result
-                // We return a fresh variable as the result type
-                let _ = arg_types; // constructor args constrained during pattern matching
-                Ok((con_tv, bindings))
+
+                // Look up constructor type from env
+                if let Some(scheme) = env.lookup(name) {
+                    let con_ty = self.instantiate(scheme);
+                    // Unroll: T1 -> T2 -> ... -> R
+                    let (expected_args, result_ty) = unroll_arrows(&con_ty);
+
+                    if expected_args.len() != arg_types.len() {
+                        return Err(TypeError::bare(TypeErrorKind::ArityMismatch {
+                            name: name.clone(),
+                            expected: expected_args.len(),
+                            found: arg_types.len(),
+                        }));
+                    }
+
+                    // Unify each sub-pattern type with the constructor's parameter type
+                    for (expected, actual) in expected_args.iter().zip(arg_types.iter()) {
+                        let s = unify(expected, actual, &mut self.gen)?;
+                        // Apply substitution (simplified — in a full implementation
+                        // we'd thread subst through)
+                        let _ = s;
+                    }
+
+                    Ok((result_ty, bindings))
+                } else {
+                    // Constructor not in env — fallback to fresh type variable
+                    let con_tv = self.gen.fresh_var();
+                    Ok((con_tv, bindings))
+                }
             }
             Pat::Cons(head, tail) => {
-                let (h_ty, h_binds) = self.infer_pattern(head)?;
-                let (_t_ty, t_binds) = self.infer_pattern(tail)?;
-                // tail must be List h_ty
+                let (h_ty, h_binds) = self.infer_pattern(env, head)?;
+                let (_t_ty, t_binds) = self.infer_pattern(env, tail)?;
                 let list_ty = Type::list(h_ty.clone());
-                // We'd unify t_ty with list_ty, but since we return constraints
-                // we just set the list type
                 let mut bindings = h_binds;
                 bindings.extend(t_binds);
                 Ok((list_ty, bindings))
             }
-            Pat::Paren(inner) => self.infer_pattern(inner),
+            Pat::Paren(inner) => self.infer_pattern(env, inner),
             Pat::Record(fields) => {
                 let mut all_bindings: Vec<(String, Type)> = Vec::new();
                 let mut field_types: Vec<(String, Type)> = Vec::new();
                 for (name, sub_pat) in fields {
-                    let (ty, bindings) = self.infer_pattern(sub_pat)?;
+                    let (ty, bindings) = self.infer_pattern(env, sub_pat)?;
                     field_types.push((name.clone(), ty));
                     all_bindings.extend(bindings);
                 }
-                // Record patterns are open by default — they match records with extra fields too.
-                // We introduce a fresh row variable so that pattern-matching a record with
-                // `{x = v}` does not fail when the record also has other fields.
                 let row_var = self.gen.fresh();
                 Ok((Type::Record(field_types, Some(row_var)), all_bindings))
             }
@@ -1023,6 +1267,12 @@ fn check_linear_in_expr(expr: &Expr, linear_vars: &HashSet<String>) -> TResult<U
         // CONCURRENCY (Phase BC — linearity not yet analysed)
         ExprKind::Scope(body) => check_linear_in_expr(body, linear_vars),
         ExprKind::Spawn(body) => check_linear_in_expr(body, linear_vars),
+        ExprKind::Prop(_, body) => check_linear_in_expr(body, linear_vars),
+        ExprKind::When(lhs, rhs) => {
+            let ml = check_linear_in_expr(lhs, linear_vars)?;
+            let mr = check_linear_in_expr(rhs, linear_vars)?;
+            seq_usages(ml, mr, expr.span)
+        }
     }
 }
 
@@ -1063,4 +1313,67 @@ fn check_linear_func(equations: &[Equation], ty_sig: &TypeExpr) -> TResult<()> {
     }
 
     Ok(())
+}
+
+// ── Type Alias Helpers ──────────────────────────────────
+
+/// Check if a TypeExpr mentions a given name (for recursive alias detection)
+fn type_expr_mentions(texpr: &TypeExpr, name: &str) -> bool {
+    match &texpr.kind {
+        TypeExprKind::Con(n) => n == name,
+        TypeExprKind::Var(_) => false,
+        TypeExprKind::Arrow(a, b) | TypeExprKind::LinearArrow(a, b) | TypeExprKind::App(a, b) => {
+            type_expr_mentions(a, name) || type_expr_mentions(b, name)
+        }
+        TypeExprKind::Paren(inner) => type_expr_mentions(inner, name),
+    }
+}
+
+/// Collect a chain of type applications: `F a b` → (F, [a, b])
+fn collect_type_app(texpr: &TypeExpr) -> (&TypeExpr, Vec<&TypeExpr>) {
+    let mut args = Vec::new();
+    let mut current = texpr;
+    while let TypeExprKind::App(f, a) = &current.kind {
+        args.push(a.as_ref());
+        current = f.as_ref();
+    }
+    args.reverse();
+    (current, args)
+}
+
+/// Substitute type variable names in a TypeExpr
+fn substitute_type_expr(texpr: &TypeExpr, param_names: &[String], args: &[&TypeExpr]) -> TypeExpr {
+    let span = texpr.span;
+    let kind = match &texpr.kind {
+        TypeExprKind::Var(v) => {
+            // If this var matches a parameter name, replace with corresponding arg
+            if let Some(i) = param_names.iter().position(|p| p == v) {
+                return args[i].clone();
+            }
+            TypeExprKind::Var(v.clone())
+        }
+        TypeExprKind::Con(c) => TypeExprKind::Con(c.clone()),
+        TypeExprKind::Arrow(a, b) => {
+            TypeExprKind::Arrow(
+                Box::new(substitute_type_expr(a, param_names, args)),
+                Box::new(substitute_type_expr(b, param_names, args)),
+            )
+        }
+        TypeExprKind::LinearArrow(a, b) => {
+            TypeExprKind::LinearArrow(
+                Box::new(substitute_type_expr(a, param_names, args)),
+                Box::new(substitute_type_expr(b, param_names, args)),
+            )
+        }
+        TypeExprKind::App(f, a) => {
+            TypeExprKind::App(
+                Box::new(substitute_type_expr(f, param_names, args)),
+                Box::new(substitute_type_expr(a, param_names, args)),
+            )
+        }
+        TypeExprKind::Paren(inner) => {
+            TypeExprKind::Paren(Box::new(substitute_type_expr(inner, param_names, args)))
+        }
+    };
+    TypeExpr::new(kind, span)
 }

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 //! Optimization pass over Core IR.
 //!
 //! Phase 10.2: Constant Folding + Dead Code Elimination
@@ -88,6 +91,7 @@ fn fold_expr(expr: CoreExpr) -> CoreExpr {
             CoreExpr::FieldAccess(Box::new(expr), name)
         }
 
+        CoreExpr::Region(body) => CoreExpr::Region(Box::new(fold_expr(*body))),
         CoreExpr::Scope(body) => CoreExpr::Scope(Box::new(fold_expr(*body))),
         CoreExpr::Spawn(expr) => CoreExpr::Spawn(Box::new(fold_expr(*expr))),
 
@@ -280,8 +284,10 @@ fn is_free(name: &str, expr: &CoreExpr) -> bool {
 
         CoreExpr::FieldAccess(expr, _) => is_free(name, expr),
 
+        CoreExpr::Region(body) => is_free(name, body),
         CoreExpr::Scope(body) => is_free(name, body),
         CoreExpr::Spawn(expr) => is_free(name, expr),
+        CoreExpr::RuntimeError(_) => false,
     }
 }
 
@@ -292,6 +298,161 @@ fn pat_binds(name: &str, pat: &CorePat) -> bool {
         CorePat::Wildcard | CorePat::Lit(_) => false,
         CorePat::Con(_, sub_pats) => sub_pats.iter().any(|p| pat_binds(name, p)),
         CorePat::Record(fields) => fields.iter().any(|(_, p)| pat_binds(name, p)),
+    }
+}
+
+// ── Region Inference: Escape Analysis + Annotation ──────────
+
+/// Annotate a Core IR program with Region nodes for automatic memory reclamation.
+/// For each `let x = e1 in e2` where e1 allocates heap and x doesn't escape e2,
+/// wrap in `Region(Let(...))` so the JIT emits region_enter/exit around the scope.
+pub fn annotate_regions(program: CoreProgram) -> CoreProgram {
+    let defs = program.defs.into_iter().map(|def| CoreDef {
+        name: def.name,
+        body: annotate_expr(def.body),
+    }).collect();
+    CoreProgram { defs, ctor_tags: program.ctor_tags }
+}
+
+fn annotate_expr(expr: CoreExpr) -> CoreExpr {
+    match expr {
+        CoreExpr::Let(name, val, body) => {
+            let val = annotate_expr(*val);
+            let body = annotate_expr(*body);
+            if allocates_heap(&val) && !escapes(&name, &body) {
+                CoreExpr::Region(Box::new(
+                    CoreExpr::Let(name, Box::new(val), Box::new(body))
+                ))
+            } else {
+                CoreExpr::Let(name, Box::new(val), Box::new(body))
+            }
+        }
+        CoreExpr::LetRec(name, val, body) => {
+            CoreExpr::LetRec(name, Box::new(annotate_expr(*val)), Box::new(annotate_expr(*body)))
+        }
+        CoreExpr::Lam(p, body) => CoreExpr::Lam(p, Box::new(annotate_expr(*body))),
+        CoreExpr::App(f, a) => CoreExpr::App(Box::new(annotate_expr(*f)), Box::new(annotate_expr(*a))),
+        CoreExpr::Case(scrut, alts) => CoreExpr::Case(
+            Box::new(annotate_expr(*scrut)),
+            alts.into_iter().map(|a| Alt { pat: a.pat, body: annotate_expr(a.body) }).collect(),
+        ),
+        CoreExpr::MkList(elems) => CoreExpr::MkList(elems.into_iter().map(annotate_expr).collect()),
+        CoreExpr::Record(fields) => CoreExpr::Record(fields.into_iter().map(|(n, e)| (n, annotate_expr(e))).collect()),
+        CoreExpr::FieldAccess(e, n) => CoreExpr::FieldAccess(Box::new(annotate_expr(*e)), n),
+        CoreExpr::Region(body) => CoreExpr::Region(Box::new(annotate_expr(*body))),
+        CoreExpr::Scope(body) => CoreExpr::Scope(Box::new(annotate_expr(*body))),
+        CoreExpr::Spawn(e) => CoreExpr::Spawn(Box::new(annotate_expr(*e))),
+        other => other, // Lit, Var, PrimOp, Con, MkClosure, RuntimeError
+    }
+}
+
+/// Does this expression potentially allocate heap objects in the JIT?
+fn allocates_heap(expr: &CoreExpr) -> bool {
+    match expr {
+        CoreExpr::MkList(elems) => !elems.is_empty(),
+        CoreExpr::Record(_) => true,
+        // PrimOps that produce heap values
+        CoreExpr::App(f, _) => match f.as_ref() {
+            CoreExpr::App(ff, _) => matches!(ff.as_ref(),
+                CoreExpr::PrimOp(PrimOp::Cons | PrimOp::Concat | PrimOp::Range | PrimOp::Show)
+            ),
+            CoreExpr::PrimOp(PrimOp::Show) => true,
+            // Function calls may allocate
+            CoreExpr::Var(_) => true,
+            _ => false,
+        },
+        // Constructors with arguments allocate ConNode
+        CoreExpr::Con(_) => false, // bare constructor, no allocation until applied
+        _ => false,
+    }
+}
+
+/// Check if variable `var` escapes from the expression `body`.
+/// A value escapes if it could be part of the return value or captured by a closure.
+/// MUST be conservative: false negatives → use-after-free, false positives → missed optimization.
+pub fn escapes(var: &str, body: &CoreExpr) -> bool {
+    match body {
+        // Returned directly → escapes
+        CoreExpr::Var(n) => n == var,
+
+        // Literals, operators, constructors → no reference to var
+        CoreExpr::Lit(_) | CoreExpr::PrimOp(_) | CoreExpr::Con(_) | CoreExpr::RuntimeError(_) => false,
+
+        // Data structures: if var is mentioned in elements → escapes
+        CoreExpr::MkList(elems) => elems.iter().any(|e| is_free(var, e)),
+        CoreExpr::Record(fields) => fields.iter().any(|(_, e)| is_free(var, e)),
+
+        // Lambda: if var is captured → escapes (conservative: closure may escape)
+        CoreExpr::Lam(param, inner) => {
+            if param == var { false } else { is_free(var, inner) }
+        }
+
+        // MkClosure: captured vars escape
+        CoreExpr::MkClosure { free_vars, .. } => free_vars.iter().any(|v| v == var),
+
+        // Let chain: var escapes if it escapes from body,
+        // or if it's used in val and the bound name escapes from body
+        CoreExpr::Let(name, val, inner) => {
+            if name == var {
+                // shadowed — var doesn't escape through this let
+                false
+            } else if escapes(var, inner) {
+                true
+            } else {
+                // Transitive: var is used in val, and name escapes
+                is_free(var, val) && escapes(name, inner)
+            }
+        }
+        CoreExpr::LetRec(name, val, inner) => {
+            if name == var { false }
+            else { escapes(var, inner) || (is_free(var, val) && escapes(name, inner)) }
+        }
+
+        // Case: var escapes if it escapes from any branch
+        CoreExpr::Case(_scrut, alts) => {
+            // If var is the scrutinee of a case, the branches receive its value
+            // through patterns — but the patterns bind new names. The var itself
+            // only escapes if a branch's body references it (not shadowed by pattern).
+            alts.iter().any(|alt| {
+                if pat_binds(var, &alt.pat) { false } else { escapes(var, &alt.body) }
+            })
+            // Note: we don't check scrut here because being scrutinized ≠ escaping.
+            // The scrutinee is inspected, not returned. What matters is whether var
+            // appears in a return position in any branch body.
+        }
+
+        // Function application: check if this is a known-consuming builtin
+        CoreExpr::App(func, arg) => {
+            if is_consuming_app(func) {
+                // Builtin consumes arg without retaining it.
+                // var escapes only if it's in the func position (shouldn't happen for builtins)
+                is_free(var, func)
+            } else {
+                // Conservative: any mention in an app → escapes
+                is_free(var, func) || is_free(var, arg)
+            }
+        }
+
+        CoreExpr::FieldAccess(expr, _) => escapes(var, expr),
+        CoreExpr::Region(inner) => escapes(var, inner),
+        CoreExpr::Scope(inner) => escapes(var, inner),
+        CoreExpr::Spawn(inner) => is_free(var, inner), // spawned → escapes
+    }
+}
+
+/// Check if an App node calls a known builtin that consumes its argument
+/// without retaining a reference to it.
+fn is_consuming_app(func: &CoreExpr) -> bool {
+    match func {
+        // Unary consuming builtins: length, sum, str_len, print, show
+        CoreExpr::Var(n) => matches!(n.as_str(),
+            "length" | "sum" | "str_len" | "str_find" | "str_trim" | "head" | "tail"
+        ),
+        // Partially applied binary: App(PrimOp(Show), _) — show applied to 1st arg
+        CoreExpr::App(ff, _) => matches!(ff.as_ref(),
+            CoreExpr::PrimOp(PrimOp::Show | PrimOp::Print)
+        ),
+        _ => false,
     }
 }
 
@@ -430,5 +591,117 @@ mod tests {
             assert!((f - (-3.14)).abs() < 1e-10);
         }
         // If not folded (desugarer may not produce FSub), that's also OK
+    }
+
+    // ── Escape analysis tests ─────────────────────────────
+
+    #[test]
+    fn escapes_var_returned_directly() {
+        // let x = [1 2 3] in x → x escapes (is the return value)
+        let body = CoreExpr::Var("x".into());
+        assert!(escapes("x", &body));
+    }
+
+    #[test]
+    fn escapes_var_not_mentioned() {
+        // let x = [1 2 3] in 42 → x doesn't escape
+        let body = CoreExpr::Lit(Lit::Int(42));
+        assert!(!escapes("x", &body));
+    }
+
+    #[test]
+    fn escapes_var_in_list() {
+        // let x = [1] in [x] → x escapes (stored in data structure)
+        let body = CoreExpr::MkList(vec![CoreExpr::Var("x".into())]);
+        assert!(escapes("x", &body));
+    }
+
+    #[test]
+    fn escapes_var_in_lambda() {
+        // let x = [1] in (\_ -> x) → x escapes (captured by closure)
+        let body = CoreExpr::Lam("_".into(), Box::new(CoreExpr::Var("x".into())));
+        assert!(escapes("x", &body));
+    }
+
+    #[test]
+    fn escapes_consuming_builtin() {
+        // let x = [1..100] in length x → x doesn't escape (length consumes)
+        let body = CoreExpr::App(
+            Box::new(CoreExpr::Var("length".into())),
+            Box::new(CoreExpr::Var("x".into())),
+        );
+        assert!(!escapes("x", &body));
+    }
+
+    #[test]
+    fn escapes_transitive_through_let() {
+        // let x = [1] in let y = x in y → x escapes (transitively through y)
+        let body = CoreExpr::Let(
+            "y".into(),
+            Box::new(CoreExpr::Var("x".into())),
+            Box::new(CoreExpr::Var("y".into())),
+        );
+        assert!(escapes("x", &body));
+    }
+
+    #[test]
+    fn escapes_shadowed_in_let() {
+        // let x = [1] in let x = 42 in x → x doesn't escape (shadowed)
+        let body = CoreExpr::Let(
+            "x".into(),
+            Box::new(CoreExpr::Lit(Lit::Int(42))),
+            Box::new(CoreExpr::Var("x".into())),
+        );
+        assert!(!escapes("x", &body));
+    }
+
+    // ── Region annotation tests ──────────────────────────
+
+    #[test]
+    fn region_annotated_for_non_escaping_list() {
+        // let x = [1 2 3] in 42 → Region(Let(...))
+        let expr = CoreExpr::Let(
+            "x".into(),
+            Box::new(CoreExpr::MkList(vec![
+                CoreExpr::Lit(Lit::Int(1)),
+                CoreExpr::Lit(Lit::Int(2)),
+            ])),
+            Box::new(CoreExpr::Lit(Lit::Int(42))),
+        );
+        let annotated = annotate_expr(expr);
+        assert!(matches!(annotated, CoreExpr::Region(_)), "Expected Region, got: {}", annotated);
+    }
+
+    #[test]
+    fn region_not_annotated_for_escaping_list() {
+        // let x = [1 2] in x → NOT Region (x escapes)
+        let expr = CoreExpr::Let(
+            "x".into(),
+            Box::new(CoreExpr::MkList(vec![
+                CoreExpr::Lit(Lit::Int(1)),
+                CoreExpr::Lit(Lit::Int(2)),
+            ])),
+            Box::new(CoreExpr::Var("x".into())),
+        );
+        let annotated = annotate_expr(expr);
+        assert!(matches!(annotated, CoreExpr::Let(..)), "Expected Let (no Region), got: {}", annotated);
+    }
+
+    #[test]
+    fn region_annotated_consuming_builtin() {
+        // let x = [1 2] in length x → Region(Let(...))
+        let expr = CoreExpr::Let(
+            "x".into(),
+            Box::new(CoreExpr::MkList(vec![
+                CoreExpr::Lit(Lit::Int(1)),
+                CoreExpr::Lit(Lit::Int(2)),
+            ])),
+            Box::new(CoreExpr::App(
+                Box::new(CoreExpr::Var("length".into())),
+                Box::new(CoreExpr::Var("x".into())),
+            )),
+        );
+        let annotated = annotate_expr(expr);
+        assert!(matches!(annotated, CoreExpr::Region(_)), "Expected Region, got: {}", annotated);
     }
 }

@@ -19,6 +19,7 @@ import sys
 OPERATORS = {
     # Two-char operators
     "--":  "comment",
+    "---": "doc_comment",
     "->":  "arrow",
     "<-":  "bind",
     "|>":  "pipe",
@@ -56,13 +57,14 @@ OPERATORS = {
 }
 
 KEYWORDS = {
-    "mod":   "module",
-    "use":   "import",
-    "trait": "typeclass",
-    "impl":  "instance",
-    "true":  "bool_true",
-    "false": "bool_false",
-    "lazy":  "lazy_eval",
+    "mod":      "module",
+    "use":      "import",
+    "trait":    "typeclass",
+    "impl":     "instance",
+    "true":     "bool_true",
+    "false":    "bool_false",
+    "lazy":     "lazy_eval",
+    "derive":   "derive_clause",
 }
 
 # ── Tokenizer configs ────────────────────────────────────────

@@ -1,12 +1,12 @@
 # Тестирование
 
-Synoema покрыт 634 тестами в 7 крейтах. Все тесты проходят с `0 failures, 0 warnings`.
+Synoema покрыт 771 тестом в 7 крейтах. Все тесты проходят с `0 failures, 0 warnings`.
 
 ## Быстрый старт
 
 ```bash
 cd lang/
-cargo test        # все тесты — 634/634 зелёных
+cargo test        # все тесты — 771/771 зелёных
 ```
 
 ## Структура тестов
@@ -17,14 +17,14 @@ cargo test        # все тесты — 634/634 зелёных
 
 | Крейт | Тестов | Что тестируется |
 |-------|-------:|-----------------|
-| `synoema-lexer` | 51 | Токенизация, offside rule, escape-последовательности |
-| `synoema-parser` | 43 | Pratt-парсер, 15 видов ExprKind, ошибки |
-| `synoema-types` | 61 | Hindley-Milner, row polymorphism, type classes |
-| `synoema-core` | 44 | Core IR, десахаризация, оптимизации |
-| `synoema-eval` | 137 | Tree-walking интерпретатор, все фичи языка |
-| `synoema-codegen` | 191 | Cranelift JIT — арифметика, строки, ADT, замыкания |
+| `synoema-lexer` | 97 | Токенизация, offside rule, escape-последовательности, string interpolation |
+| `synoema-parser` | 72 | Pratt-парсер, type aliases, imports, error recovery, string interp |
+| `synoema-types` | 90 | Hindley-Milner, row polymorphism, type classes, alias expansion |
+| `synoema-core` | 50 | Core IR, десахаризация, оптимизации |
+| `synoema-eval` | 183 | Tree-walking интерпретатор, все фичи языка |
+| `synoema-codegen` | 209 | Cranelift JIT — арифметика, строки, ADT, замыкания |
 | `synoema-diagnostic` | — | Нет отдельных тестов (покрыто через eval/codegen) |
-| **Итого** | **634** | |
+| **Итого** | **771** | |
 
 ### Стресс-тесты
 
@@ -50,6 +50,39 @@ cargo test --test stress -p synoema-codegen -- --nocapture
 ```bash
 cargo test --test stress -p synoema-eval -- --ignored --nocapture
 ```
+
+## Встроенные тесты языка
+
+Synoema поддерживает три вида тестов в `.sno` файлах:
+
+### Doctests
+```
+--- example: fact 5 == 120
+fact n = ? n == 0 -> 1 : n * fact (n - 1)
+```
+
+### Test declarations
+```
+test "fact base" = fact 0 == 1
+test "sort then reverse" = reverse (qsort [3 1 2]) == [3 2 1]
+```
+
+### Property-based tests
+```
+test "reverse involution" = prop xs -> reverse (reverse xs) == xs
+test "fact positive" = prop n -> fact n > 0 when n >= 0 && n <= 10
+```
+
+### Запуск
+
+```bash
+cargo run -p synoema-repl -- test examples/testing.sno          # один файл
+cargo run -p synoema-repl -- test examples/                     # директория
+cargo run -p synoema-repl -- test examples/ --filter "sort"     # фильтр по имени
+```
+
+Keywords: `test` (декларация), `prop` (property-генератор), `when` (условный property).
+Все три — 1 BPE-токен в cl100k_base.
 
 ## Запуск по крейтам
 

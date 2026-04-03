@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 //! # synoema-core
 //! Core IR and desugaring for the Synoema programming language.
 //!
@@ -10,7 +13,7 @@ pub mod optimize;
 
 pub use core_ir::*;
 pub use desugar::desugar_program;
-pub use optimize::{optimize_expr, optimize_program};
+pub use optimize::{optimize_expr, optimize_program, annotate_regions};
 
 /// Parse and desugar Synoema source code into Core IR.
 pub fn to_core(source: &str) -> Result<CoreProgram, String> {

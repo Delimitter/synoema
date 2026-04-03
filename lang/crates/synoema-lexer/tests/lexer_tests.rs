@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 use synoema_lexer::*;
 
 // Helper: lex and extract just the token variants, excluding Eof
@@ -85,6 +88,9 @@ fn lex_keywords() {
     assert_eq!(toks("trait"), vec![Token::KwTrait]);
     assert_eq!(toks("impl"), vec![Token::KwImpl]);
     assert_eq!(toks("lazy"), vec![Token::KwLazy]);
+    assert_eq!(toks("test"), vec![Token::KwTest]);
+    assert_eq!(toks("prop"), vec![Token::KwProp]);
+    assert_eq!(toks("when"), vec![Token::KwWhen]);
 }
 
 #[test]
@@ -92,6 +98,8 @@ fn lex_keyword_prefix_is_id() {
     // "module" is not a keyword, "mod" is
     assert_eq!(toks("module"), vec![Token::LowerId("module".into())]);
     assert_eq!(toks("implementation"), vec![Token::LowerId("implementation".into())]);
+    assert_eq!(toks("testing"), vec![Token::LowerId("testing".into())]);
+    assert_eq!(toks("property"), vec![Token::LowerId("property".into())]);
 }
 
 #[test]

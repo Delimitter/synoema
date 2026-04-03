@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 use synoema_lexer::{Token, Span};
 
 #[derive(Debug, Clone, PartialEq)]

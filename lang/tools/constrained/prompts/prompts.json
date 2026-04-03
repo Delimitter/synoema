@@ -1,0 +1,172 @@
+[
+  {
+    "task": "constant",
+    "complexity": "trivial",
+    "expected_features": ["literal"],
+    "prompts": [
+      "Write a Synoema program where main returns the integer 42.",
+      "Create a simple Synoema program that defines main as the number 100.",
+      "Write a Synoema constant: main equals 7.",
+      "Define a Synoema program with main = 0.",
+      "Write main that returns a negative number in Synoema: main = 0 - 5.",
+      "Create a Synoema program: main = 999.",
+      "Write a trivial Synoema program returning 1.",
+      "Define main as the literal 256 in Synoema.",
+      "Synoema program: main should be 12345.",
+      "Write a one-line Synoema program where main equals 10."
+    ]
+  },
+  {
+    "task": "arithmetic",
+    "complexity": "simple",
+    "expected_features": ["arithmetic", "function_def"],
+    "prompts": [
+      "Write a Synoema function double that takes x and returns x * 2.",
+      "Create a Synoema function add that takes x and y and returns x + y.",
+      "Define a function square in Synoema: square x = x * x.",
+      "Write a Synoema function that computes x * x + 1.",
+      "Create triple x = x * 3 in Synoema and call it from main.",
+      "Write a Synoema function inc x = x + 1 and main = inc 5.",
+      "Define sub x y = x - y in Synoema with main = sub 10 3.",
+      "Write a Synoema program with avg x y = (x + y) / 2 and main = avg 10 20.",
+      "Create a Synoema function negate x = 0 - x with main = negate 7.",
+      "Write a Synoema function that computes the remainder: rem x y = x % y, main = rem 10 3."
+    ]
+  },
+  {
+    "task": "factorial",
+    "complexity": "medium",
+    "expected_features": ["recursion", "pattern_match"],
+    "prompts": [
+      "Write a recursive factorial function in Synoema using pattern matching: fac 0 = 1, fac n = n * fac (n - 1).",
+      "Implement factorial in Synoema with pattern matching on 0 and n.",
+      "Create a Synoema factorial function and compute fac 10 in main.",
+      "Write Synoema code for factorial using recursion. Base case: fac 0 = 1.",
+      "Define a recursive factorial in Synoema. Call it with fac 5 in main.",
+      "Implement fac in Synoema: fac 0 = 1, fac n = n * fac (n - 1), main = fac 7.",
+      "Write a factorial function in Synoema that multiplies n by fac of n minus 1.",
+      "Create Synoema code: recursive factorial with main = fac 12.",
+      "Write a Synoema program computing 10 factorial using pattern matching.",
+      "Implement factorial recursively in Synoema. Include a main binding."
+    ]
+  },
+  {
+    "task": "list_operations",
+    "complexity": "medium",
+    "expected_features": ["lists", "pattern_match", "recursion"],
+    "prompts": [
+      "Write a map function in Synoema: map f [] = [], map f (x:xs) = f x : map f xs.",
+      "Implement a length function for lists in Synoema: len [] = 0, len (_:xs) = 1 + len xs.",
+      "Write a Synoema function sum that sums a list: sum [] = 0, sum (x:xs) = x + sum xs.",
+      "Create a Synoema filter function using cons pattern matching.",
+      "Write a Synoema function head that returns the first element: head (x:xs) = x.",
+      "Implement append in Synoema: append [] ys = ys, append (x:xs) ys = x : append xs ys.",
+      "Write a Synoema function that reverses a list using an accumulator.",
+      "Create a Synoema function last that returns the last element of a list.",
+      "Write take n in Synoema: take 0 _ = [], take n (x:xs) = x : take (n - 1) xs.",
+      "Implement zip in Synoema that pairs elements from two lists."
+    ]
+  },
+  {
+    "task": "string_processing",
+    "complexity": "medium",
+    "expected_features": ["strings", "show", "concatenation"],
+    "prompts": [
+      "Write a Synoema program that concatenates two strings with ++.",
+      "Create a Synoema function greet name = \"Hello \" ++ name.",
+      "Write a Synoema program using show to convert a number to a string.",
+      "Create a Synoema program: main = \"foo\" ++ \"bar\".",
+      "Write a Synoema function that builds a greeting: greet n = \"Hi \" ++ show n.",
+      "Define a Synoema program with string interpolation: main = \"value: ${show 42}\".",
+      "Write a Synoema program: label x = \"x = \" ++ show x, main = label 10.",
+      "Create a Synoema function repeat that concatenates a string with itself.",
+      "Write a Synoema program that uses ++ to join three strings.",
+      "Define msg = \"hello\" ++ \" \" ++ \"world\" in Synoema with main = msg."
+    ]
+  },
+  {
+    "task": "records",
+    "complexity": "medium_high",
+    "expected_features": ["records", "field_access"],
+    "prompts": [
+      "Write a Synoema program with records: point x y = {x = x, y = y}, main = (point 3 4).x.",
+      "Create a Synoema record for a person with name and age fields.",
+      "Write a Synoema function that creates a record and accesses its field with dot notation.",
+      "Define a 2D point record in Synoema and compute dist_sq p = p.x * p.x + p.y * p.y.",
+      "Write Synoema code: circle r = {radius = r}, area c = c.radius * c.radius, main = area (circle 5).",
+      "Create a Synoema record pair a b = {fst = a, snd = b} and extract fst.",
+      "Write a Synoema function that takes a record and returns the sum of its x and y fields.",
+      "Define a color record in Synoema: rgb r g b = {r = r, g = g, b = b}.",
+      "Write Synoema code that creates nested records and accesses inner fields.",
+      "Create a Synoema record with three fields and access each one in main."
+    ]
+  },
+  {
+    "task": "adt",
+    "complexity": "high",
+    "expected_features": ["adt", "pattern_match", "type_def"],
+    "prompts": [
+      "Define Maybe a = Just a | None in Synoema and write fromMaybe that extracts the value.",
+      "Write a Synoema ADT: Shape = Circle Int | Rect Int Int, with an area function.",
+      "Create a Synoema Bool ADT and implement not: not True = False, not False = True.",
+      "Define Either a b = Left a | Right b in Synoema with a pattern matching function.",
+      "Write a Synoema ADT for a simple expression tree: Expr = Num Int | Add Expr Expr.",
+      "Create Synoema code with Color = Red | Green | Blue and a show_color function.",
+      "Define a Synoema List ADT: List a = Cons a (List a) | Nil, with a length function.",
+      "Write Synoema ADT: Ordering = LT | EQ | GT, and compare function.",
+      "Create a Synoema Option type and implement map_option that applies a function inside Just.",
+      "Define a Synoema Pair type: Pair a b = MkPair a b, with fst and snd extractors."
+    ]
+  },
+  {
+    "task": "higher_order",
+    "complexity": "high",
+    "expected_features": ["lambda", "higher_order", "pipe"],
+    "prompts": [
+      "Write a Synoema function apply f x = f x and use it with a lambda: main = apply (\\x -> x + 1) 5.",
+      "Create a compose function in Synoema: compose f g x = f (g x).",
+      "Write a Synoema program using pipe: main = 5 |> double |> inc.",
+      "Define twice f x = f (f x) in Synoema and apply it to double.",
+      "Write a Synoema program with a lambda that squares: main = (\\x -> x * x) 7.",
+      "Create a Synoema function flip f x y = f y x.",
+      "Write Synoema code using pipes to chain three operations.",
+      "Define on f g x y = f (g x) (g y) in Synoema.",
+      "Write a Synoema program: const x _ = x, main = const 42 0.",
+      "Create a Synoema program that maps a lambda over a list: main = map (\\x -> x * 2) [1 2 3]."
+    ]
+  },
+  {
+    "task": "quicksort",
+    "complexity": "high",
+    "expected_features": ["recursion", "list_comprehension", "concat"],
+    "prompts": [
+      "Write quicksort in Synoema using list comprehensions for partitioning.",
+      "Implement qsort in Synoema: qsort [] = [], qsort (p:xs) uses lo and hi with list comprehensions.",
+      "Create a Synoema quicksort that partitions with [x | x <- xs , x <= p].",
+      "Write a complete quicksort in Synoema and sort [5 3 8 1 9 2 7 4 6].",
+      "Implement sorting in Synoema using recursive quicksort with ++ for concatenation.",
+      "Write Synoema quicksort with where-bindings for lo and hi partitions.",
+      "Create a Synoema qsort function using list comprehensions and test on [3 1 4 1 5 9].",
+      "Implement quicksort in Synoema: base case empty list, recursive case with pivot.",
+      "Write a Synoema sorting function using the quicksort algorithm with list comprehension filters.",
+      "Create Synoema code: qsort partitions around pivot using <= and > filters, concatenates with ++."
+    ]
+  },
+  {
+    "task": "module_types",
+    "complexity": "very_high",
+    "expected_features": ["module", "type_sig", "function_def"],
+    "prompts": [
+      "Write a Synoema module Math with functions square, cube, and abs. Use it with use Math (square cube abs).",
+      "Create a Synoema module with type signatures and function definitions.",
+      "Write a Synoema module Vec2 with make, add, and dot functions for 2D vectors using records.",
+      "Define a Synoema module StringUtils with helper functions and use it in main.",
+      "Write a Synoema module with type signatures: add : Int -> Int -> Int.",
+      "Create a Synoema module Prelude with id, const, and compose functions.",
+      "Write a Synoema module List with map, filter, and fold functions.",
+      "Define a Synoema module Geometry with point creation and distance functions.",
+      "Write a Synoema module Math with pi, square, and abs, then use all three in main.",
+      "Create a complete Synoema module with at least 3 functions and demonstrate use."
+    ]
+  }
+]

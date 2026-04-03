@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Pre-commit hook: verify SPDX license headers on staged files
+set -euo pipefail
+
+FAIL=0
+
+check_header() {
+    local file="$1"
+    local expected_spdx="$2"
+    if ! head -5 "$file" | grep -q "SPDX-License-Identifier: $expected_spdx"; then
+        echo "  MISSING: $file (expected $expected_spdx)"
+        FAIL=1
+    fi
+}
+
+# Get staged files (added or modified)
+STAGED=$(git diff --cached --name-only --diff-filter=ACM)
+
+for file in $STAGED; do
+    case "$file" in
+        lang/crates/synoema-codegen/*.rs)
+            check_header "$file" "BUSL-1.1"
+            ;;
+        lang/crates/*.rs)
+            check_header "$file" "Apache-2.0"
+            ;;
+        tools/*.py|tools/*.sh|tools/*.rs)
+            check_header "$file" "BUSL-1.1"
+            ;;
+        lang/examples/*.sno|examples/*.sno)
+            check_header "$file" "MIT-0"
+            ;;
+    esac
+done
+
+if [[ "$FAIL" -ne 0 ]]; then
+    echo ""
+    echo "SPDX header check failed. Run: ./scripts/add_headers.sh"
+    exit 1
+fi

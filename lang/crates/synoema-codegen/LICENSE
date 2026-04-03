@@ -1,0 +1,99 @@
+Business Source License 1.1
+
+Licensor:           Andrey Bubnov
+Licensed Work:      Synoema Codegen (synoema-codegen)
+                    Copyright (c) 2025-present Andrey Bubnov
+
+Additional Use Grant:
+  You may use the Licensed Work for any purpose, including production use,
+  EXCEPT for providing a Commercial LLM Service.
+
+  "Commercial LLM Service" means a hosted service that:
+    (a) uses the Licensed Work's native code generation, constrained decoding,
+        BPE verification, or module interface generation capabilities; AND
+    (b) is made available to third parties; AND
+    (c) generates revenue directly or indirectly through the service.
+
+  For clarity, the following are NOT "Commercial LLM Services" and are
+  permitted without a commercial license:
+    - Internal use within an organization (no third-party access)
+    - Non-commercial research, education, and personal projects
+    - Development, testing, and CI/CD usage
+    - Redistribution of unmodified or modified source code
+
+Change Date:        36 months from the date of each release
+Change License:     Apache License, Version 2.0
+
+SPDX-License-Identifier: BUSL-1.1
+
+For the full text of the Business Source License 1.1, see:
+https://mariadb.com/bsl11/
+
+--- Terms of the Business Source License 1.1 ---
+
+THE WORK (AS DEFINED BELOW) IS PROVIDED UNDER THE TERMS OF THIS
+BUSINESS SOURCE LICENSE ("LICENSE"). THE WORK IS PROTECTED BY
+COPYRIGHT AND/OR OTHER APPLICABLE LAW. ANY USE OF THE WORK OTHER
+THAN AS AUTHORIZED UNDER THIS LICENSE OR COPYRIGHT LAW IS PROHIBITED.
+
+BY EXERCISING ANY RIGHTS TO THE WORK PROVIDED IN THIS LICENSE, YOU
+AGREE TO BE BOUND BY THE TERMS OF THIS LICENSE. TO THE EXTENT THIS
+LICENSE MAY BE CONSIDERED TO BE A CONTRACT, THE LICENSOR GRANTS YOU
+THE RIGHTS CONTAINED HERE IN AS CONSIDERATION FOR YOUR ACCEPTANCE OF
+SUCH TERMS AND CONDITIONS.
+
+1. Grant of Rights
+
+The Licensor hereby grants You the right to copy, modify, create
+derivative works, redistribute, and make non-production use of the
+Licensed Work. The Licensor may make an Additional Use Grant, above,
+permitting limited production use.
+
+2. Effective on the Change Date, or the fourth anniversary of the
+first publicly available distribution of a specific version of the
+Licensed Work under this License, whichever comes first, the Licensor
+hereby grants you rights under the terms of the Change License, and
+the rights granted in the paragraph above terminate.
+
+3. If your use of the Licensed Work does not comply with the
+requirements currently in effect as described in this License, you
+must purchase a commercial license from the Licensor, its affiliated
+entities, or authorized resellers, or you must refrain from using the
+Licensed Work.
+
+4. All copies of the original and modified Licensed Work, and
+derivative works of the Licensed Work, are subject to this License.
+This License applies separately for each version of the Licensed
+Work. The Licensor may also offer the Licensed Work under separate
+terms or stop distributing the Licensed Work at any time; however,
+doing so will not affect the terms of this License.
+
+5. DISCLAIMER
+
+THE LICENSED WORK IS PROVIDED "AS IS". THE LICENSOR HEREBY DISCLAIMS
+ALL WARRANTIES, WHETHER EXPRESS, IMPLIED, STATUTORY, OR OTHERWISE WITH
+RESPECT TO THE LICENSED WORK, INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND
+NON-INFRINGEMENT. TO THE FULLEST EXTENT PERMITTED BY APPLICABLE LAW,
+IN NO EVENT WILL THE LICENSOR BE LIABLE TO YOU ON ANY LEGAL THEORY
+(INCLUDING WITHOUT LIMITATION, NEGLIGENCE) OR OTHERWISE FOR ANY
+DIRECT, SPECIAL, INDIRECT, INCIDENTAL, CONSEQUENTIAL, PUNITIVE,
+EXEMPLARY, OR OTHER LOSSES, COSTS, EXPENSES, OR DAMAGES ARISING OUT
+OF THIS LICENSE OR USE OF THE LICENSED WORK, EVEN IF THE LICENSOR HAS
+BEEN ADVISED OF THE POSSIBILITY OF SUCH LOSSES, COSTS, EXPENSES, OR
+DAMAGES.
+
+6. Limitation on Grant Scope
+
+The License does not grant you any right in any trademark or logo of
+the Licensor or its affiliates (provided that you may use a trademark
+or logo of the Licensor as expressly required by this License).
+
+7. THIS SECTION IS NOT A PART OF THE BUSINESS SOURCE LICENSE.
+
+To the extent this License is not enforceable, each provision is to be
+read so as to give it maximum legal effect. If any provision is held
+to be unenforceable, it will be interpreted so as to be enforceable to
+the maximum extent permissible. Under no circumstances shall the
+Licensor be liable for damages of any kind arising out of your
+exercise of rights under this License, to the extent permitted by law.

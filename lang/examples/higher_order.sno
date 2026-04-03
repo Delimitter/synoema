@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: MIT-0
+
 id x = x
 apply f x = f x
 compose f g x = f (g x)

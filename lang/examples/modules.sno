@@ -1,11 +1,17 @@
--- Modules example: namespace Math with utility functions
+-- SPDX-License-Identifier: MIT-0
 
+--- Modules example: namespace Math with utility functions.
 mod Math
+  --- Approximate pi (integer for simplicity).
   pi = 3
+  --- Square a number.
+  --- example: square 5 == 25
   square x = x * x
+  --- Cube a number.
   cube x = x * x * x
+  --- Absolute value.
   abs x = ? x < 0 -> 0 - x : x
 
-use Math (pi square cube abs)
+use Math (*)
 
 main = square 5 + cube 3 + abs (0 - 7)

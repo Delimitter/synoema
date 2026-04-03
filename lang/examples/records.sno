@@ -1,5 +1,7 @@
+-- SPDX-License-Identifier: MIT-0
+
 -- Records example: geometric shapes
-point x y = {x = x, y = y}
+point x y = {x, y}
 dist_sq p = p.x * p.x + p.y * p.y
 
 circle cx cy r = {center = point cx cy, radius = r}

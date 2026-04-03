@@ -122,6 +122,42 @@ docs/llm/
 
 **Когда файл нарушает лимит — разбить, не сжимать:** если фрагмент не помещается в 400–600 токенов при сохранении всех конструкций — делить на два файла (например `types-adt.md` + `types-classes.md`), не выбрасывать конструкции.
 
+### 8. Лицензирование и IP
+
+**Многокомпонентная лицензия:** проект использует разные лицензии для разных компонентов.
+
+| Компонент | Лицензия | SPDX |
+|-----------|---------|------|
+| `lang/crates/` (кроме codegen) | Apache-2.0 | `Apache-2.0` |
+| `lang/crates/synoema-codegen/` | BSL-1.1 → Apache-2.0 (36 мес.) | `BUSL-1.1` |
+| `tools/` | BSL-1.1 → Apache-2.0 (36 мес.) | `BUSL-1.1` |
+| `spec/` | CC-BY-SA-4.0 | `CC-BY-SA-4.0` |
+| `docs/` | CC-BY-SA-4.0 | `CC-BY-SA-4.0` |
+| `examples/` | MIT-0 | `MIT-0` |
+
+**Правила для SPDX-заголовков:**
+- Каждый новый `.rs` файл ОБЯЗАН иметь SPDX-заголовок (первые 2 строки)
+- Apache-2.0 файлы: copyright = `Synoema Contributors`
+- BSL-1.1 файлы: copyright = `Andrey Bubnov` (licensor)
+- Скрипт: `scripts/add_headers.sh` для добавления заголовков
+
+**DCO (Developer Certificate of Origin):**
+- Все коммиты должны быть подписаны: `git commit -s`
+- Полные правила: `CONTRIBUTING.md`
+
+**Товарные знаки:**
+- "Synoema", "sno", расширения `.sno`/`.snm`/`.snp` — TM Andrey Bubnov
+- Правила использования: `TRADEMARK.md`
+- Форки ОБЯЗАНЫ быть переименованы
+
+**Ключевые документы:**
+- `LICENSE` — корневая Apache-2.0 с multi-license заголовком
+- `NOTICE` — атрибуции
+- `PATENTS` — defensive patent pledge
+- `CONTRIBUTING.md` — DCO + правила контрибуции
+- `SECURITY.md` — политика раскрытия уязвимостей
+- `docs/IP_STRATEGY.md` — стратегия IP (внутренний)
+
 ## Чеклист для новой фичи
 
 1. Проверить BPE-alignment нового синтаксиса

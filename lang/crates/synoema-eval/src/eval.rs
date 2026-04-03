@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 //! Tree-walking evaluator for Synoema.
 //!
 //! Implements big-step operational semantics from the Language Reference §5.
@@ -390,6 +393,29 @@ impl Evaluator {
                 });
                 Ok(Value::Unit)
             }
+
+            // ── Property generator — evaluated by test runner, not here ──
+            ExprKind::Prop(vars, body) => {
+                // When evaluated directly (not via test runner), treat as lambda
+                // that returns Bool for a single random set. But test runner handles this.
+                // Fallback: evaluate body with unbound vars → will error if vars used.
+                // This path shouldn't normally be hit.
+                let mut local = env.child();
+                for var in vars {
+                    local.insert(var.clone(), Value::Unit);
+                }
+                self.eval(&local, body)
+            }
+
+            // ── When — body when cond: if cond false, vacuously true ────
+            ExprKind::When(body, cond) => {
+                let cond_val = self.eval(env, cond)?;
+                match cond_val {
+                    Value::Bool(false) => Ok(Value::Bool(true)),
+                    Value::Bool(true) => self.eval(env, body),
+                    _ => Err(err("when: condition must be Bool")),
+                }
+            }
         }
     }
 
@@ -753,6 +779,7 @@ impl Evaluator {
             // I/O builtins (for stress_server.sno)
             ("tcp_listen", 1), ("tcp_accept", 1),
             ("fd_readline", 1), ("fd_write", 2), ("fd_close", 1), ("fd_popen", 1),
+            ("fd_open", 1), ("fd_open_write", 1),
             // Concurrency builtins (Phase C)
             ("send", 2), ("recv", 1),
         ] {
@@ -1033,6 +1060,30 @@ impl Evaluator {
                 IO_READERS.with(|r| r.borrow_mut().insert(fd,
                     Box::new(BufReader::new(stdout)) as Box<dyn BufRead>));
                 IO_CHILDREN.with(|c| c.borrow_mut().insert(fd, child));
+                Ok(Value::Int(fd))
+            }
+
+            // ── File I/O builtins (streaming) ────────────────────────────────────
+
+            // fd_open: open file for reading (returns fd for fd_readline / fd_close)
+            "fd_open" => {
+                let path = sval(&args[0])?.to_string();
+                let file = std::fs::File::open(&path)
+                    .map_err(|e| err_io(format!("fd_open: {}: {}", path, e)))?;
+                let fd = next_io_fd();
+                IO_READERS.with(|r| r.borrow_mut().insert(fd,
+                    Box::new(BufReader::new(file)) as Box<dyn BufRead>));
+                Ok(Value::Int(fd))
+            }
+
+            // fd_open_write: open file for writing (returns fd for fd_write / fd_close)
+            "fd_open_write" => {
+                let path = sval(&args[0])?.to_string();
+                let file = std::fs::File::create(&path)
+                    .map_err(|e| err_io(format!("fd_open_write: {}: {}", path, e)))?;
+                let fd = next_io_fd();
+                IO_WRITERS.with(|w| w.borrow_mut().insert(fd,
+                    Box::new(std::io::BufWriter::new(file)) as Box<dyn Write>));
                 Ok(Value::Int(fd))
             }
 

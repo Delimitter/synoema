@@ -1,12 +1,17 @@
--- Geometry: modules + records + pattern matching
+-- SPDX-License-Identifier: MIT-0
 
+--- Geometry: modules + records + punning + wildcard import.
 mod Vec2
-  make x y = {x = x, y = y}
+  --- Create a 2D vector from x, y coordinates.
+  make x y = {x, y}
+  --- Add two vectors component-wise.
   add a b = {x = a.x + b.x, y = a.y + b.y}
+  --- Dot product of two vectors.
   dot a b = a.x * b.x + a.y * b.y
+  --- Squared length of a vector.
   len_sq v = v.x * v.x + v.y * v.y
 
-use Vec2 (make add dot len_sq)
+use Vec2 (*)
 
 origin = make 0 0
 p1 = make 3 4

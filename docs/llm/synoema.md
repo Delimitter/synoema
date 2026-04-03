@@ -21,12 +21,14 @@ Override your Haskell/Python priors first:
 | `case x of` | multi-equation `f Con = ...` | — |
 | `data T = A \| B` | `T = A \| B` | no `data` |
 | `class` / `instance` | `trait` / `impl` | — |
-| `import M` | `use M (f g)` | selective, explicit |
+| `import M` | `use M (f g)` or `use M (*)` | selective or wildcard |
 | `[1, 2, 3]` | `[1 2 3]` | **no commas** |
 | `x:xs` bare in pattern | `(x:xs)` | **parens required** |
 | `s1 + s2` (strings) | `s1 ++ s2` | `+` = numbers only |
+| `f"x={x}"` / `` `x=${x}` `` | `"x=${x}"` | `${}` interpolation |
 | `do { a; b }` | `a ; b` or `<-` bind | — |
 | `// comment` | `-- comment` | — |
+| `/// doc comment` | `--- doc comment` | preserved in AST |
 
 ---
 
@@ -146,11 +148,30 @@ pt     = {x = 3, y = 4}          -- literal
 px     = pt.x                    -- field access
 circle = {center = {x=0, y=0}, radius = 5}  -- nested
 
+-- punning: {x, y} ≡ {x = x, y = y}
+point x y = {x, y}
+mixed     = {x, y, sum = x + y}  -- mixed
+
 -- record pattern (destructure in args)
-dist {x = a, y = b} = a * a + b * b
+dist {x, y} = x * x + y * y      -- pattern punning
+dist2 {x = a, y = b} = a * a + b * b  -- explicit still works
 
 -- "update": create new record
 move_x pt dx = {x = pt.x + dx, y = pt.y}
+```
+
+---
+
+## 7b. Type aliases
+
+```sno
+type Pos = {x : Int, y : Int}
+type Transform = Int -> Int
+type Pair a b = {fst : a, snd : b}
+
+-- aliases are transparent (expanded at type check)
+dist : Pos -> Int
+dist p = p.x * p.x + p.y * p.y
 ```
 
 ---
@@ -165,6 +186,9 @@ Shape   = Circle Float | Rect Float Float | Point
 -- construction
 x = Just 42
 s = Circle 3.0
+
+-- derive: auto-generate typeclass instances
+Color = Red | Green | Blue derive (Show, Eq, Ord)
 
 -- pattern matching on constructors
 fromMaybe def None     = def
@@ -201,21 +225,45 @@ main = show (Just 42)   -- "Just 42"
 
 ---
 
-## 10. Modules
+## 10. Modules & Imports
 
 ```sno
 mod Math
   square x = x * x
   pi = 3.14159
 
-use Math (square pi)        -- selective import, must list names
+use Math (square pi)        -- selective import
+use Math (*)                -- wildcard: import all exports
 
 main = square 5             -- 25
 ```
 
+Multi-file: `import "path.sno"` loads another file's modules/decls.
+
+```sno
+-- main.sno
+import "math.sno"
+use Math (square)
+main = square 5
+```
+
+Circular imports → error. Diamond imports → loaded once.
+
 ---
 
-## 11. IO & effects
+## 11. String interpolation
+
+```sno
+msg = "Hello ${name}, you have ${count} items"
+sum = "${a} + ${b} = ${a + b}"      -- exprs allowed
+esc = "\$ is literal dollar"        -- \$ escapes
+```
+
+Desugars to `show` + `++`. No format specifiers.
+
+---
+
+## 12. IO & effects
 
 ```sno
 main = print "hello"        -- print any value, returns ()
@@ -229,7 +277,7 @@ main =                      -- monadic bind
 
 ---
 
-## 12. Stdlib
+## 13. Stdlib (summary — full list: `docs/llm/stdlib.md`)
 
 | Function | Type | |
 |----------|------|-|
@@ -240,11 +288,40 @@ main =                      -- monadic bind
 | `map` | `(a->b) -> [a] -> [b]` | transform |
 | `filter` | `(a->Bool) -> [a] -> [a]` | filter |
 | `foldl` | `(b->a->b) -> b -> [a] -> b` | left fold |
+| `concatMap` | `(a->[b]) -> [a] -> [b]` | map + flatten |
+| `sum` | `[Int] -> Int` | sum list |
 | `sqrt` `floor` `ceil` `abs` `round` | `Float -> Float` | math |
+| `str_len` `str_slice` `str_find` `str_trim` | String ops | see stdlib.md |
 
 ---
 
-## 13. Gotchas
+## 14. Error handling (LLM feedback loop)
+
+`--errors json` output includes `llm_hint`, `fixability`, `did_you_mean` fields.
+Full reference: `docs/llm/error-feedback.md`
+
+```bash
+synoema --errors json run file.sno   # JSON with LLM hints
+```
+
+Feedback loop: `tools/llm/feedback_loop.py` — generate, check, retry with enriched errors.
+
+---
+
+## 15. Testing
+
+```sno
+--- example: fact 5 == 120          -- doctest (in doc comment)
+test "base case" = fact 0 == 1      -- unit test (Bool expression)
+test "inv" = prop xs -> reverse (reverse xs) == xs  -- property test
+test "pos" = prop n -> fact n > 0 when n >= 0 && n <= 10  -- conditional
+```
+
+Keywords: `test` (declaration), `prop` (generator), `when` (conditional). Run: `synoema test file.sno`
+
+---
+
+## 16. Gotchas
 
 1. **Cons pattern needs parens** — `head (x:_) = x` ✓  `head x:_ = x` ✗
 2. **List: space-separated** — `[1 2 3]` never `[1, 2, 3]`

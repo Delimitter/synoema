@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: MIT-0
+
 -- Fast exponentiation
 pow x 0 = 1
 pow x n = ? n % 2 == 0 -> pow (x * x) (n / 2) : x * pow x (n - 1)

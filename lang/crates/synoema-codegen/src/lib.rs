@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: BUSL-1.1
+// Copyright (c) 2025-present Andrey Bubnov
+
 //! # synoema-codegen
 //! Cranelift-based native code generator for the Synoema programming language.
 //!
@@ -8,11 +11,22 @@ pub mod runtime;
 pub use compiler::{Compiler, CompileError};
 pub use runtime::arena_reset;
 
+use std::path::Path;
 use synoema_diagnostic::{Diagnostic, codes};
+use synoema_parser::{ImportError, ImportErrorCode};
 
 fn parse_err(e: &synoema_parser::ParseError) -> Diagnostic {
     Diagnostic::error(codes::PARSE_UNEXPECTED_TOKEN, e.message.clone())
         .with_span(e.span)
+}
+
+fn import_err(e: ImportError) -> Diagnostic {
+    let code = match e.code {
+        ImportErrorCode::Cycle => codes::IMPORT_CYCLE,
+        ImportErrorCode::NotFound => codes::IMPORT_NOT_FOUND,
+        ImportErrorCode::ParseError => codes::PARSE_UNEXPECTED_TOKEN,
+    };
+    Diagnostic::error(code, e.message).with_span(e.span)
 }
 
 fn compile_err(e: CompileError) -> Diagnostic {
@@ -22,11 +36,20 @@ fn compile_err(e: CompileError) -> Diagnostic {
 /// Parse, desugar, and JIT-compile a Synoema program, returning main() result as i64.
 /// Strings are returned as tagged i64 pointers (use `display_result` for human-readable output).
 pub fn compile_and_run(source: &str) -> Result<i64, Diagnostic> {
+    compile_and_run_with_base_dir(source, None)
+}
+
+/// Like `compile_and_run` but with import resolution from `base_dir`.
+pub fn compile_and_run_with_base_dir(source: &str, base_dir: Option<&Path>) -> Result<i64, Diagnostic> {
     let program = synoema_parser::parse(source)
         .map_err(|e| parse_err(&e))?;
+    let program = if let Some(dir) = base_dir {
+        synoema_parser::resolve_imports(program, dir).map_err(import_err)?
+    } else { program };
     let program = synoema_types::resolve_modules(program);
     let core = synoema_core::desugar_program(&program);
     let core = synoema_core::optimize_program(core);
+    let core = synoema_core::annotate_regions(core);
     let mut compiler = Compiler::new()
         .map_err(compile_err)?;
     let result = compiler.compile_and_run(&core)
@@ -38,7 +61,12 @@ pub fn compile_and_run(source: &str) -> Result<i64, Diagnostic> {
 /// Parse, desugar, JIT-compile and return main() result as a display string.
 /// Handles both integer results and tagged string results.
 pub fn compile_and_display(source: &str) -> Result<String, Diagnostic> {
-    let result = compile_and_run(source)?;
+    compile_and_display_with_base_dir(source, None)
+}
+
+/// Like `compile_and_display` but with import resolution from `base_dir`.
+pub fn compile_and_display_with_base_dir(source: &str, base_dir: Option<&Path>) -> Result<String, Diagnostic> {
+    let result = compile_and_run_with_base_dir(source, base_dir)?;
     Ok(runtime::display_value(result))
 }
 
@@ -1268,5 +1296,146 @@ main = \"color=\" ++ show Green";
     #[test]
     fn jit_foldl_product() {
         assert_eq!(jit("main = foldl (\\acc x -> acc * x) 1 [1 2 3 4 5]"), 120);
+    }
+
+    // ── TCO (tail-call optimization) tests ──────────────────────────────
+
+    #[test]
+    fn jit_tco_countdown() {
+        // Simple tail-recursive countdown — would overflow without TCO
+        assert_eq!(jit(
+            "countdown n = ? n == 0 -> 0 : countdown (n - 1)\nmain = countdown 1000000"
+        ), 0);
+    }
+
+    #[test]
+    fn jit_tco_sum_acc() {
+        // Accumulator-style tail recursion: sum 1..10
+        assert_eq!(jit(
+            "sum_to n acc = ? n == 0 -> acc : sum_to (n - 1) (acc + n)\nmain = sum_to 10 0"
+        ), 55);
+    }
+
+    #[test]
+    fn jit_tco_gcd_unchanged() {
+        // gcd is tail-recursive — result should be unchanged
+        assert_eq!(jit(
+            "gcd a b = ? b == 0 -> a : gcd b (a % b)\nmain = gcd 1071 462"
+        ), 21);
+    }
+
+    #[test]
+    fn jit_tco_factorial_unchanged() {
+        // factorial is NOT tail-recursive (n * fact(n-1)) — result should still be correct
+        assert_eq!(jit(
+            "fact 0 = 1\nfact n = n * fact (n - 1)\nmain = fact 10"
+        ), 3628800);
+    }
+
+    #[test]
+    fn jit_tco_deep_acc() {
+        // Deep tail recursion with accumulator — 1M iterations
+        assert_eq!(jit(
+            "sum_to n acc = ? n == 0 -> acc : sum_to (n - 1) (acc + n)\nmain = sum_to 1000000 0"
+        ), 500000500000);
+    }
+
+    // ── String Stdlib in JIT ─────────────────────────────
+
+    #[test]
+    fn jit_str_slice_basic() {
+        assert_eq!(jit_str("main = str_slice \"hello world\" 0 5"), "hello");
+    }
+
+    #[test]
+    fn jit_str_slice_middle() {
+        assert_eq!(jit_str("main = str_slice \"hello world\" 6 11"), "world");
+    }
+
+    #[test]
+    fn jit_str_slice_clamped() {
+        assert_eq!(jit_str("main = str_slice \"hi\" 0 100"), "hi");
+    }
+
+    #[test]
+    fn jit_str_find_found() {
+        assert_eq!(jit("main = str_find \"hello world\" \" \" 0"), 5);
+    }
+
+    #[test]
+    fn jit_str_find_not_found() {
+        assert_eq!(jit("main = str_find \"hello\" \"xyz\" 0"), -1);
+    }
+
+    #[test]
+    fn jit_str_find_from_offset() {
+        assert_eq!(jit("main = str_find \"abcabc\" \"bc\" 2"), 4);
+    }
+
+    #[test]
+    fn jit_str_starts_with_true() {
+        assert_eq!(jit("main = str_starts_with \"hello\" \"hel\""), 1);
+    }
+
+    #[test]
+    fn jit_str_starts_with_false() {
+        assert_eq!(jit("main = str_starts_with \"hello\" \"world\""), 0);
+    }
+
+    #[test]
+    fn jit_str_trim_spaces() {
+        assert_eq!(jit_str("main = str_trim \"  hello  \""), "hello");
+    }
+
+    #[test]
+    fn jit_str_len_basic() {
+        assert_eq!(jit("main = str_len \"hello\""), 5);
+    }
+
+    #[test]
+    fn jit_str_len_empty() {
+        assert_eq!(jit("main = str_len \"\""), 0);
+    }
+
+    #[test]
+    fn jit_json_escape_quotes() {
+        assert_eq!(jit_str("main = json_escape \"he said \\\"hi\\\"\""), "he said \\\"hi\\\"");
+    }
+
+    #[test]
+    fn jit_json_escape_backslash() {
+        assert_eq!(jit_str("main = json_escape \"a\\\\b\""), "a\\\\b");
+    }
+
+    // ── Region inference tests ────────────────────────
+
+    #[test]
+    fn jit_region_tco_loop_basic() {
+        // Tail-recursive countdown — TCO auto-region should free per-iteration heap
+        assert_eq!(jit("countdown n = ? n == 0 -> 0 : countdown (n - 1)\nmain = countdown 100000"), 0);
+    }
+
+    #[test]
+    fn jit_region_tco_sum_acc() {
+        // Tail-recursive sum with accumulator
+        assert_eq!(jit("sum_to n acc = ? n == 0 -> acc : sum_to (n - 1) (acc + n)\nmain = sum_to 1000 0"), 500500);
+    }
+
+    #[test]
+    fn jit_region_non_escaping_let() {
+        // Non-escaping list: result is length (int), list can be freed
+        assert_eq!(jit("main = length [1 2 3 4 5]"), 5);
+    }
+
+    #[test]
+    fn jit_region_escaping_let() {
+        // Escaping list: result IS the list, must survive
+        assert_eq!(jit("main = head [42 1 2]"), 42);
+    }
+
+    #[test]
+    fn jit_region_sum_range() {
+        // sum of [1..100] — range allocates, sum consumes
+        assert_eq!(jit("main = sum [1..100]"), 5050);
     }
 }

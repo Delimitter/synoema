@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 use crate::*;
 
 fn check(src: &str) -> TypeEnv {
@@ -648,4 +651,55 @@ fn linear_unify_linear_with_unrestricted_fails() {
     let unr = Type::arrow(Type::int(), Type::int());
     let mut gen = TyVarGen::new();
     assert!(unify(&lin, &unr, &mut gen).is_err());
+}
+
+#[test]
+fn con_pattern_wrong_arity_rejected() {
+    // Constructor Just : a -> Maybe a — pattern Just(x, y) has 2 args instead of 1
+    let err = check_err("Maybe a = Just a | None\nf (Just x y) = x\nmain = f (Just 1)");
+    assert!(
+        err.contains("expected 1") || err.contains("arity") || err.contains("arguments"),
+        "Wrong arity should be rejected, got: {}",
+        err
+    );
+}
+
+// ── Type Aliases ─────────────────────────────────────────
+
+#[test]
+fn type_alias_simple_con() {
+    // type Num = Int; then use Num in ADT field — should resolve to Int
+    check("type Num = Int\nId a = MkId a\nf (MkId x) = x + 1\nmain = f (MkId 42)");
+}
+
+#[test]
+fn type_alias_in_signature() {
+    // type alias used in type signature
+    check("type Num = Int\nadd : Num -> Num -> Num\nadd x y = x + y\nmain = add 1 2");
+}
+
+#[test]
+fn type_alias_recursive_rejected() {
+    let err = check_err("type Rec = Rec\nmain = 42");
+    assert!(
+        err.contains("Recursive") || err.contains("recursive"),
+        "Recursive alias should be rejected, got: {}",
+        err
+    );
+}
+
+// ── Error Recovery (Type Checker) ────────────────────────
+
+#[test]
+fn type_recovery_collects_multiple_errors() {
+    // Two functions with type errors — both should be reported
+    let (_, errors) = crate::typecheck_recovering("foo x = x + true\nbar y = y ++ 42\nmain = 1");
+    assert!(errors.len() >= 2, "should collect multiple type errors, got {}", errors.len());
+}
+
+#[test]
+fn type_recovery_valid_no_errors() {
+    let (result, errors) = crate::typecheck_recovering("foo x = x + 1\nmain = foo 2");
+    assert!(result.is_ok(), "valid program should typecheck");
+    assert!(errors.is_empty(), "valid program should have no type errors");
 }

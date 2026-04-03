@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 use crate::*;
 
 fn ev(src: &str) -> Value {
@@ -1336,6 +1339,110 @@ fn file_read_missing_is_err() {
     assert!(result.unwrap_err().message.contains("file_read"));
 }
 
+// ── Memory Management v2: fd_open / fd_open_write ─────────────────────────────
+
+#[test]
+fn fd_open_read_line() {
+    // fd_open opens a file for reading, fd_readline reads one line
+    let src = r#"
+main =
+  fd = fd_open "Cargo.toml"
+  line = fd_readline fd
+  fd_close fd |> \_ -> str_len line
+"#;
+    let (val, _) = run_main(src);
+    match val {
+        Value::Int(n) => assert!(n > 0, "Expected non-empty first line, got {}", n),
+        _ => panic!("Expected Int, got {:?}", val),
+    }
+}
+
+#[test]
+fn fd_open_read_multiple_lines() {
+    // fd_readline reads successive lines from the same fd
+    let src = r#"
+main =
+  fd = fd_open "Cargo.toml"
+  l1 = fd_readline fd
+  l2 = fd_readline fd
+  fd_close fd |> \_ -> l1 ++ "|" ++ l2
+"#;
+    let (val, _) = run_main(src);
+    match &val {
+        Value::Str(s) => {
+            assert!(s.contains("|"), "Expected two lines joined by |, got {:?}", s);
+            let parts: Vec<&str> = s.split('|').collect();
+            assert_eq!(parts.len(), 2);
+            assert!(!parts[0].is_empty());
+        }
+        _ => panic!("Expected Str, got {:?}", val),
+    }
+}
+
+#[test]
+fn fd_open_missing_file_is_err() {
+    let result = eval_main(r#"main = fd_open "/nonexistent/path/xyz.txt""#);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().message.contains("fd_open"));
+}
+
+#[test]
+fn fd_open_write_creates_file() {
+    use std::io::Write;
+    // Create a temp file path
+    let tmp = std::env::temp_dir().join("synoema_test_fd_open_write.txt");
+    let tmp_path = tmp.to_str().unwrap().replace('\\', "/");
+    let src = format!(r#"
+main =
+  fd = fd_open_write "{}"
+  fd_write fd "hello from synoema"
+  fd_close fd |> \_ -> 42
+"#, tmp_path);
+    let (val, _) = run_main(&src);
+    assert_eq!(val, Value::Int(42));
+    // Verify file contents
+    let contents = std::fs::read_to_string(&tmp).unwrap();
+    assert_eq!(contents, "hello from synoema");
+    // Cleanup
+    let _ = std::fs::remove_file(&tmp);
+}
+
+#[test]
+fn fd_open_write_then_read() {
+    // Write a file, then read it back with fd_open
+    let tmp = std::env::temp_dir().join("synoema_test_write_then_read.txt");
+    let tmp_path = tmp.to_str().unwrap().replace('\\', "/");
+
+    // Step 1: write the file
+    let write_src = format!(r#"
+main =
+  wfd = fd_open_write "{}"
+  fd_write wfd "line one"
+  fd_close wfd |> \_ -> 1
+"#, tmp_path);
+    let (val, _) = run_main(&write_src);
+    assert_eq!(val, Value::Int(1));
+
+    // Step 2: read it back
+    let read_src = format!(r#"
+main =
+  rfd = fd_open "{}"
+  line = fd_readline rfd
+  fd_close rfd |> \_ -> line
+"#, tmp_path);
+    let (val, _) = run_main(&read_src);
+    assert_eq!(val, Value::Str("line one".to_string()));
+
+    let _ = std::fs::remove_file(&tmp);
+}
+
+#[test]
+fn fd_open_write_missing_dir_is_err() {
+    let result = eval_main(r#"main = fd_open_write "/nonexistent/dir/file.txt""#);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().message.contains("fd_open_write"));
+}
+
 // ── Phase C: chan / send / recv ────────────────────────────────────────────────
 
 #[test]
@@ -1454,4 +1561,259 @@ main =
 "#;
     let (val, _) = run_main(src);
     assert_eq!(val, Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)]));
+}
+
+// ── Type Aliases (e2e) ───────────────────────────────────
+
+#[test]
+fn type_alias_program_runs() {
+    // Type alias should be transparent — program runs as if alias wasn't there
+    let (val, _) = run_main("type Num = Int\nadd : Num -> Num -> Num\nadd x y = x + y\nmain = add 3 4");
+    assert_eq!(val, Value::Int(7));
+}
+
+#[test]
+fn type_alias_with_adt() {
+    // Type alias + ADT — alias used in program, not blocking ADT definitions
+    let (val, _) = run_main("type Num = Int\nMaybe a = Just a | None\nmain = Just 42");
+    assert_eq!(val, Value::Con("Just".into(), vec![Value::Int(42)]));
+}
+
+// ── String Interpolation ─────────────────────────────────
+
+#[test]
+fn interp_simple_var() {
+    let (val, _) = run_main("name = \"World\"\nmain = \"Hello ${name}\"");
+    assert_eq!(val, Value::Str("Hello World".into()));
+}
+
+#[test]
+fn interp_int_show() {
+    let (val, _) = run_main("x = 42\nmain = \"x is ${x}\"");
+    assert_eq!(val, Value::Str("x is 42".into()));
+}
+
+#[test]
+fn interp_expression() {
+    let (val, _) = run_main("main = \"sum is ${2 + 3}\"");
+    assert_eq!(val, Value::Str("sum is 5".into()));
+}
+
+#[test]
+fn interp_multiple() {
+    let (val, _) = run_main("a = 1\nb = 2\nmain = \"${a} + ${b} = ${a + b}\"");
+    assert_eq!(val, Value::Str("1 + 2 = 3".into()));
+}
+
+#[test]
+fn interp_string_var_no_quotes() {
+    // show "hello" should produce "hello" not "\"hello\""
+    let (val, _) = run_main("s = \"world\"\nmain = \"hello ${s}\"");
+    assert_eq!(val, Value::Str("hello world".into()));
+}
+
+#[test]
+fn interp_escaped_dollar() {
+    let val = ev(r#""\$ is money""#);
+    assert_eq!(val, Value::Str("$ is money".into()));
+}
+
+#[test]
+fn interp_no_interp_stays_plain() {
+    let val = ev(r#""no interpolation""#);
+    assert_eq!(val, Value::Str("no interpolation".into()));
+}
+
+#[test]
+fn interp_only_expr() {
+    let (val, _) = run_main("main = \"${42}\"");
+    assert_eq!(val, Value::Str("42".into()));
+}
+
+// ── LLM Error Feedback Integration ─────────────────────
+
+#[test]
+fn error_enrichment_type_mismatch() {
+    let err = run("main = 1 + true").unwrap_err();
+    assert_eq!(err.code, "type_mismatch");
+    assert!(err.llm_hint.is_some(), "type_mismatch should have llm_hint");
+    assert_eq!(err.fixability, Some(synoema_diagnostic::Fixability::Trivial));
+}
+
+#[test]
+fn error_enrichment_unbound_var() {
+    let err = run("main = foo").unwrap_err();
+    assert!(err.llm_hint.is_some(), "unbound_variable should have llm_hint");
+    assert_eq!(err.fixability, Some(synoema_diagnostic::Fixability::Easy));
+}
+
+#[test]
+fn error_enrichment_json_output() {
+    let err = run("main = 1 + true").unwrap_err();
+    let json = synoema_diagnostic::render_json(&err);
+    assert!(json.contains("\"llm_hint\":"), "JSON should contain llm_hint");
+    assert!(json.contains("\"fixability\":"), "JSON should contain fixability");
+}
+
+// ── derive(Show, Eq, Ord) ───────────────────────────────
+
+#[test]
+fn derive_show_enum() {
+    let (val, _) = run_main("Color = Red | Green | Blue derive (Show)\nmain = show Red");
+    assert_eq!(val, Value::Str("Red".into()));
+}
+
+#[test]
+fn derive_show_with_fields() {
+    let (val, _) = run_main("Maybe a = Just a | Nothing derive (Show)\nmain = show (Just 42)");
+    assert_eq!(val, Value::Str("Just 42".into()));
+}
+
+#[test]
+fn derive_show_nothing() {
+    let (val, _) = run_main("Maybe a = Just a | Nothing derive (Show)\nmain = show Nothing");
+    assert_eq!(val, Value::Str("Nothing".into()));
+}
+
+#[test]
+fn derive_eq_same() {
+    let (val, _) = run_main("trait Eq a\n  eq : a -> a -> Bool\nColor = Red | Green | Blue derive (Eq)\nmain = eq Red Red");
+    assert_eq!(val, Value::Bool(true));
+}
+
+#[test]
+fn derive_eq_diff() {
+    let (val, _) = run_main("trait Eq a\n  eq : a -> a -> Bool\nColor = Red | Green | Blue derive (Eq)\nmain = eq Red Blue");
+    assert_eq!(val, Value::Bool(false));
+}
+
+#[test]
+fn derive_eq_with_fields_same() {
+    let (val, _) = run_main("trait Eq a\n  eq : a -> a -> Bool\nMaybe a = Just a | Nothing derive (Eq)\nmain = eq (Just 1) (Just 1)");
+    assert_eq!(val, Value::Bool(true));
+}
+
+#[test]
+fn derive_eq_with_fields_diff() {
+    let (val, _) = run_main("trait Eq a\n  eq : a -> a -> Bool\nMaybe a = Just a | Nothing derive (Eq)\nmain = eq (Just 1) (Just 2)");
+    assert_eq!(val, Value::Bool(false));
+}
+
+#[test]
+fn derive_eq_diff_constructors() {
+    let (val, _) = run_main("trait Eq a\n  eq : a -> a -> Bool\nMaybe a = Just a | Nothing derive (Eq)\nmain = eq (Just 1) Nothing");
+    assert_eq!(val, Value::Bool(false));
+}
+
+#[test]
+fn derive_ord_less() {
+    let (val, _) = run_main("trait Ord a\n  cmp : a -> a -> Int\nColor = Red | Green | Blue derive (Ord)\nmain = cmp Red Green");
+    assert_eq!(val, Value::Int(-1));
+}
+
+#[test]
+fn derive_ord_equal() {
+    let (val, _) = run_main("trait Ord a\n  cmp : a -> a -> Int\nColor = Red | Green | Blue derive (Ord)\nmain = cmp Green Green");
+    assert_eq!(val, Value::Int(0));
+}
+
+#[test]
+fn derive_ord_greater() {
+    let (val, _) = run_main("trait Ord a\n  cmp : a -> a -> Int\nColor = Red | Green | Blue derive (Ord)\nmain = cmp Blue Red");
+    assert_eq!(val, Value::Int(1));
+}
+
+#[test]
+fn derive_ord_first_vs_last() {
+    let (val, _) = run_main("trait Ord a\n  cmp : a -> a -> Int\nColor = Red | Green | Blue derive (Ord)\nmain = cmp Red Blue");
+    assert_eq!(val, Value::Int(-1));
+}
+
+#[test]
+fn derive_ord_last_vs_middle() {
+    let (val, _) = run_main("trait Ord a\n  cmp : a -> a -> Int\nColor = Red | Green | Blue derive (Ord)\nmain = cmp Blue Green");
+    assert_eq!(val, Value::Int(1));
+}
+
+#[test]
+fn derive_multiple_traits() {
+    let (val, _) = run_main("trait Eq a\n  eq : a -> a -> Bool\ntrait Ord a\n  cmp : a -> a -> Int\nColor = Red | Green | Blue derive (Show, Eq, Ord)\nmain = show Red ++ \" \" ++ show (eq Red Red) ++ \" \" ++ show (cmp Red Green)");
+    assert_eq!(val, Value::Str("Red true -1".into()));
+}
+
+#[test]
+fn derive_manual_override_show() {
+    // Manual impl should override derive (derive Show is a no-op, manual impl works)
+    let (val, _) = run_main("Color = Red | Green | Blue derive (Show)\nimpl Show Color\n  show Red = \"RED\"\n  show Green = \"GREEN\"\n  show Blue = \"BLUE\"\nmain = show Red");
+    assert_eq!(val, Value::Str("RED".into()));
+}
+
+#[test]
+fn derive_unknown_trait_error() {
+    let result = run("Color = Red | Green | Blue derive (Functor)\nmain = show Red");
+    assert!(result.is_err());
+}
+
+#[test]
+fn derive_recursive_adt() {
+    let (val, _) = run_main("trait Eq a\n  eq : a -> a -> Bool\nList a = Cons a (List a) | Nil derive (Show, Eq)\nmain = show (Cons 1 (Cons 2 Nil))");
+    assert_eq!(val, Value::Str("Cons 1 (Cons 2 Nil)".into()));
+}
+
+// ── Record Punning ──────────────────────────────────────────
+
+#[test]
+fn record_punning_basic() {
+    let (val, _) = run_main("main =\n  x = 3\n  y = 4\n  r = {x, y}\n  r.x + r.y");
+    assert_eq!(val, Value::Int(7));
+}
+
+#[test]
+fn record_punning_mixed() {
+    let (val, _) = run_main("main =\n  x = 10\n  r = {x, y = 20}\n  r.x + r.y");
+    assert_eq!(val, Value::Int(30));
+}
+
+#[test]
+fn record_pattern_punning() {
+    let (val, _) = run_main("get_sum {x, y} = x + y\nmain = get_sum {x = 3, y = 4}");
+    assert_eq!(val, Value::Int(7));
+}
+
+// ── Wildcard Import ─────────────────────────────────────────
+
+#[test]
+fn wildcard_import_basic() {
+    let src = "\
+mod Math
+  square x = x * x
+  cube x = x * x * x
+use Math (*)
+main = square 5 + cube 2";
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Int(33));
+}
+
+#[test]
+fn wildcard_import_constant() {
+    let src = "\
+mod Consts
+  pi = 314
+  e = 271
+use Consts (*)
+main = pi + e";
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Int(585));
+}
+
+#[test]
+fn wildcard_import_with_args() {
+    let src = "\
+mod Vec
+  make x y = {x = x, y = y}
+  dot a b = a.x * b.x + a.y * b.y
+use Vec (*)
+main = dot (make 3 4) (make 1 2)";
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Int(11));
 }

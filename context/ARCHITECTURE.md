@@ -43,6 +43,14 @@ Source (.sno) → Lexer → Parser → Types (HM) → Core IR → Optimizer → 
 - `RECORD_TAG (0x05)` → Record (RecordNode)
 - Иначе → Int / Bool (unboxed)
 
+## Memory Management (JIT)
+
+8 MB bump arena с region stack. Два уровня автоматического управления:
+1. **TCO auto-regions:** tail-recursive loops получают `region_enter` на loop header и `region_exit` перед back-edge — per-iteration heap автоматически освобождается
+2. **Escape analysis:** Core IR pass (`annotate_regions`) оборачивает non-escaping `let`-bindings в `CoreExpr::Region` → JIT emits `region_enter`/`region_exit`
+
+Region stack: массив saved offsets (depth до 64). `arena_reset()` после каждого запуска очищает всё.
+
 ## Runtime FFI паттерн
 
 ```rust

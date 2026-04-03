@@ -1,0 +1,37 @@
+DEFENSIVE PATENT PLEDGE
+
+Andrey Bubnov hereby pledges that, to the extent they hold any
+patent claims covering the Synoema compiler, language specification,
+or associated tooling, they will not assert such claims against any
+party for making, using, selling, or distributing software that
+implements the Synoema language specification or interoperates with
+the Synoema compiler, UNLESS that party first asserts patent claims
+against Synoema, its contributors, or its users.
+
+This pledge is irrevocable and applies to all current and future
+patent claims held by Andrey Bubnov related to:
+
+1. BPE-aligned lexer design methodology — lexemes engineered to
+   align with BPE tokenizer boundaries (e.g., GPT-4 cl100k_base,
+   Claude) so that each language operator occupies exactly one token.
+
+2. Intent-Bridging Annotation (IBA) system — the @? (informal),
+   @! (contract), and @!! (formal proof) annotation mechanism used
+   by LLMs during code generation but erased at compile time.
+
+3. Automatic constrained-decoding grammar generation from language
+   specifications — generating GBNF grammars from typed EBNF specs
+   for use in SGLang/vLLM constrained decoding pipelines.
+
+4. Context-window-optimized module interface generation — the .snm
+   module interface format designed to fit within LLM context-window
+   budgets (< 2KB per module).
+
+This pledge does not extend to implementations that are not
+substantially derived from or interoperable with Synoema.
+
+This pledge is made in the spirit of the Open Patent Pledge and is
+intended to foster innovation and interoperability in the programming
+language and LLM tooling ecosystem.
+
+Effective date: 2025-04-03

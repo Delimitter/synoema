@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 //! Robinson's unification algorithm for Synoema types.
 
 use crate::types::*;
@@ -143,13 +146,14 @@ fn unify_records(
         // This preserves openness and correctly threads extra fields.
         (Some(r1), Some(r2)) => {
             if r1 == r2 {
-                // Same row variable — only need to ensure no exclusive extras on either side
-                // (if both have the same tail, they already agree on what's unknown)
-                // Just unify exclusive fields as errors since we can't distinguish
+                // Same row variable — both types share the same "rest".
+                // Any field present in one but not the other is a contradiction:
+                // the shared tail cannot simultaneously contain and not contain a field.
                 if !extra_in_1.is_empty() || !extra_in_2.is_empty() {
-                    // Both have a shared tail but different declared fields — still consistent;
-                    // unify each exclusive set into the shared tail (noop if no conflict).
-                    // This is fine — nothing to bind since r1 == r2.
+                    return Err(TypeError::bare(TypeErrorKind::Mismatch {
+                        expected: orig1.clone(),
+                        found: orig2.clone(),
+                    }));
                 }
             } else if extra_in_1.is_empty() && extra_in_2.is_empty() {
                 // No extra fields on either side: just unify the tails
@@ -264,5 +268,56 @@ mod tests {
         let t2 = Type::list(Type::int());
         let s = unify(&t1, &t2, &mut gen()).unwrap();
         assert_eq!(s.0.get(&0), Some(&Type::int()));
+    }
+
+    #[test]
+    fn unify_open_records_same_row_var_conflicting_fields() {
+        // {x: Int, y: Bool | r} vs {x: Int, z: String | r} with same row var
+        // y is in first but not second, z is in second but not first — mismatch
+        let r = 99; // shared row variable
+        let t1 = Type::Record(
+            vec![("x".into(), Type::int()), ("y".into(), Type::bool())],
+            Some(r),
+        );
+        let t2 = Type::Record(
+            vec![("x".into(), Type::int()), ("z".into(), Type::Con("String".into()))],
+            Some(r),
+        );
+        let result = unify(&t1, &t2, &mut gen());
+        assert!(result.is_err(), "same row var with different field sets must fail");
+    }
+
+    #[test]
+    fn unify_open_records_same_row_var_same_fields_ok() {
+        // {x: Int, y: Bool | r} vs {x: Int, y: Bool | r} — should succeed
+        let r = 99;
+        let t1 = Type::Record(
+            vec![("x".into(), Type::int()), ("y".into(), Type::bool())],
+            Some(r),
+        );
+        let t2 = Type::Record(
+            vec![("x".into(), Type::int()), ("y".into(), Type::bool())],
+            Some(r),
+        );
+        let result = unify(&t1, &t2, &mut gen());
+        assert!(result.is_ok(), "same row var with identical fields should succeed");
+    }
+
+    #[test]
+    fn unify_open_records_same_row_var_type_mismatch() {
+        // {x: Int, y: Bool | r} vs {x: Int, y: String | r} with same row var
+        // y appears in both but with incompatible types — should fail during
+        // common field unification (before we even check extras)
+        let r = 99;
+        let t1 = Type::Record(
+            vec![("x".into(), Type::int()), ("y".into(), Type::bool())],
+            Some(r),
+        );
+        let t2 = Type::Record(
+            vec![("x".into(), Type::int()), ("y".into(), Type::Con("String".into()))],
+            Some(r),
+        );
+        let result = unify(&t1, &t2, &mut gen());
+        assert!(result.is_err(), "same row var with conflicting field types must fail");
     }
 }

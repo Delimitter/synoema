@@ -18,15 +18,26 @@ root ::= program
 
 program ::= (top-item newline)* top-item newline?
 
-top-item ::= module-decl | use-decl | decl
+top-item ::= import-decl | module-decl | use-decl | decl
 
 # ── Module System ────────────────────────────────────────
 
+import-decl ::= "import" ws string-lit
+
 module-decl ::= "mod" ws upper-id newline (ws func-def newline)+
 
-use-decl ::= "use" ws upper-id ws "(" ws lower-id (ws lower-id)* ws ")"
+use-decl ::= "use" ws upper-id ws "(" ws use-names ws ")"
+use-names ::= "*" | lower-id (ws lower-id)*
 
-decl ::= func-def | type-sig | type-def
+decl ::= func-def | type-sig | type-def | type-alias | test-decl
+
+# ── Test Declarations ────────────────────────────────────
+
+test-decl ::= "test" ws string-lit ws "=" ws expr
+
+# ── Type Aliases ────────────────────────────────────────
+
+type-alias ::= "type" ws upper-id (ws lower-id)* ws "=" ws type
 
 # ── Function Definition ──────────────────────────────────
 
@@ -36,7 +47,7 @@ type-sig ::= lower-id ws ":" ws type
 
 # ── Type Definitions (ADT) ───────────────────────────────
 
-type-def ::= upper-id (ws lower-id)* ws "=" ws variants
+type-def ::= upper-id (ws lower-id)* ws "=" ws variants (ws "derive" ws "(" ws upper-id (ws "," ws upper-id)* ws ")")?
 
 variants ::= variant (ws "|" ws variant)*
 
@@ -44,11 +55,15 @@ variant ::= upper-id (ws type-atom)*
 
 # ── Expressions (precedence climbing) ────────────────────
 
-expr ::= cond-expr | pipe-expr
+expr ::= cond-expr | prop-expr | pipe-expr
 
 cond-expr ::= "?" ws expr ws "->" ws expr ws ":" ws expr
 
-pipe-expr ::= or-expr (ws "|>" ws or-expr)*
+prop-expr ::= "prop" ws lower-id (ws lower-id)* ws "->" ws expr
+
+pipe-expr ::= when-expr (ws "|>" ws when-expr)*
+
+when-expr ::= or-expr (ws "when" ws or-expr)*
 
 or-expr ::= and-expr (ws "||" ws and-expr)*
 
@@ -89,7 +104,7 @@ atom ::= lower-id
 record-expr ::= "{" ws "}"
               | "{" ws record-field (ws "," ws record-field)* ws "}"
 
-record-field ::= lower-id ws "=" ws expr
+record-field ::= lower-id ws "=" ws expr | lower-id
 
 lambda-expr ::= "\\" ws (pattern ws)+ "->" ws expr
 
@@ -116,7 +131,8 @@ pattern ::= "_"
           | "[" ws "]"
           | record-pattern
 
-record-pattern ::= "{" ws lower-id ws "=" ws pattern (ws "," ws lower-id ws "=" ws pattern)* ws "}"
+record-pattern ::= "{" ws record-pat-field (ws "," ws record-pat-field)* ws "}"
+record-pat-field ::= lower-id ws "=" ws pattern | lower-id
 
 # ── Types ────────────────────────────────────────────────
 
@@ -133,9 +149,13 @@ int-lit ::= "0" | [1-9] [0-9]*
 
 float-lit ::= int-lit "." [0-9]+
 
-string-lit ::= "\"" string-char* "\""
+string-lit ::= "\"" string-content* "\""
 
-string-char ::= [^"\\\n] | "\\" [nrt\\"0]
+string-content ::= string-char+ | interpolation
+
+interpolation ::= "${" expr "}"
+
+string-char ::= [^"\\\n$] | "\\" [nrt\\"0$] | "$" [^{]
 
 char-lit ::= "'" ([^'\\\n] | "\\" [nrt\\'0]) "'"
 
@@ -148,7 +168,7 @@ lower-id ::= [a-z] [a-zA-Z0-9_]*
 upper-id ::= [A-Z] [a-zA-Z0-9]*
 
 # ── Keywords (reserved) ─────────────────────────────────
-# mod, use, trait, impl, true, false, lazy
+# mod, use, import, trait, impl, type, true, false, lazy
 # These are handled by the identifier rules above
 
 # ── Whitespace & Structure ───────────────────────────────
@@ -160,3 +180,4 @@ newline ::= "\n" [ \t]*
 # ── Comments (optional - LLM may or may not generate) ────
 
 comment ::= "--" [^\n]*
+doc-comment ::= "---" " "? [^\n]*

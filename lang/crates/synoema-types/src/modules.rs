@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 //! Module resolution pass for Synoema.
 //!
 //! Converts `mod`/`use` declarations into regular top-level `Decl::Func` entries
@@ -33,12 +36,13 @@ pub fn resolve_modules(program: Program) -> Program {
     for module in program.modules {
         for decl in module.body {
             match decl {
-                Decl::Func { name, equations, span } => {
+                Decl::Func { name, equations, span, doc } => {
                     let qualified = format!("{}.{}", module.name, name);
                     module_decls.push(Decl::Func {
                         name: qualified,
                         equations,
                         span,
+                        doc,
                     });
                 }
                 // Type sigs and ADTs inside a module are kept as-is.
@@ -51,7 +55,19 @@ pub fn resolve_modules(program: Program) -> Program {
     //    This ensures aliases work correctly in both the interpreter and JIT.
     let mut alias_decls: Vec<Decl> = Vec::new();
     for use_decl in program.uses {
-        for name in use_decl.names {
+        // Wildcard import: use M (*) → collect all function names from module
+        let names = if use_decl.names == ["*"] {
+            let prefix = format!("{}.", use_decl.module);
+            module_decls.iter().filter_map(|d| match d {
+                Decl::Func { name, .. } if name.starts_with(&prefix) => {
+                    Some(name[prefix.len()..].to_string())
+                }
+                _ => None,
+            }).collect()
+        } else {
+            use_decl.names
+        };
+        for name in names {
             let qualified = format!("{}.{}", use_decl.module, name);
             let span = use_decl.span;
 
@@ -67,7 +83,7 @@ pub fn resolve_modules(program: Program) -> Program {
                 // Constant alias: `name = Module.name`
                 let body = Expr::new(ExprKind::Var(qualified), Span::dummy());
                 let equation = Equation { pats: vec![], body, span };
-                alias_decls.push(Decl::Func { name: name.clone(), equations: vec![equation], span });
+                alias_decls.push(Decl::Func { name: name.clone(), equations: vec![equation], span, doc: vec![] });
             } else {
                 // Eta-expanded wrapper: `name a0 a1 ... = Module.name a0 a1 ...`
                 // This works for curried functions: applying one arg at a time.
@@ -83,7 +99,7 @@ pub fn resolve_modules(program: Program) -> Program {
                     body = Expr::new(ExprKind::App(Box::new(body), Box::new(arg_expr)), Span::dummy());
                 }
                 let equation = Equation { pats: arg_pats, body, span };
-                alias_decls.push(Decl::Func { name: name.clone(), equations: vec![equation], span });
+                alias_decls.push(Decl::Func { name: name.clone(), equations: vec![equation], span, doc: vec![] });
             }
         }
     }
@@ -94,6 +110,7 @@ pub fn resolve_modules(program: Program) -> Program {
     decls.extend(program.decls);
 
     Program {
+        imports: vec![],
         decls,
         modules: vec![],
         uses: vec![],

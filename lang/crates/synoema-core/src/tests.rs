@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 use crate::*;
 
 fn core(src: &str) -> CoreProgram {
@@ -337,4 +340,14 @@ fn desugar_seq_op() {
     let s = fmt("main = 42 ; 99");
     assert!(!s.is_empty(), "Should desugar sequence: {}", s);
     assert!(s.contains("99"), "Right-hand value should appear in output: {}", s);
+}
+
+#[test]
+fn desugar_non_exhaustive_produces_runtime_error() {
+    // A function with non-exhaustive patterns should have a RuntimeError fallback
+    let prog = core("f True = 1\nmain = f True");
+    // Find 'f' definition — it should contain RuntimeError as fallback
+    let f_def = prog.defs.iter().find(|d| d.name == "f").expect("f not found");
+    let s = format!("{}", f_def.body);
+    assert!(s.contains("error!"), "Non-exhaustive fallback should produce RuntimeError, got: {}", s);
 }

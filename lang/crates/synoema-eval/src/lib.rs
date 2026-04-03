@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 //! # synoema-eval
 //! Tree-walking interpreter for the Synoema programming language.
 //!
@@ -10,14 +13,35 @@ pub mod eval;
 pub use value::{Value, Env};
 pub use eval::{Evaluator, EvalError, EvalErrorKind};
 
-use synoema_diagnostic::{Diagnostic, codes};
+use std::path::Path;
+use synoema_diagnostic::{Diagnostic, Fixability, enrich_diagnostic, codes};
+use synoema_parser::{ImportError, ImportErrorCode};
 use synoema_types::{TypeError, TypeErrorKind};
 
 // ── Error conversion ────────────────────────────────────
 
 fn parse_err(e: &synoema_parser::ParseError) -> Diagnostic {
-    Diagnostic::error(codes::PARSE_UNEXPECTED_TOKEN, e.message.clone())
-        .with_span(e.span)
+    let msg_lower = e.message.to_lowercase();
+    // Detect indentation-related parse errors
+    if msg_lower.contains("indent") || msg_lower.contains("dedent") {
+        Diagnostic::error(codes::PARSE_INDENTATION, e.message.clone())
+            .with_span(e.span)
+            .with_note(format!(
+                "at column {} — check that the body is indented further than the enclosing definition",
+                e.span.start.col
+            ))
+            .with_llm_hint(
+                "Synoema uses the offside rule (like Haskell/Python). \
+                 Indent the body of a definition further than its name. \
+                 Use consistent 2-space indentation."
+            )
+            .with_fixability(Fixability::Easy)
+    } else {
+        let mut diag = Diagnostic::error(codes::PARSE_UNEXPECTED_TOKEN, e.message.clone())
+            .with_span(e.span);
+        enrich_diagnostic(&mut diag);
+        diag
+    }
 }
 
 fn type_err(e: TypeError) -> Diagnostic {
@@ -30,6 +54,7 @@ fn type_err(e: TypeError) -> Diagnostic {
         TypeErrorKind::PatternMismatch { .. } => codes::TYPE_PATTERN,
         TypeErrorKind::LinearDuplicate { .. } => codes::LINEAR_DUPLICATE,
         TypeErrorKind::LinearUnused { .. } => codes::LINEAR_UNUSED,
+        TypeErrorKind::RecursiveAlias { .. } => codes::TYPE_OTHER,
         TypeErrorKind::Other(_) => codes::TYPE_OTHER,
     };
     let mut diag = Diagnostic::error(code, format!("{}", e));
@@ -39,7 +64,18 @@ fn type_err(e: TypeError) -> Diagnostic {
             .with_note(format!("expected: {}", expected))
             .with_note(format!("found: {}", found));
     }
-    diag.maybe_span(e.span)
+    let mut diag = diag.maybe_span(e.span);
+    enrich_diagnostic(&mut diag);
+    diag
+}
+
+fn import_err(e: ImportError) -> Diagnostic {
+    let code = match e.code {
+        ImportErrorCode::Cycle => codes::IMPORT_CYCLE,
+        ImportErrorCode::NotFound => codes::IMPORT_NOT_FOUND,
+        ImportErrorCode::ParseError => codes::PARSE_UNEXPECTED_TOKEN,
+    };
+    Diagnostic::error(code, e.message).with_span(e.span)
 }
 
 fn eval_err(e: EvalError) -> Diagnostic {
@@ -50,7 +86,9 @@ fn eval_err(e: EvalError) -> Diagnostic {
         EvalErrorKind::IoError       => codes::EVAL_IO,
         EvalErrorKind::Type          => codes::EVAL_TYPE,
     };
-    Diagnostic::error(code, e.message)
+    let mut diag = Diagnostic::error(code, e.message);
+    enrich_diagnostic(&mut diag);
+    diag
 }
 
 /// Convert a `TypeError` from the type-checker into a `Diagnostic`.
@@ -58,7 +96,7 @@ fn eval_err(e: EvalError) -> Diagnostic {
 /// Exposed so that callers (e.g. the REPL's `jit_file`) can use the same
 /// precise code dispatch as the interpreter path without duplicating logic.
 pub fn type_err_to_diagnostic(e: synoema_types::TypeError) -> Diagnostic {
-    type_err(e)
+    type_err(e) // already enriched inside type_err
 }
 
 // ── Public API ──────────────────────────────────────────
@@ -66,11 +104,18 @@ pub fn type_err_to_diagnostic(e: synoema_types::TypeError) -> Diagnostic {
 /// Parse, type-check, and evaluate a Synoema program.
 /// Returns the final environment.
 pub fn run(source: &str) -> Result<Env, Diagnostic> {
+    run_with_base_dir(source, None)
+}
+
+/// Parse, resolve imports, type-check, and evaluate a Synoema program.
+pub fn run_with_base_dir(source: &str, base_dir: Option<&Path>) -> Result<Env, Diagnostic> {
     let program = synoema_parser::parse(source)
         .map_err(|e| parse_err(&e))?;
+    let program = if let Some(dir) = base_dir {
+        synoema_parser::resolve_imports(program, dir).map_err(import_err)?
+    } else { program };
     let program = synoema_types::resolve_modules(program);
-    let _types = synoema_types::typecheck(source)
-        .map_err(type_err)?;
+    synoema_types::typecheck_program(&program).map_err(type_err)?;
     let mut evaluator = Evaluator::new();
     evaluator.eval_program(&program)
         .map_err(eval_err)
@@ -82,21 +127,29 @@ pub fn run(source: &str) -> Result<Env, Diagnostic> {
 /// Phase 10.1: runs in a 64 MB stack thread so deeply-recursive programs
 /// (like euler1 with 999 recursive calls) don't stack-overflow.
 pub fn eval_main(source: &str) -> Result<(Value, Vec<String>), Diagnostic> {
+    eval_main_with_base_dir(source, None)
+}
+
+/// Like `eval_main` but with import resolution from `base_dir`.
+pub fn eval_main_with_base_dir(source: &str, base_dir: Option<&Path>) -> Result<(Value, Vec<String>), Diagnostic> {
     let source = source.to_string();
+    let base_dir = base_dir.map(|p| p.to_path_buf());
     std::thread::Builder::new()
         .stack_size(64 * 1024 * 1024) // 64 MB — handles ~50 000 levels of recursion
-        .spawn(move || eval_main_inner(&source))
+        .spawn(move || eval_main_inner(&source, base_dir.as_deref()))
         .expect("Failed to spawn eval thread")
         .join()
         .expect("Eval thread panicked")
 }
 
-fn eval_main_inner(source: &str) -> Result<(Value, Vec<String>), Diagnostic> {
+fn eval_main_inner(source: &str, base_dir: Option<&Path>) -> Result<(Value, Vec<String>), Diagnostic> {
     let program = synoema_parser::parse(source)
         .map_err(|e| parse_err(&e))?;
+    let program = if let Some(dir) = base_dir {
+        synoema_parser::resolve_imports(program, dir).map_err(import_err)?
+    } else { program };
     let program = synoema_types::resolve_modules(program);
-    let _types = synoema_types::typecheck(source)
-        .map_err(type_err)?;
+    synoema_types::typecheck_program(&program).map_err(type_err)?;
     let mut evaluator = Evaluator::new();
     let env = evaluator.eval_program(&program)
         .map_err(eval_err)?;

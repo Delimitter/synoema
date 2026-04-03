@@ -1,3 +1,8 @@
+-- SPDX-License-Identifier: MIT-0
+
+--- Sort a list using quicksort.
+--- example: qsort [3 1 2] == [1 2 3]
+--- example: qsort [] == []
 qsort [] = []
 qsort (p:xs) = qsort lo ++ [p] ++ qsort hi
   lo = [x | x <- xs , x <= p]

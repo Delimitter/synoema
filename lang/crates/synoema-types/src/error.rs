@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 //! Type error definitions for Synoema.
 
 use crate::types::{Type, TyVarId};
@@ -62,6 +65,8 @@ pub enum TypeErrorKind {
     LinearDuplicate { name: String },
     /// Linear variable never used (must be used exactly once)
     LinearUnused { name: String },
+    /// Recursive type alias detected
+    RecursiveAlias { name: String },
 }
 
 impl fmt::Display for TypeError {
@@ -85,6 +90,8 @@ impl fmt::Display for TypeError {
                 write!(f, "Linear variable '{}' used more than once", name),
             TypeErrorKind::LinearUnused { name } =>
                 write!(f, "Linear variable '{}' must be used exactly once (never used)", name),
+            TypeErrorKind::RecursiveAlias { name } =>
+                write!(f, "Recursive type alias '{}' is not allowed", name),
         }
     }
 }

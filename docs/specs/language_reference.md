@@ -75,21 +75,28 @@ COMMENT     = '--' [^\n]* NEWLINE
 DOC_COMMENT = '---' [^\n]* NEWLINE
 ```
 
+`COMMENT` отбрасывается лексером. `DOC_COMMENT` сохраняется в AST и прикрепляется к следующему объявлению (функция, тип, модуль). Строки `--- example: <expr> == <val>` проверяются при `synoema test`.
+
 Блочные комментарии отсутствуют (экономия: не нужен терминал закрытия `*/`).
 
 ### 2.4 Ключевые слова
 
-MVL содержит **7 ключевых слов**:
+MVL содержит **9 ключевых слов**:
 
 | Слово | BPE-токены | Назначение |
 |-------|-----------|------------|
 | `mod` | 1 | объявление модуля |
-| `use` | 1 | импорт |
+| `use` | 1 | импорт имён из модуля |
+| `import` | 1 | импорт файла |
 | `trait` | 1 | type class |
 | `impl` | 1 | реализация type class |
+| `type` | 1 | type alias |
 | `true` | 1 | литерал Bool |
 | `false` | 1 | литерал Bool |
 | `lazy` | 1 | ленивое вычисление (зарезервировано) |
+| `test` | 1 | объявление теста |
+| `prop` | 1 | property-генератор в тестах |
+| `when` | 1 | условный property в тестах |
 
 Ключевые слова нельзя использовать как идентификаторы.
 
@@ -149,13 +156,17 @@ MVL содержит **7 ключевых слов**:
 | `_` | wildcard pattern | 1 |
 | `,` | разделитель в guards/comprehension | 1 |
 | `..` | диапазон | 1 |
+| `${` | начало строковой интерполяции | 1 |
 
 ### 2.6 Литералы
 
 ```
 INT      = '0' | [1-9][0-9]*
 FLOAT    = INT '.' [0-9]+
-STRING   = '"' [^"\n]* '"'
+STRING   = '"' string_content* '"'
+string_content = [^"\\\n$] | escape_seq | interpolation | '$' [^{]
+interpolation  = '${' expr '}'
+escape_seq     = '\\' [nrt\\"0$]
 CHAR     = '\'' [^'\n] '\''
 BOOL     = 'true' | 'false'
 ```
@@ -194,15 +205,23 @@ topDecl      = moduleDecl
              | typeSig
              | funcDef
              | typeDef
+             | typeAlias
              | traitDef
-             | implDef ;
+             | implDef
+             | testDecl ;
+
+testDecl     = 'test' STRING_LIT '=' expr NEWLINE ;
+
+typeAlias    = 'type' UPPER_ID { LOWER_ID } '=' type NEWLINE ;
+
+importDecl   = 'import' STRING_LIT NEWLINE ;
 
 moduleDecl   = 'mod' UPPER_ID NEWLINE INDENT { funcDef } DEDENT ;
 
 useDecl      = 'use' UPPER_ID '(' LOWER_ID { LOWER_ID } ')' NEWLINE ;
 ```
 
-Пример:
+Пример (single-file modules):
 ```
 mod Math
   square x = x * x
@@ -212,6 +231,20 @@ use Math (square abs)
 
 main = square 5 + abs (0 - 3)
 ```
+
+Пример (multi-file imports):
+```
+-- math.sno
+mod Math
+  square x = x * x
+
+-- main.sno
+import "math.sno"
+use Math (square)
+main = square 5
+```
+
+`import "path.sno"` загружает файл по относительному пути. Циклические импорты — ошибка. Diamond-импорты (один файл через несколько путей) загружаются один раз.
 
 ### 3.3 Определения функций
 
@@ -231,18 +264,21 @@ fib n = fib (n - 1) + fib (n - 2)
 ### 3.4 Определения типов
 
 ```ebnf
-typeDef      = UPPER_ID { LOWER_ID } '=' variants NEWLINE ;
+typeDef      = UPPER_ID { LOWER_ID } '=' variants [ 'derive' '(' UPPER_ID { ',' UPPER_ID } ')' ] NEWLINE ;
 
 variants     = variant { '|' variant } ;
 
 variant      = UPPER_ID { typeAtom } ;
 ```
 
+Необязательная клауза `derive` автоматически генерирует инстансы указанных тайпклассов (Show, Eq, Ord) для типа.
+
 Примеры:
 ```
 Maybe a = Just a | None
 List a = Cons a (List a) | Nil
 Shape = Circle Float | Rect Float Float | Point
+Color = Red | Green | Blue derive (Show, Eq, Ord)
 ```
 
 ### 3.5 Type classes (trait/impl)
@@ -325,6 +361,10 @@ generator    = LOWER_ID '<-' expr
 blockExpr    = INDENT { binding } expr DEDENT ;
 
 binding      = LOWER_ID '=' expr NEWLINE ;
+
+propExpr     = 'prop' LOWER_ID { LOWER_ID } '->' expr ;
+
+whenExpr     = expr 'when' expr ;
 
 literal      = INT | FLOAT | STRING | CHAR | BOOL ;
 ```
@@ -935,8 +975,8 @@ result = [fizzbuzz(n) for n in range(1, 101)]
 
 ### B.1 Реализовано в v0.2–v0.4
 
-- ✅ **Records** `{name = val, ...}` + `.field` + pattern matching — interpreter + JIT
-- ✅ **Modules** `mod Name` + `use Name (func1 func2)` — lexical namespacing
+- ✅ **Records** `{name = val, ...}` + `.field` + pattern matching + **punning** `{x, y}` ≡ `{x = x, y = y}` — interpreter + JIT
+- ✅ **Modules** `mod Name` + `use Name (func1 func2)` + **wildcard** `use Name (*)` — lexical namespacing
 - ✅ **Closures** в JIT — lambda lifting, indirect calls, `map`/`filter`
 - ✅ **Strings** в JIT — tagged pointer, `show`, `++`, `length`, `==`, `!=`
 - ✅ **List comprehensions** `[x | x <- xs, p x]` — через `concatMap`

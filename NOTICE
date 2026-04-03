@@ -1,0 +1,16 @@
+Synoema Programming Language
+Copyright (c) 2025-present Andrey Bubnov
+
+This product includes software developed by Andrey Bubnov.
+
+Portions of this software were inspired by or reference the following works:
+
+- Rust Programming Language (MIT/Apache-2.0) — compiler architecture patterns
+- Haskell/GHC — Hindley-Milner type inference algorithms
+- XGrammar / SGLang — constrained decoding integration concepts
+
+TRADEMARKS
+
+"Synoema", "sno", and the Synoema logo are trademarks of
+Andrey Bubnov. These trademarks may not be used without
+written permission. See TRADEMARK.md for details.

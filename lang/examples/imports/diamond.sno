@@ -1,0 +1,14 @@
+-- SPDX-License-Identifier: MIT-0
+
+--- Diamond import example.
+--- Both a.sno and b.sno import base.sno.
+--- base.sno is loaded only once (diamond caching).
+import "diamond_base.sno"
+import "diamond_a.sno"
+import "diamond_b.sno"
+
+use Base (base_val)
+use A (a_val)
+use B (b_val)
+
+main = base_val + a_val + b_val

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 //! Core type representations for Synoema's Hindley-Milner type system.
 
 use std::collections::{HashMap, HashSet};

@@ -1,0 +1,8 @@
+-- SPDX-License-Identifier: MIT-0
+-- Streaming file I/O: fd_open reads a file line-by-line.
+-- Memory usage: O(line_size), not O(file_size).
+main =
+  fd = fd_open "examples/factorial.sno"
+  line1 = fd_readline fd
+  line2 = fd_readline fd
+  fd_close fd |> \_ -> line1 ++ " | " ++ line2

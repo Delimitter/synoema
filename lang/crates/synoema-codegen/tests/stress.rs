@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: BUSL-1.1
+// Copyright (c) 2025-present Andrey Bubnov
+
 //! JIT compiler and runtime load tests.
 //!
 //! Fast tests:
@@ -511,4 +514,110 @@ fn bench_jit_compile_and_run() {
     }
     let avg = start.elapsed() / n;
     println!("BENCH jit_factorial(10): {:?} avg/run  (incl. Cranelift compile)", avg);
+}
+
+// ── String Interpolation in JIT ──────────────────────────
+
+#[test]
+fn jit_interp_simple() {
+    let s = jit_str("name = \"World\"\nmain = \"Hello ${name}\"");
+    assert_eq!(s, "Hello World");
+}
+
+#[test]
+fn jit_interp_int() {
+    let s = jit_str("x = 42\nmain = \"x=${x}\"");
+    assert_eq!(s, "x=42");
+}
+
+#[test]
+fn jit_interp_expression() {
+    let s = jit_str("main = \"sum=${2 + 3}\"");
+    assert_eq!(s, "sum=5");
+}
+
+#[test]
+fn jit_interp_multiple() {
+    let s = jit_str("a = 1\nb = 2\nmain = \"${a}+${b}=${a + b}\"");
+    assert_eq!(s, "1+2=3");
+}
+
+#[test]
+fn jit_interp_escape_dollar() {
+    let s = jit_str(r#"main = "\$ is money""#);
+    assert_eq!(s, "$ is money");
+}
+
+// ── Memory Management v2: arena_save / arena_restore ─────────────────────────
+
+#[test]
+fn arena_save_restore_basic() {
+    // arena_save / arena_restore exist as runtime functions and can be called.
+    // They return i64 values (arena offset).
+    use synoema_codegen::runtime::{arena_save, arena_restore, arena_reset};
+    let saved = arena_save();
+    assert!(saved >= 0, "arena_save should return non-negative offset");
+    arena_restore(saved);
+    arena_reset();
+}
+
+#[test]
+fn arena_save_restore_preserves_offset() {
+    use synoema_codegen::runtime::{arena_save, arena_restore, arena_reset};
+    arena_reset();
+    let before = arena_save();
+    // Allocate something to advance offset
+    let src = "main = length [1..100]";
+    let _ = synoema_codegen::compile_and_run(src);
+    // After compile_and_run, arena is reset (lib.rs calls arena_reset)
+    let after = arena_save();
+    // After reset, offset should be 0 again
+    assert_eq!(after, 0, "After arena_reset, offset should be 0");
+}
+
+#[test]
+fn arena_overflow_tracked_cleanup() {
+    // After arena overflow + reset, overflow allocations should be freed.
+    // We can't directly verify dealloc, but we can verify no crash on
+    // repeated overflow cycles.
+    for _ in 0..3 {
+        let src = "main = length [1..600000]"; // 9.6 MB > 8 MB arena
+        let result = synoema_codegen::compile_and_run(src);
+        assert!(result.is_ok(), "Overflow cycle should not crash");
+        assert_eq!(result.unwrap(), 600_000);
+        // arena_reset() is called inside compile_and_run
+        // → overflow_allocs should be freed each time
+    }
+}
+
+// ── Record Punning in JIT ──────────────────────────────────────────────────
+
+#[test]
+fn jit_record_punning_basic() {
+    let src = "main =\n  x = 3\n  y = 4\n  r = {x, y}\n  r.x + r.y";
+    let result = synoema_codegen::compile_and_run(src);
+    assert_eq!(result.unwrap(), 7);
+}
+
+#[test]
+fn jit_record_punning_mixed() {
+    let src = "main =\n  x = 10\n  r = {x, y = 20}\n  r.x + r.y";
+    let result = synoema_codegen::compile_and_run(src);
+    assert_eq!(result.unwrap(), 30);
+}
+
+// ── Wildcard Import in JIT ─────────────────────────────────────────────────
+
+#[test]
+fn jit_wildcard_import() {
+    let src = "mod Math\n  square x = x * x\n  cube x = x * x * x\nuse Math (*)\nmain = square 5 + cube 2";
+    let result = synoema_codegen::compile_and_run(src);
+    assert_eq!(result.unwrap(), 33);
+}
+
+#[test]
+fn jit_wildcard_import_constant() {
+    let src = "mod Consts\n  pi = 314\n  e = 271\nuse Consts (*)\nmain = pi + e";
+    let result = synoema_codegen::compile_and_run(src);
+    assert_eq!(result.unwrap(), 585);
 }

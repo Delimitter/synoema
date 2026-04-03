@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: BUSL-1.1
+// Copyright (c) 2025-present Andrey Bubnov
+
 //! Synoema → Cranelift native code compiler
 //!
 //! Compiles Core IR to native machine code using Cranelift JIT.
@@ -25,6 +28,15 @@ impl std::fmt::Display for CompileError {
 
 type CResult<T> = Result<T, CompileError>;
 fn cerr(msg: impl Into<String>) -> CompileError { CompileError(msg.into()) }
+
+/// Context for tail-call optimization: tracks the current function's
+/// name, loop header block, and parameter Variables so that a self-recursive
+/// tail call can be compiled as a jump instead of a call.
+struct TcoContext {
+    self_name: String,
+    loop_block: cranelift_codegen::ir::Block,
+    params: Vec<Variable>,
+}
 
 /// The Synoema JIT compiler
 pub struct Compiler {
@@ -68,6 +80,13 @@ impl Compiler {
         builder.symbol("synoema_str_concat", runtime::synoema_str_concat as *const u8);
         builder.symbol("synoema_str_length", runtime::synoema_str_length as *const u8);
         builder.symbol("synoema_str_eq", runtime::synoema_str_eq as *const u8);
+        // String stdlib
+        builder.symbol("synoema_str_slice", runtime::synoema_str_slice as *const u8);
+        builder.symbol("synoema_str_find", runtime::synoema_str_find as *const u8);
+        builder.symbol("synoema_str_starts_with", runtime::synoema_str_starts_with as *const u8);
+        builder.symbol("synoema_str_trim", runtime::synoema_str_trim as *const u8);
+        builder.symbol("synoema_str_len", runtime::synoema_str_len as *const u8);
+        builder.symbol("synoema_json_escape", runtime::synoema_json_escape as *const u8);
         builder.symbol("synoema_concatmap", runtime::synoema_concatmap as *const u8);
         builder.symbol("synoema_record_new", runtime::synoema_record_new as *const u8);
         builder.symbol("synoema_record_set", runtime::synoema_record_set as *const u8);
@@ -112,6 +131,10 @@ impl Compiler {
         builder.symbol("synoema_chan_new",  runtime::synoema_chan_new  as *const u8);
         builder.symbol("synoema_chan_send", runtime::synoema_chan_send as *const u8);
         builder.symbol("synoema_chan_recv", runtime::synoema_chan_recv as *const u8);
+        builder.symbol("synoema_match_error", runtime::synoema_match_error as *const u8);
+        // Region inference FFI
+        builder.symbol("synoema_region_enter", runtime::synoema_region_enter as *const u8);
+        builder.symbol("synoema_region_exit", runtime::synoema_region_exit as *const u8);
 
         let module = JITModule::new(builder);
 
@@ -215,6 +238,10 @@ impl Compiler {
         decl(self, "synoema_tail", "tail", &sig1)?;
         decl(self, "synoema_str_length", "synoema_str_length", &sig1)?;
         decl(self, "synoema_show_int", "synoema_show_int", &sig1)?;
+        // String stdlib: fn(i64) -> i64
+        decl(self, "synoema_str_trim", "str_trim", &sig1)?;
+        decl(self, "synoema_str_len", "str_len", &sig1)?;
+        decl(self, "synoema_json_escape", "json_escape", &sig1)?;
         // fn(i64, i64) -> i64
         decl(self, "synoema_cons", "synoema_cons", &sig2)?;
         decl(self, "synoema_concat", "synoema_concat", &sig2)?;
@@ -222,6 +249,8 @@ impl Compiler {
         decl(self, "synoema_str_new", "synoema_str_new", &sig2)?;
         decl(self, "synoema_str_concat", "synoema_str_concat", &sig2)?;
         decl(self, "synoema_str_eq", "synoema_str_eq", &sig2)?;
+        // String stdlib: fn(i64, i64) -> i64
+        decl(self, "synoema_str_starts_with", "str_starts_with", &sig2)?;
         // synoema_concatmap: fn(i64, i64) -> i64  (closure_ptr, list -> list)
         decl(self, "synoema_concatmap", "concatMap", &sig2)?;
         // fn(i64) -> i64
@@ -241,6 +270,9 @@ impl Compiler {
         decl(self, "synoema_map",    "map",    &sig2)?;
         decl(self, "synoema_filter", "filter", &sig2)?;
         decl(self, "synoema_foldl",  "foldl",  &sig3_ret)?;
+        // String stdlib: fn(i64, i64, i64) -> i64
+        decl(self, "synoema_str_slice", "str_slice", &sig3_ret)?;
+        decl(self, "synoema_str_find", "str_find", &sig3_ret)?;
         // ADT ConNode functions
         decl(self, "synoema_make_con", "synoema_make_con", &sig4_ret)?; // fn(i64,i64,i64,i64)->i64
         decl(self, "synoema_show_con", "synoema_show_con", &sig1)?;
@@ -283,6 +315,13 @@ impl Compiler {
         decl(self, "synoema_chan_new",  "chan",  &sig0)?;   // fn() -> i64
         decl(self, "synoema_chan_send", "send",  &sig2)?;   // fn(i64, i64) -> i64
         decl(self, "synoema_chan_recv", "recv",  &sig1)?;   // fn(i64) -> i64
+
+        // Runtime error: fn(i64, i64) -> i64 (ptr, len → never returns)
+        decl(self, "synoema_match_error", "synoema_match_error", &sig2)?;
+
+        // Region inference: fn() -> i64
+        decl(self, "synoema_region_enter", "synoema_region_enter", &sig0)?;
+        decl(self, "synoema_region_exit", "synoema_region_exit", &sig0)?;
 
         Ok(())
     }
@@ -421,7 +460,7 @@ impl Compiler {
         let ctor_tags = self.ctor_tags.clone();
         let result = compile_expr(
             &mut builder, &mut vars, &mut vc,
-            &self.functions, &mut self.module, &ctor_tags, body,
+            &self.functions, &mut self.module, &ctor_tags, body, None,
         )?;
 
         builder.ins().return_(&[result]);
@@ -455,6 +494,7 @@ impl Compiler {
         let mut vars = HashMap::new();
         let mut vc: u32 = 0;
 
+        let mut param_vars = Vec::new();
         for (i, pname) in params.iter().enumerate() {
             let var = Variable::from_u32(vc);
             vc += 1;
@@ -462,15 +502,38 @@ impl Compiler {
             let pval = builder.block_params(entry)[i];
             builder.def_var(var, pval);
             vars.insert(pname.clone(), var);
+            param_vars.push(var);
         }
+
+        // TCO: create loop header block for self-recursive tail calls.
+        let loop_header = builder.create_block();
+        builder.ins().jump(loop_header, &[]);
+        builder.switch_to_block(loop_header);
+        // Don't seal loop_header yet — TCO jumps will add predecessors.
+
+        // TCO auto-region: enter a new region at each loop iteration.
+        // region_exit is emitted before each back-edge (tail call → jump to loop_header).
+        // Base-case returns do NOT exit the region — arena_reset handles final cleanup.
+        let region_enter_id = *self.functions.get("synoema_region_enter")
+            .ok_or_else(|| cerr("synoema_region_enter not declared"))?;
+        let region_enter_ref = self.module.declare_func_in_func(region_enter_id, builder.func);
+        builder.ins().call(region_enter_ref, &[]);
+
+        let tco_ctx = TcoContext {
+            self_name: name.to_string(),
+            loop_block: loop_header,
+            params: param_vars,
+        };
 
         let ctor_tags = self.ctor_tags.clone();
         let result = compile_expr(
             &mut builder, &mut vars, &mut vc,
             &self.functions, &mut self.module, &ctor_tags, inner,
+            Some(&tco_ctx),
         )?;
 
         builder.ins().return_(&[result]);
+        builder.seal_block(loop_header);
         builder.finalize();
 
         self.module.define_function(func_id, &mut self.ctx)
@@ -488,6 +551,7 @@ fn compile_expr(
     module: &mut JITModule,
     ctor_tags: &HashMap<String, (i64, usize)>,
     expr: &CoreExpr,
+    tco_ctx: Option<&TcoContext>,
 ) -> CResult<cranelift_codegen::ir::Value> {
     match expr {
         CoreExpr::Lit(Lit::Int(n)) => Ok(builder.ins().iconst(types::I64, *n)),
@@ -540,13 +604,13 @@ fn compile_expr(
         }
 
         CoreExpr::Let(name, val, body) | CoreExpr::LetRec(name, val, body) => {
-            let v = compile_expr(builder, vars, vc, funcs, module, ctor_tags, val)?;
+            let v = compile_expr(builder, vars, vc, funcs, module, ctor_tags, val, None)?;
             let var = Variable::from_u32(*vc);
             *vc += 1;
             builder.declare_var(var, types::I64);
             builder.def_var(var, v);
             vars.insert(name.clone(), var);
-            compile_expr(builder, vars, vc, funcs, module, ctor_tags, body)
+            compile_expr(builder, vars, vc, funcs, module, ctor_tags, body, tco_ctx)
         }
 
         CoreExpr::App(func, arg) => {
@@ -576,7 +640,7 @@ fn compile_expr(
                 let con_set_id = *funcs.get("synoema_con_set")
                     .ok_or_else(|| cerr("synoema_con_set not declared"))?;
                 for (i, a) in args.iter().enumerate() {
-                    let v = compile_expr(builder, vars, vc, funcs, module, ctor_tags, a)?;
+                    let v = compile_expr(builder, vars, vc, funcs, module, ctor_tags, a, None)?;
                     let idx_val = builder.ins().iconst(types::I64, i as i64);
                     let con_set_ref = module.declare_func_in_func(con_set_id, builder.func);
                     builder.ins().call(con_set_ref, &[con_ptr, idx_val, v]);
@@ -589,16 +653,16 @@ fn compile_expr(
                     // Cons and Concat need runtime calls
                     match op {
                         PrimOp::Cons => {
-                            let l = compile_expr(builder, vars, vc, funcs, module, ctor_tags, lhs)?;
-                            let r = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg)?;
+                            let l = compile_expr(builder, vars, vc, funcs, module, ctor_tags, lhs, None)?;
+                            let r = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg, None)?;
                             let fid = *funcs.get("synoema_cons").ok_or_else(|| cerr("synoema_cons"))?;
                             let fref = module.declare_func_in_func(fid, builder.func);
                             let call = builder.ins().call(fref, &[l, r]);
                             return Ok(builder.inst_results(call)[0]);
                         }
                         PrimOp::Concat => {
-                            let l = compile_expr(builder, vars, vc, funcs, module, ctor_tags, lhs)?;
-                            let r = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg)?;
+                            let l = compile_expr(builder, vars, vc, funcs, module, ctor_tags, lhs, None)?;
+                            let r = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg, None)?;
                             let fid = *funcs.get("synoema_concat").ok_or_else(|| cerr("synoema_concat"))?;
                             let fref = module.declare_func_in_func(fid, builder.func);
                             let call = builder.ins().call(fref, &[l, r]);
@@ -606,8 +670,8 @@ fn compile_expr(
                         }
                         PrimOp::Eq => {
                             // Runtime dispatch: synoema_val_eq handles both int and string equality
-                            let l = compile_expr(builder, vars, vc, funcs, module, ctor_tags, lhs)?;
-                            let r = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg)?;
+                            let l = compile_expr(builder, vars, vc, funcs, module, ctor_tags, lhs, None)?;
+                            let r = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg, None)?;
                             let fid = *funcs.get("synoema_val_eq").ok_or_else(|| cerr("synoema_val_eq"))?;
                             let fref = module.declare_func_in_func(fid, builder.func);
                             let call = builder.ins().call(fref, &[l, r]);
@@ -615,8 +679,8 @@ fn compile_expr(
                         }
                         PrimOp::Neq => {
                             // Runtime dispatch: 1 - synoema_val_eq(l, r)
-                            let l = compile_expr(builder, vars, vc, funcs, module, ctor_tags, lhs)?;
-                            let r = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg)?;
+                            let l = compile_expr(builder, vars, vc, funcs, module, ctor_tags, lhs, None)?;
+                            let r = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg, None)?;
                             let fid = *funcs.get("synoema_val_eq").ok_or_else(|| cerr("synoema_val_eq"))?;
                             let fref = module.declare_func_in_func(fid, builder.func);
                             let call = builder.ins().call(fref, &[l, r]);
@@ -627,8 +691,8 @@ fn compile_expr(
                         // Float arithmetic and comparison: call float runtime functions
                         PrimOp::FAdd | PrimOp::FSub | PrimOp::FMul | PrimOp::FDiv | PrimOp::FPow
                         | PrimOp::FLt | PrimOp::FGt | PrimOp::FLte | PrimOp::FGte | PrimOp::FEq => {
-                            let l = compile_expr(builder, vars, vc, funcs, module, ctor_tags, lhs)?;
-                            let r = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg)?;
+                            let l = compile_expr(builder, vars, vc, funcs, module, ctor_tags, lhs, None)?;
+                            let r = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg, None)?;
                             let fn_name = match op {
                                 PrimOp::FAdd  => "synoema_float_add",
                                 PrimOp::FSub  => "synoema_float_sub",
@@ -649,8 +713,8 @@ fn compile_expr(
                         }
                         // Integer power: call synoema_int_pow(base, exp)
                         PrimOp::Pow => {
-                            let l = compile_expr(builder, vars, vc, funcs, module, ctor_tags, lhs)?;
-                            let r = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg)?;
+                            let l = compile_expr(builder, vars, vc, funcs, module, ctor_tags, lhs, None)?;
+                            let r = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg, None)?;
                             let fid = *funcs.get("synoema_int_pow").ok_or_else(|| cerr("synoema_int_pow not declared"))?;
                             let fref = module.declare_func_in_func(fid, builder.func);
                             let call = builder.ins().call(fref, &[l, r]);
@@ -658,16 +722,16 @@ fn compile_expr(
                         }
                         // Range [from..to]: call synoema_range(from, to) → list
                         PrimOp::Range => {
-                            let l = compile_expr(builder, vars, vc, funcs, module, ctor_tags, lhs)?;
-                            let r = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg)?;
+                            let l = compile_expr(builder, vars, vc, funcs, module, ctor_tags, lhs, None)?;
+                            let r = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg, None)?;
                             let fid = *funcs.get("synoema_range").ok_or_else(|| cerr("synoema_range not declared"))?;
                             let fref = module.declare_func_in_func(fid, builder.func);
                             let call = builder.ins().call(fref, &[l, r]);
                             return Ok(builder.inst_results(call)[0]);
                         }
                         _ => {
-                            let l = compile_expr(builder, vars, vc, funcs, module, ctor_tags, lhs)?;
-                            let r = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg)?;
+                            let l = compile_expr(builder, vars, vc, funcs, module, ctor_tags, lhs, None)?;
+                            let r = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg, None)?;
                             return compile_binop(builder, *op, l, r);
                         }
                     }
@@ -675,7 +739,7 @@ fn compile_expr(
             }
             // PrimOp unary: App(PrimOp, arg)
             if let CoreExpr::PrimOp(op) = func.as_ref() {
-                let a = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg)?;
+                let a = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg, None)?;
                 return compile_unop(builder, *op, a);
             }
             // Special case: show / show_bool → type-directed dispatch
@@ -690,7 +754,7 @@ fn compile_expr(
                 if name == "show" {
                     // Bool expression (comparison, logical op): use synoema_show_bool at runtime
                     if is_bool_expr(arg) {
-                        let v = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg)?;
+                        let v = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg, None)?;
                         let show_bool_id = *funcs.get("synoema_show_bool")
                             .ok_or_else(|| cerr("synoema_show_bool not declared"))?;
                         let show_bool_ref = module.declare_func_in_func(show_bool_id, builder.func);
@@ -705,11 +769,33 @@ fn compile_expr(
             }
             // Function call: flatten App chain for known static calls
             let (callee, args) = flatten_apps(func, arg);
-            if let Some(name) = callee {
-                if let Some(&fid) = funcs.get(&name) {
+            if let Some(ref name) = callee {
+                // TCO: self-recursive tail call → jump to loop header
+                if let Some(tco) = tco_ctx {
+                    if name == &tco.self_name && args.len() == tco.params.len() {
+                        let mut arg_vals = Vec::new();
+                        for a in &args {
+                            arg_vals.push(compile_expr(builder, vars, vc, funcs, module, ctor_tags, a, None)?);
+                        }
+                        for (var, val) in tco.params.iter().zip(arg_vals.iter()) {
+                            builder.def_var(*var, *val);
+                        }
+                        // TCO auto-region: exit region before back-edge to free per-iteration heap
+                        let region_exit_id = *funcs.get("synoema_region_exit")
+                            .ok_or_else(|| cerr("synoema_region_exit not declared"))?;
+                        let region_exit_ref = module.declare_func_in_func(region_exit_id, builder.func);
+                        builder.ins().call(region_exit_ref, &[]);
+                        builder.ins().jump(tco.loop_block, &[]);
+                        let unreachable = builder.create_block();
+                        builder.switch_to_block(unreachable);
+                        builder.seal_block(unreachable);
+                        return Ok(builder.ins().iconst(types::I64, 0));
+                    }
+                }
+                if let Some(&fid) = funcs.get(name.as_str()) {
                     let mut arg_vals = Vec::new();
                     for a in &args {
-                        arg_vals.push(compile_expr(builder, vars, vc, funcs, module, ctor_tags, a)?);
+                        arg_vals.push(compile_expr(builder, vars, vc, funcs, module, ctor_tags, a, None)?);
                     }
                     let local_func = module.declare_func_in_func(fid, builder.func);
                     let call = builder.ins().call(local_func, &arg_vals);
@@ -720,8 +806,8 @@ fn compile_expr(
 
             // Indirect closure call: compile func to a closure pointer, call via fn_ptr
             // Closures have ABI: fn(env_ptr: i64, arg: i64) -> i64
-            let closure_val = compile_expr(builder, vars, vc, funcs, module, ctor_tags, func)?;
-            let arg_val = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg)?;
+            let closure_val = compile_expr(builder, vars, vc, funcs, module, ctor_tags, func, None)?;
+            let arg_val = compile_expr(builder, vars, vc, funcs, module, ctor_tags, arg, None)?;
 
             let fn_ptr = builder.ins().load(types::I64, MemFlags::new(), closure_val, 0);
             let env_ptr = builder.ins().load(types::I64, MemFlags::new(), closure_val, 8);
@@ -736,8 +822,8 @@ fn compile_expr(
         }
 
         CoreExpr::Case(scrut, alts) => {
-            let sv = compile_expr(builder, vars, vc, funcs, module, ctor_tags, scrut)?;
-            compile_case(builder, vars, vc, funcs, module, ctor_tags, sv, alts, 0)
+            let sv = compile_expr(builder, vars, vc, funcs, module, ctor_tags, scrut, None)?;
+            compile_case(builder, vars, vc, funcs, module, ctor_tags, sv, alts, 0, tco_ctx)
         }
 
         CoreExpr::MkList(elems) => {
@@ -754,7 +840,7 @@ fn compile_expr(
 
             // Cons each element from right to left
             for elem in elems.iter().rev() {
-                let elem_val = compile_expr(builder, vars, vc, funcs, module, ctor_tags, elem)?;
+                let elem_val = compile_expr(builder, vars, vc, funcs, module, ctor_tags, elem, None)?;
                 let cons_call = builder.ins().call(cons_ref, &[elem_val, list_val]);
                 list_val = builder.inst_results(cons_call)[0];
             }
@@ -842,7 +928,7 @@ fn compile_expr(
             let rec_set_id = *funcs.get("synoema_record_set")
                 .ok_or_else(|| cerr("synoema_record_set not declared"))?;
             for (i, (name, val_expr)) in fields.iter().enumerate() {
-                let val = compile_expr(builder, vars, vc, funcs, module, ctor_tags, val_expr)?;
+                let val = compile_expr(builder, vars, vc, funcs, module, ctor_tags, val_expr, None)?;
                 let idx_val = builder.ins().iconst(types::I64, i as i64);
                 let hash = crate::runtime::field_name_hash(name);
                 let hash_val = builder.ins().iconst(types::I64, hash);
@@ -855,7 +941,7 @@ fn compile_expr(
 
         CoreExpr::FieldAccess(obj, field) => {
             // 1. Compile object → rec_ptr
-            let rec_ptr = compile_expr(builder, vars, vc, funcs, module, ctor_tags, obj)?;
+            let rec_ptr = compile_expr(builder, vars, vc, funcs, module, ctor_tags, obj, None)?;
             // 2. Hash the field name at compile time
             let hash = crate::runtime::field_name_hash(field);
             let hash_val = builder.ins().iconst(types::I64, hash);
@@ -867,16 +953,41 @@ fn compile_expr(
             Ok(builder.inst_results(get_call)[0])
         }
 
+        // ── Region inference: enter/exit arena region around body ────────────────
+        CoreExpr::Region(body) => {
+            let enter_id = *funcs.get("synoema_region_enter")
+                .ok_or_else(|| cerr("synoema_region_enter not declared"))?;
+            let enter_ref = module.declare_func_in_func(enter_id, builder.func);
+            builder.ins().call(enter_ref, &[]);
+            let result = compile_expr(builder, vars, vc, funcs, module, ctor_tags, body, tco_ctx)?;
+            let exit_id = *funcs.get("synoema_region_exit")
+                .ok_or_else(|| cerr("synoema_region_exit not declared"))?;
+            let exit_ref = module.declare_func_in_func(exit_id, builder.func);
+            builder.ins().call(exit_ref, &[]);
+            Ok(result)
+        }
+
         // ── Concurrency — Phase B sequential stubs ───────────────────────────────
         // Scope: evaluate body sequentially (no thread management in JIT yet).
         CoreExpr::Scope(body) => {
-            compile_expr(builder, vars, vc, funcs, module, ctor_tags, body)
+            compile_expr(builder, vars, vc, funcs, module, ctor_tags, body, tco_ctx)
         }
 
         // Spawn: evaluate expr sequentially, discard result → return Unit (0).
         CoreExpr::Spawn(expr) => {
-            compile_expr(builder, vars, vc, funcs, module, ctor_tags, expr)?;
+            compile_expr(builder, vars, vc, funcs, module, ctor_tags, expr, None)?;
             Ok(builder.ins().iconst(types::I64, 0))
+        }
+
+        // RuntimeError: call FFI to print message and abort.
+        CoreExpr::RuntimeError(msg) => {
+            let fid = *funcs.get("synoema_match_error")
+                .ok_or_else(|| cerr("synoema_match_error not declared"))?;
+            let fref = module.declare_func_in_func(fid, builder.func);
+            let ptr = builder.ins().iconst(types::I64, msg.as_ptr() as i64);
+            let len = builder.ins().iconst(types::I64, msg.len() as i64);
+            let call = builder.ins().call(fref, &[ptr, len]);
+            Ok(builder.inst_results(call)[0])
         }
 
         _ => Err(cerr(format!("Unsupported in codegen: {}", expr))),
@@ -947,19 +1058,20 @@ fn compile_case(
     scrut: cranelift_codegen::ir::Value,
     alts: &[Alt],
     idx: usize,
+    tco_ctx: Option<&TcoContext>,
 ) -> CResult<cranelift_codegen::ir::Value> {
     if idx >= alts.len() {
         return Err(cerr("Non-exhaustive patterns"));
     }
     let alt = &alts[idx];
     match &alt.pat {
-        CorePat::Wildcard => compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body),
+        CorePat::Wildcard => compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body, tco_ctx),
         CorePat::Var(name) => {
             let var = Variable::from_u32(*vc); *vc += 1;
             builder.declare_var(var, types::I64);
             builder.def_var(var, scrut);
             vars.insert(name.clone(), var);
-            compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body)
+            compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body, tco_ctx)
         }
         CorePat::Lit(Lit::Bool(true)) if idx + 1 < alts.len() => {
             // if scrut then alt.body else next
@@ -973,13 +1085,13 @@ fn compile_case(
 
             builder.switch_to_block(then_b);
             builder.seal_block(then_b);
-            let tv = compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body)?;
+            let tv = compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body, tco_ctx)?;
             builder.def_var(rv, tv);
             builder.ins().jump(merge_b, &[]);
 
             builder.switch_to_block(else_b);
             builder.seal_block(else_b);
-            let ev = compile_case(builder, vars, vc, funcs, module, ctor_tags, scrut, alts, idx+1)?;
+            let ev = compile_case(builder, vars, vc, funcs, module, ctor_tags, scrut, alts, idx+1, tco_ctx)?;
             builder.def_var(rv, ev);
             builder.ins().jump(merge_b, &[]);
 
@@ -988,7 +1100,7 @@ fn compile_case(
             Ok(builder.use_var(rv))
         }
         CorePat::Lit(Lit::Bool(false)) => {
-            compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body)
+            compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body, tco_ctx)
         }
         CorePat::Lit(Lit::Int(n)) => {
             let lit = builder.ins().iconst(types::I64, *n);
@@ -1005,13 +1117,13 @@ fn compile_case(
 
                 builder.switch_to_block(then_b);
                 builder.seal_block(then_b);
-                let tv = compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body)?;
+                let tv = compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body, tco_ctx)?;
                 builder.def_var(rv, tv);
                 builder.ins().jump(merge_b, &[]);
 
                 builder.switch_to_block(else_b);
                 builder.seal_block(else_b);
-                let ev = compile_case(builder, vars, vc, funcs, module, ctor_tags, scrut, alts, idx+1)?;
+                let ev = compile_case(builder, vars, vc, funcs, module, ctor_tags, scrut, alts, idx+1, tco_ctx)?;
                 builder.def_var(rv, ev);
                 builder.ins().jump(merge_b, &[]);
 
@@ -1019,7 +1131,7 @@ fn compile_case(
                 builder.seal_block(merge_b);
                 Ok(builder.use_var(rv))
             } else {
-                compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body)
+                compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body, tco_ctx)
             }
         }
         CorePat::Lit(Lit::Str(s)) => {
@@ -1045,13 +1157,13 @@ fn compile_case(
 
                 builder.switch_to_block(then_b);
                 builder.seal_block(then_b);
-                let tv = compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body)?;
+                let tv = compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body, tco_ctx)?;
                 builder.def_var(rv, tv);
                 builder.ins().jump(merge_b, &[]);
 
                 builder.switch_to_block(else_b);
                 builder.seal_block(else_b);
-                let ev = compile_case(builder, vars, vc, funcs, module, ctor_tags, scrut, alts, idx+1)?;
+                let ev = compile_case(builder, vars, vc, funcs, module, ctor_tags, scrut, alts, idx+1, tco_ctx)?;
                 builder.def_var(rv, ev);
                 builder.ins().jump(merge_b, &[]);
 
@@ -1059,7 +1171,7 @@ fn compile_case(
                 builder.seal_block(merge_b);
                 Ok(builder.use_var(rv))
             } else {
-                compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body)
+                compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body, tco_ctx)
             }
         }
         // Constructor patterns: Nil and Cons for lists
@@ -1079,13 +1191,13 @@ fn compile_case(
 
                 builder.switch_to_block(then_b);
                 builder.seal_block(then_b);
-                let tv = compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body)?;
+                let tv = compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body, tco_ctx)?;
                 builder.def_var(rv, tv);
                 builder.ins().jump(merge_b, &[]);
 
                 builder.switch_to_block(else_b);
                 builder.seal_block(else_b);
-                let ev = compile_case(builder, vars, vc, funcs, module, ctor_tags, scrut, alts, idx+1)?;
+                let ev = compile_case(builder, vars, vc, funcs, module, ctor_tags, scrut, alts, idx+1, tco_ctx)?;
                 builder.def_var(rv, ev);
                 builder.ins().jump(merge_b, &[]);
 
@@ -1093,7 +1205,7 @@ fn compile_case(
                 builder.seal_block(merge_b);
                 Ok(builder.use_var(rv))
             } else {
-                compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body)
+                compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body, tco_ctx)
             }
         }
 
@@ -1127,7 +1239,7 @@ fn compile_case(
             bind_sub_pat(builder, vars, vc, funcs, module, ctor_tags, head_val, &sub_pats[0], else_b)?;
             bind_sub_pat(builder, vars, vc, funcs, module, ctor_tags, tail_val, &sub_pats[1], else_b)?;
 
-            let tv = compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body)?;
+            let tv = compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body, tco_ctx)?;
             builder.def_var(rv, tv);
             builder.ins().jump(merge_b, &[]);
 
@@ -1135,7 +1247,7 @@ fn compile_case(
             builder.switch_to_block(else_b);
             builder.seal_block(else_b);
             let ev = if idx + 1 < alts.len() {
-                compile_case(builder, vars, vc, funcs, module, ctor_tags, scrut, alts, idx+1)?
+                compile_case(builder, vars, vc, funcs, module, ctor_tags, scrut, alts, idx+1, tco_ctx)?
             } else {
                 builder.ins().iconst(types::I64, 0) // fallback
             };
@@ -1167,7 +1279,7 @@ fn compile_case(
                 bind_sub_pat(builder, vars, vc, funcs, module, ctor_tags, field_val, field_pat, else_b)?;
             }
 
-            let tv = compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body)?;
+            let tv = compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body, tco_ctx)?;
             builder.def_var(rv, tv);
             builder.ins().jump(merge_b, &[]);
 
@@ -1175,7 +1287,7 @@ fn compile_case(
             builder.switch_to_block(else_b);
             builder.seal_block(else_b);
             let ev = if idx + 1 < alts.len() {
-                compile_case(builder, vars, vc, funcs, module, ctor_tags, scrut, alts, idx + 1)?
+                compile_case(builder, vars, vc, funcs, module, ctor_tags, scrut, alts, idx + 1, tco_ctx)?
             } else {
                 builder.ins().iconst(types::I64, 0) // non-exhaustive fallback
             };
@@ -1223,7 +1335,7 @@ fn compile_case(
                 bind_sub_pat(builder, vars, vc, funcs, module, ctor_tags, field_val, sub_pat, else_b)?;
             }
 
-            let tv = compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body)?;
+            let tv = compile_expr(builder, vars, vc, funcs, module, ctor_tags, &alt.body, tco_ctx)?;
             builder.def_var(rv, tv);
             builder.ins().jump(merge_b, &[]);
 
@@ -1231,7 +1343,7 @@ fn compile_case(
             builder.switch_to_block(else_b);
             builder.seal_block(else_b);
             let ev = if idx + 1 < alts.len() {
-                compile_case(builder, vars, vc, funcs, module, ctor_tags, scrut, alts, idx + 1)?
+                compile_case(builder, vars, vc, funcs, module, ctor_tags, scrut, alts, idx + 1, tco_ctx)?
             } else {
                 builder.ins().iconst(types::I64, 0) // non-exhaustive fallback
             };
@@ -1464,6 +1576,9 @@ fn lift_expr(
             field.clone(),
         ),
 
+        CoreExpr::Region(body) => CoreExpr::Region(Box::new(
+            lift_expr(body, bound, globals, lifted, counter)
+        )),
         CoreExpr::Scope(body) => CoreExpr::Scope(Box::new(
             lift_expr(body, bound, globals, lifted, counter)
         )),
@@ -1471,7 +1586,7 @@ fn lift_expr(
             lift_expr(expr, bound, globals, lifted, counter)
         )),
 
-        // Leaf nodes — no lambdas inside
+        // Leaf nodes — no lambdas inside (RuntimeError, Lit, Con, PrimOp)
         other => other.clone(),
     }
 }
@@ -1553,6 +1668,9 @@ fn collect_free_vars_inner(
         CoreExpr::FieldAccess(obj, _) => {
             collect_free_vars_inner(obj, outer_bound, globals, locally_bound, result);
         }
+        CoreExpr::Region(body) => {
+            collect_free_vars_inner(body, outer_bound, globals, locally_bound, result);
+        }
         CoreExpr::Scope(body) => {
             collect_free_vars_inner(body, outer_bound, globals, locally_bound, result);
         }
@@ -1612,7 +1730,7 @@ fn compile_show_record(
         let r = module.declare_func_in_func(str_concat, builder.func);
         let c = builder.ins().call(r, &[acc, label]); acc = builder.inst_results(c)[0];
         // show(value)
-        let fval = compile_expr(builder, vars, vc, funcs, module, ctor_tags, fexpr)?;
+        let fval = compile_expr(builder, vars, vc, funcs, module, ctor_tags, fexpr, None)?;
         let show_ref = module.declare_func_in_func(show_fn, builder.func);
         let show_call = builder.ins().call(show_ref, &[fval]);
         let shown = builder.inst_results(show_call)[0];

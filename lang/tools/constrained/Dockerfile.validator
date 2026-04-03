@@ -1,0 +1,26 @@
+# Synoema E2E Validator
+# Builds the Synoema compiler + Python validation tooling
+FROM rust:1.82-slim AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY lang/ ./lang/
+WORKDIR /build/lang
+RUN cargo build --release -p synoema-repl
+
+FROM python:3.12-slim
+
+RUN pip install --no-cache-dir openai
+
+WORKDIR /workspace
+
+# Copy Synoema binary
+COPY --from=builder /build/lang/target/release/synoema-repl /usr/local/bin/synoema-repl
+
+# Copy tooling
+COPY lang/tools/constrained/ ./tools/constrained/
+
+CMD ["python3", "tools/constrained/validate_e2e.py", "--input-dir", "/workspace/results", "--report"]

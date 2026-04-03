@@ -81,3 +81,33 @@ User-defined `impl Show Color` в JIT, `synoema_show_bool`, `is_bool_expr` heuri
 Type checker: линейные типы (`LinearArrow`, `LinearDuplicate`, `LinearUnused`).
 Диагностика: `synoema-diagnostic` crate, JSON/human рендереры, span в type errors.
 
+## TCO в JIT
+Self-recursive tail calls → jump to loop header. `TcoContext` threads through `compile_expr`/`compile_case`, propagated in tail positions (Case branches, Let/LetRec body). O(1) stack для tail-recursive функций. countdown(10M) и sum_to(1M) в JIT без stack overflow. 5 тестов.
+
+## String Stdlib в JIT
+`str_slice`, `str_find`, `str_starts_with`, `str_trim`, `str_len`, `json_escape` — все 6 функций портированы из interpreter в JIT через FFI-паттерн. Arena-allocated строки, 13 тестов.
+
+## Phase 19 — Doc-as-Code
+`---` doc-comments сохраняются в AST (Token::DocComment → Decl.doc: Vec<String>). Doctests (`--- example: expr == val`) проверяются при `synoema test`. `synoema doc` генерирует Markdown из кода. Guide metadata (`--- guide:`, `--- order:`). 0 влияния на runtime/JIT. 12 новых тестов (6 lexer + 6 parser).
+
+## Phase 20 — LLM Cost Reduction v1
+Пять фич для удешевления LLM-использования:
+1. **Stdlib catalog:** `docs/llm/stdlib.md` — машиночитаемый каталог всех builtins с типами для weak LLMs.
+2. **Type aliases:** `type Pos = {x: Int, y: Int}` — `KwType` в lexer, `Decl::TypeAlias` в AST, expansion в type checker через `resolve_type_expr`. Parametric aliases, recursive alias detection. 8 тестов.
+3. **Error recovery:** `parse_recovering()` — parser собирает все ошибки за один проход (skip-to-next-decl). `infer_program_recovering()` — type checker продолжает после ошибки. 6 тестов.
+4. **String interpolation:** `"hello ${name}"` — lexer: `StringFragment`/`InterpStart`/`InterpEnd` tokens, brace depth tracking. Parser: `ExprKind::StringInterp`. Desugar: `show` + `++` chain. Escape: `\$`. 8 тестов.
+5. **Multi-file imports:** `import "path.sno"` — `ImportDecl` в AST, `resolve_imports` рекурсивный resolver, cycle detection (visited set), diamond caching (по canonical path). 4 теста.
+
+## Phase 21 — Region Inference
+Автоматическое управление памятью в JIT через region inference. Два уровня:
+1. **TCO auto-regions:** tail-recursive loops автоматически освобождают per-iteration heap через `region_enter`/`region_exit` FFI. Вставка в codegen при компиляции TCO-функций.
+2. **Escape analysis + region annotation:** Core IR pass определяет non-escaping `let`-bindings (через `escapes()` + `allocates_heap()`), оборачивает их в `CoreExpr::Region`. JIT emits `region_enter`/`region_exit` вокруг scope.
+Runtime: region stack в Arena (массив saved offsets, depth до 64). 15 новых тестов.
+
+## Phase 22 — Built-in Testing
+Встроенная система тестирования: три уровня от конкретного к абстрактному.
+1. **Doctests** (существовали) — `--- example: expr == val` в doc-комментариях.
+2. **Test declarations** — `test "name" = <Bool-expr>` — standalone тесты как top-level декларации. `Decl::Test` в AST.
+3. **Property-based testing** — `prop vars -> body` — type-driven генерация 100 случайных входов. `ExprKind::Prop` + `ExprKind::Implies`. LCG генератор (без crate rand).
+Keywords: `test`, `prop`, `when` — все 1 BPE-токен. Runner: `synoema test <path> [--filter <str>]`. Поддержка `implies` для conditional properties.
+

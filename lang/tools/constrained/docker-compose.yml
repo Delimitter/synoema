@@ -1,0 +1,111 @@
+# Synoema Constrained Decoding E2E Pipeline
+#
+# Usage:
+#   docker compose up -d sglang        # Start SGLang server (GPU required)
+#   docker compose up -d llama          # Start llama.cpp server (CPU)
+#   docker compose run validator        # Run validation pipeline
+#   docker compose run benchmark        # Run benchmark suite
+#
+# Environment variables:
+#   MODEL_PATH  - Path to model file (required)
+#   HF_MODEL    - HuggingFace model ID for SGLang (default: TinyLlama/TinyLlama-1.1B-Chat-v1.0)
+
+services:
+  # ── SGLang Server (GPU) ──────────────────────────────────
+  sglang:
+    image: lmsysorg/sglang:latest
+    ports:
+      - "30000:30000"
+    volumes:
+      - ./synoema.gbnf:/workspace/synoema.gbnf:ro
+      - model-cache:/root/.cache/huggingface
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+    command: >
+      python3 -m sglang.launch_server
+      --model-path ${HF_MODEL:-TinyLlama/TinyLlama-1.1B-Chat-v1.0}
+      --port 30000
+      --host 0.0.0.0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:30000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+
+  # ── llama.cpp Server (CPU) ───────────────────────────────
+  llama:
+    image: ghcr.io/ggerganov/llama.cpp:server
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./synoema.gbnf:/workspace/synoema.gbnf:ro
+      - ${MODEL_PATH:-.}/:/models:ro
+    command: >
+      --model /models/${MODEL_FILE:-model.gguf}
+      --host 0.0.0.0
+      --port 8080
+      --grammar-file /workspace/synoema.gbnf
+      --ctx-size 2048
+      --threads 4
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+
+  # ── Synoema Validator ────────────────────────────────────
+  validator:
+    build:
+      context: ../..
+      dockerfile: tools/constrained/Dockerfile.validator
+    volumes:
+      - ./prompts:/workspace/prompts:ro
+      - ./synoema.gbnf:/workspace/synoema.gbnf:ro
+      - results:/workspace/results
+    environment:
+      - SGLANG_URL=http://sglang:30000
+      - LLAMA_URL=http://llama:8080
+    depends_on:
+      sglang:
+        condition: service_healthy
+        required: false
+      llama:
+        condition: service_healthy
+        required: false
+    profiles:
+      - validate
+
+  # ── Benchmark Runner ─────────────────────────────────────
+  benchmark:
+    build:
+      context: ../..
+      dockerfile: tools/constrained/Dockerfile.validator
+    volumes:
+      - ./prompts:/workspace/prompts:ro
+      - ./synoema.gbnf:/workspace/synoema.gbnf:ro
+      - results:/workspace/results
+    environment:
+      - SGLANG_URL=http://sglang:30000
+    command: >
+      python3 tools/constrained/benchmark.py
+      --server http://sglang:30000
+      --output-dir /workspace/results/benchmark
+      --report
+    depends_on:
+      sglang:
+        condition: service_healthy
+    profiles:
+      - benchmark
+
+volumes:
+  model-cache:
+  results:

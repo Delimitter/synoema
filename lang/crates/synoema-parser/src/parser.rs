@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 use synoema_lexer::{SpannedToken, Token, Span};
 use crate::ast::*;
 use crate::error::ParseError;
@@ -73,6 +76,25 @@ impl Parser {
         }
     }
 
+    /// Collect consecutive DocComment tokens, skipping newlines between them.
+    /// Returns the collected doc lines (empty if no doc-comments found).
+    fn collect_doc_comments(&mut self) -> Vec<String> {
+        let mut doc = Vec::new();
+        loop {
+            match self.peek().clone() {
+                Token::DocComment(text) => {
+                    doc.push(text);
+                    self.advance();
+                    // skip optional newline after doc comment
+                    self.eat(&Token::Newline);
+                }
+                Token::Newline => { self.advance(); }
+                _ => break,
+            }
+        }
+        doc
+    }
+
     fn error(&self, msg: impl Into<String>) -> ParseError {
         ParseError::new(msg, self.peek_span())
     }
@@ -80,24 +102,89 @@ impl Parser {
     // ── Program ───────────────────────────────────────────
 
     pub fn parse_program(&mut self) -> PResult<Program> {
+        let (program, errors) = self.parse_program_recovering();
+        if errors.is_empty() {
+            Ok(program)
+        } else {
+            Err(errors.into_iter().next().unwrap())
+        }
+    }
+
+    /// Parse program collecting all errors instead of stopping at the first one.
+    /// Returns partial AST + all accumulated errors.
+    pub fn parse_program_recovering(&mut self) -> (Program, Vec<ParseError>) {
+        let mut imports = Vec::new();
         let mut decls = Vec::new();
         let mut modules = Vec::new();
         let mut uses = Vec::new();
+        let mut errors = Vec::new();
         self.skip_newlines();
 
         while self.peek() != &Token::Eof {
+            // Collect doc-comments before the next declaration
+            let doc = self.collect_doc_comments();
+
             match self.peek().clone() {
+                Token::KwImport => {
+                    match self.parse_import() {
+                        Ok(import_decl) => {
+                            let _ = doc;
+                            imports.push(import_decl);
+                        }
+                        Err(e) => {
+                            errors.push(e);
+                            self.skip_to_next_decl();
+                        }
+                    }
+                }
                 Token::KwMod => {
-                    let module = self.parse_module()?;
-                    modules.push(module);
+                    match self.parse_module() {
+                        Ok(mut module) => {
+                            module.doc = doc;
+                            modules.push(module);
+                        }
+                        Err(e) => {
+                            errors.push(e);
+                            self.skip_to_next_decl();
+                        }
+                    }
+                }
+                Token::KwTest => {
+                    match self.parse_test_decl() {
+                        Ok(decl) => {
+                            let _ = doc;
+                            decls.push(decl);
+                        }
+                        Err(e) => {
+                            errors.push(e);
+                            self.skip_to_next_decl();
+                        }
+                    }
                 }
                 Token::KwUse => {
-                    let use_decl = self.parse_use()?;
-                    uses.push(use_decl);
+                    match self.parse_use() {
+                        Ok(use_decl) => {
+                            let _ = doc;
+                            uses.push(use_decl);
+                        }
+                        Err(e) => {
+                            errors.push(e);
+                            self.skip_to_next_decl();
+                        }
+                    }
                 }
+                Token::Eof => break,
                 _ => {
-                    let decl = self.parse_decl()?;
-                    decls.push(decl);
+                    match self.parse_decl() {
+                        Ok(mut decl) => {
+                            attach_doc(&mut decl, doc);
+                            decls.push(decl);
+                        }
+                        Err(e) => {
+                            errors.push(e);
+                            self.skip_to_next_decl();
+                        }
+                    }
                 }
             }
             self.skip_newlines();
@@ -106,7 +193,43 @@ impl Parser {
         // Group function equations by name
         let decls = group_func_equations(decls);
 
-        Ok(Program { decls, modules, uses })
+        (Program { imports, decls, modules, uses }, errors)
+    }
+
+    /// Skip tokens until the next top-level declaration boundary.
+    /// A declaration boundary is: a token at the beginning of a line
+    /// (after Newline) that could start a new declaration.
+    fn skip_to_next_decl(&mut self) {
+        loop {
+            match self.peek() {
+                Token::Eof => break,
+                Token::Newline => {
+                    self.advance();
+                    // After newline, check if next token can start a declaration
+                    match self.peek() {
+                        Token::LowerId(_) | Token::UpperId(_)
+                        | Token::KwMod | Token::KwUse | Token::KwTrait
+                        | Token::KwImpl | Token::KwType | Token::Eof => break,
+                        Token::DocComment(_) => break,
+                        _ => {} // keep skipping
+                    }
+                }
+                _ => { self.advance(); }
+            }
+        }
+    }
+
+    fn parse_import(&mut self) -> PResult<ImportDecl> {
+        let span = self.peek_span();
+        self.expect(&Token::KwImport)?;
+        match self.peek().clone() {
+            Token::Str(path) => {
+                self.advance();
+                self.eat(&Token::Newline);
+                Ok(ImportDecl { path, span })
+            }
+            _ => Err(self.error("expected string literal after 'import'")),
+        }
     }
 
     fn parse_module(&mut self) -> PResult<ModuleDecl> {
@@ -118,14 +241,19 @@ impl Parser {
         let mut body = Vec::new();
         self.skip_newlines();
         while self.peek() != &Token::Dedent && self.peek() != &Token::Eof {
-            let decl = self.parse_decl()?;
+            let doc = self.collect_doc_comments();
+            if self.peek() == &Token::Dedent || self.peek() == &Token::Eof {
+                break;
+            }
+            let mut decl = self.parse_decl()?;
+            attach_doc(&mut decl, doc);
             body.push(decl);
             self.skip_newlines();
         }
         self.eat(&Token::Dedent);
 
         let body = group_func_equations(body);
-        Ok(ModuleDecl { name, body })
+        Ok(ModuleDecl { name, body, doc: Vec::new() })
     }
 
     fn parse_use(&mut self) -> PResult<UseDecl> {
@@ -133,10 +261,16 @@ impl Parser {
         self.expect(&Token::KwUse)?;
         let module = self.expect_upper_id()?;
         self.expect(&Token::LParen)?;
-        let mut names = Vec::new();
-        while self.peek() != &Token::RParen && self.peek() != &Token::Eof {
-            names.push(self.expect_lower_id()?);
-        }
+        let names = if self.peek() == &Token::Star {
+            self.advance();
+            vec!["*".into()]
+        } else {
+            let mut ns = Vec::new();
+            while self.peek() != &Token::RParen && self.peek() != &Token::Eof {
+                ns.push(self.expect_lower_id()?);
+            }
+            ns
+        };
         self.expect(&Token::RParen)?;
         self.eat(&Token::Newline);
         Ok(UseDecl { module, names, span })
@@ -165,6 +299,9 @@ impl Parser {
             // Type class implementation
             Token::KwImpl => self.parse_impl_decl(),
 
+            // Type alias: type Name params = TypeExpr
+            Token::KwType => self.parse_type_alias(),
+
             _ => Err(self.error(format!("Expected declaration, got {:?}", self.peek()))),
         }
     }
@@ -190,7 +327,7 @@ impl Parser {
             self.skip_newlines();
         }
         self.eat(&Token::Dedent);
-        Ok(Decl::TraitDecl { name, ty_param, methods, span })
+        Ok(Decl::TraitDecl { name, ty_param, methods, span, doc: Vec::new() })
     }
 
     fn parse_impl_decl(&mut self) -> PResult<Decl> {
@@ -308,6 +445,7 @@ impl Parser {
             name: name.clone(),
             equations: vec![Equation { pats, body, span }],
             span,
+            doc: Vec::new(), // filled by caller via attach_doc
         })
     }
 
@@ -327,9 +465,54 @@ impl Parser {
             variants.push(self.parse_variant()?);
         }
 
+        // Parse optional deriving clause: deriving (Show, Eq, Ord)
+        let derives = if self.eat(&Token::KwDerive) {
+            self.expect(&Token::LParen)?;
+            let mut ds = vec![self.expect_upper_id()?];
+            while self.eat(&Token::Comma) {
+                ds.push(self.expect_upper_id()?);
+            }
+            self.expect(&Token::RParen)?;
+            ds
+        } else {
+            Vec::new()
+        };
+
         self.eat(&Token::Newline);
 
-        Ok(Decl::TypeDef { name, params, variants, span })
+        Ok(Decl::TypeDef { name, params, variants, span, doc: Vec::new(), derives })
+    }
+
+    fn parse_type_alias(&mut self) -> PResult<Decl> {
+        let span = self.peek_span();
+        self.expect(&Token::KwType)?;
+        let name = self.expect_upper_id()?;
+
+        let mut params = Vec::new();
+        while let Token::LowerId(_) = self.peek() {
+            params.push(self.expect_lower_id()?);
+        }
+
+        self.expect(&Token::Assign)?;
+        let body = self.parse_type()?;
+        self.eat(&Token::Newline);
+
+        Ok(Decl::TypeAlias { name, params, body, span })
+    }
+
+    fn parse_test_decl(&mut self) -> PResult<Decl> {
+        let span = self.peek_span();
+        self.expect(&Token::KwTest)?;
+        let name = match self.peek() {
+            Token::Str(_) => {
+                if let Token::Str(s) = self.advance().token.clone() { s } else { unreachable!() }
+            }
+            _ => return Err(self.error(format!("Expected test name (string), got {:?}", self.peek()))),
+        };
+        self.expect(&Token::Assign)?;
+        let body = self.parse_expr()?;
+        self.eat(&Token::Newline);
+        Ok(Decl::Test { name, body, span })
     }
 
     fn parse_variant(&mut self) -> PResult<Variant> {
@@ -419,8 +602,13 @@ impl Parser {
                 let mut fields = Vec::new();
                 while self.peek() != &Token::RBrace && self.peek() != &Token::Eof {
                     let fname = self.expect_lower_id()?;
-                    self.expect(&Token::Assign)?;
-                    let pat = self.parse_pattern()?;
+                    let pat = if self.peek() == &Token::Assign {
+                        self.advance();
+                        self.parse_pattern()?
+                    } else {
+                        // Pattern punning: {x} → {x = x}
+                        Pat::Var(fname.clone())
+                    };
                     fields.push((fname, pat));
                     self.eat(&Token::Comma);
                 }
@@ -476,6 +664,18 @@ impl Parser {
                 Token::Percent   => (BinOp::Mod,     16, 17),
                 Token::StarStar  => (BinOp::Pow,     17, 17), // right-assoc, higher than Mul/Div (rbp==lbp for right-assoc)
                 Token::Compose   => (BinOp::Compose, 18, 18), // right-assoc
+
+                // Conditional: `body when cond` (right-assoc, above |>, below ||)
+                Token::KwWhen => {
+                    let lbp = 3u8;
+                    let rbp = 3u8;
+                    if lbp < min_bp { break; }
+                    self.advance();
+                    let rhs = self.parse_pratt(rbp)?;
+                    let span = lhs.span;
+                    lhs = Expr::new(ExprKind::When(Box::new(lhs), Box::new(rhs)), span);
+                    continue;
+                }
 
                 // Field access (highest precedence for postfix)
                 Token::Dot => {
@@ -579,6 +779,18 @@ impl Parser {
                 Ok(Expr::new(ExprKind::Spawn(Box::new(expr)), span))
             }
 
+            // prop x y -> body  (property generator)
+            Token::KwProp => {
+                self.advance();
+                let mut vars = Vec::new();
+                while self.peek() != &Token::Arrow {
+                    vars.push(self.expect_lower_id()?);
+                }
+                self.expect(&Token::Arrow)?;
+                let body = self.parse_expr()?;
+                Ok(Expr::new(ExprKind::Prop(vars, Box::new(body)), span))
+            }
+
             _ => self.parse_atom(),
         }
     }
@@ -588,6 +800,7 @@ impl Parser {
         matches!(self.peek(),
             Token::LowerId(_) | Token::UpperId(_) |
             Token::Int(_) | Token::Float(_) | Token::Str(_) | Token::Char(_) |
+            Token::StringFragment(_) | Token::InterpStart |
             Token::KwTrue | Token::KwFalse |
             Token::LParen | Token::LBracket | Token::LBrace
         )
@@ -601,6 +814,11 @@ impl Parser {
             Token::Int(n) => { self.advance(); Ok(Expr::new(ExprKind::Lit(Lit::Int(n)), span)) }
             Token::Float(f) => { self.advance(); Ok(Expr::new(ExprKind::Lit(Lit::Float(f)), span)) }
             Token::Str(s) => { self.advance(); Ok(Expr::new(ExprKind::Lit(Lit::Str(s)), span)) }
+
+            // String interpolation: StringFragment ... InterpStart expr InterpEnd ...
+            Token::StringFragment(_) | Token::InterpStart => {
+                return self.parse_interp_string(span);
+            }
             Token::Char(c) => { self.advance(); Ok(Expr::new(ExprKind::Lit(Lit::Char(c)), span)) }
             Token::KwTrue => { self.advance(); Ok(Expr::new(ExprKind::Lit(Lit::Bool(true)), span)) }
             Token::KwFalse => { self.advance(); Ok(Expr::new(ExprKind::Lit(Lit::Bool(false)), span)) }
@@ -628,8 +846,13 @@ impl Parser {
                 self.skip_newlines();
                 while self.peek() != &Token::RBrace && self.peek() != &Token::Eof {
                     let fname = self.expect_lower_id()?;
-                    self.expect(&Token::Assign)?;
-                    let val = self.parse_expr()?;
+                    let val = if self.peek() == &Token::Assign {
+                        self.advance();
+                        self.parse_expr()?
+                    } else {
+                        // Record punning: {x} → {x = x}
+                        Expr::new(ExprKind::Var(fname.clone()), span)
+                    };
                     fields.push((fname, val));
                     self.eat(&Token::Comma);
                     self.skip_newlines();
@@ -639,6 +862,52 @@ impl Parser {
             }
 
             _ => Err(self.error(format!("Expected expression, got {:?}", self.peek()))),
+        }
+    }
+
+    /// Parse an interpolated string: sequence of StringFragment and InterpStart..InterpEnd.
+    /// Desugars to `show` calls joined by `++`.
+    ///
+    /// `"hello ${name}, ${x + 1} end"` becomes:
+    /// `"hello " ++ show name ++ ", " ++ show (x + 1) ++ " end"`
+    fn parse_interp_string(&mut self, span: Span) -> PResult<Expr> {
+        let mut segments: Vec<Expr> = Vec::new();
+        loop {
+            match self.peek().clone() {
+                Token::StringFragment(s) => {
+                    self.advance();
+                    if !s.is_empty() {
+                        segments.push(Expr::new(ExprKind::Lit(Lit::Str(s)), span));
+                    }
+                }
+                Token::InterpStart => {
+                    self.advance();
+                    let expr = self.parse_expr()?;
+                    self.expect(&Token::InterpEnd)?;
+                    // Wrap in `show expr`
+                    let show = Expr::new(ExprKind::Var("show".to_string()), span);
+                    segments.push(Expr::new(
+                        ExprKind::App(Box::new(show), Box::new(expr)),
+                        span,
+                    ));
+                }
+                _ => break,
+            }
+        }
+        // Fold segments with ++ (left-associative)
+        match segments.len() {
+            0 => Ok(Expr::new(ExprKind::Lit(Lit::Str(String::new())), span)),
+            1 => Ok(segments.remove(0)),
+            _ => {
+                let mut result = segments.remove(0);
+                for seg in segments {
+                    result = Expr::new(
+                        ExprKind::BinOp(BinOp::Concat, Box::new(result), Box::new(seg)),
+                        span,
+                    );
+                }
+                Ok(result)
+            }
         }
     }
 
@@ -897,7 +1166,7 @@ fn group_func_equations(decls: Vec<Decl>) -> Vec<Decl> {
 
     for decl in decls {
         match decl {
-            Decl::Func { name, equations, span } => {
+            Decl::Func { name, equations, span, doc } => {
                 if let Some(Decl::Func {
                     name: ref prev_name,
                     equations: ref mut prev_eqs,
@@ -909,11 +1178,22 @@ fn group_func_equations(decls: Vec<Decl>) -> Vec<Decl> {
                         continue;
                     }
                 }
-                result.push(Decl::Func { name, equations, span });
+                result.push(Decl::Func { name, equations, span, doc });
             }
             other => result.push(other),
         }
     }
 
     result
+}
+
+/// Attach doc-comments to a declaration.
+fn attach_doc(decl: &mut Decl, doc: Vec<String>) {
+    if doc.is_empty() { return; }
+    match decl {
+        Decl::Func { doc: d, .. } => *d = doc,
+        Decl::TypeDef { doc: d, .. } => *d = doc,
+        Decl::TraitDecl { doc: d, .. } => *d = doc,
+        Decl::TypeSig(_) | Decl::ImplDecl { .. } | Decl::TypeAlias { .. } | Decl::Test { .. } => {}
+    }
 }

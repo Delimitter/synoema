@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: MIT-0
+
 -- Greatest Common Divisor (Euclidean algorithm)
 gcd a 0 = a
 gcd a b = gcd b (a % b)

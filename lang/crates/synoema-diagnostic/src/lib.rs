@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 //! # synoema-diagnostic
 //! Structured error reporting for the Synoema programming language.
 //!
@@ -6,6 +9,32 @@
 
 use synoema_lexer::Span;
 use std::fmt;
+
+// ── Fixability ──────────────────────────────────────────
+
+/// How difficult an error is to fix — guides LLM retry strategy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fixability {
+    /// Typo, missing delimiter, wrong symbol
+    Trivial,
+    /// Add argument, fix type, add pattern
+    Easy,
+    /// Restructure code, redesign types
+    Medium,
+    /// Rethink algorithm, infinite type
+    Hard,
+}
+
+impl fmt::Display for Fixability {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Fixability::Trivial => write!(f, "trivial"),
+            Fixability::Easy => write!(f, "easy"),
+            Fixability::Medium => write!(f, "medium"),
+            Fixability::Hard => write!(f, "hard"),
+        }
+    }
+}
 
 // ── Severity ────────────────────────────────────────────
 
@@ -54,6 +83,12 @@ pub struct Diagnostic {
     pub labels: Vec<Label>,
     /// Extra context lines (e.g. "expected: Int", "found: Bool").
     pub notes: Vec<String>,
+    /// Actionable fix instruction for LLM feedback loops.
+    pub llm_hint: Option<String>,
+    /// How difficult the error is to fix.
+    pub fixability: Option<Fixability>,
+    /// Suggested alternative syntax (e.g. "if x then y" → "? x -> y : z").
+    pub did_you_mean: Option<String>,
 }
 
 impl Diagnostic {
@@ -66,6 +101,9 @@ impl Diagnostic {
             span: None,
             labels: vec![],
             notes: vec![],
+            llm_hint: None,
+            fixability: None,
+            did_you_mean: None,
         }
     }
 
@@ -78,6 +116,9 @@ impl Diagnostic {
             span: None,
             labels: vec![],
             notes: vec![],
+            llm_hint: None,
+            fixability: None,
+            did_you_mean: None,
         }
     }
 
@@ -102,6 +143,24 @@ impl Diagnostic {
     /// Add a context note.
     pub fn with_note(mut self, note: impl Into<String>) -> Self {
         self.notes.push(note.into());
+        self
+    }
+
+    /// Attach an LLM hint (actionable fix instruction).
+    pub fn with_llm_hint(mut self, hint: impl Into<String>) -> Self {
+        self.llm_hint = Some(hint.into());
+        self
+    }
+
+    /// Attach fixability level.
+    pub fn with_fixability(mut self, f: Fixability) -> Self {
+        self.fixability = Some(f);
+        self
+    }
+
+    /// Attach a did-you-mean suggestion.
+    pub fn with_did_you_mean(mut self, suggestion: impl Into<String>) -> Self {
+        self.did_you_mean = Some(suggestion.into());
         self
     }
 }
@@ -181,6 +240,16 @@ pub fn render_human(diag: &Diagnostic, source: Option<&str>) -> String {
         out.push_str(&format!("  = note: {}\n", note));
     }
 
+    // LLM hint
+    if let Some(ref hint) = diag.llm_hint {
+        out.push_str(&format!("  = hint: {}\n", hint));
+    }
+
+    // Did-you-mean
+    if let Some(ref dym) = diag.did_you_mean {
+        out.push_str(&format!("  = did you mean: {}\n", dym));
+    }
+
     out
 }
 
@@ -217,6 +286,18 @@ pub fn render_json(diag: &Diagnostic) -> String {
             out.push_str(&json_str(note));
         }
         out.push(']');
+    }
+
+    if let Some(ref hint) = diag.llm_hint {
+        out.push_str(&format!(",\"llm_hint\":{}", json_str(hint)));
+    }
+
+    if let Some(ref f) = diag.fixability {
+        out.push_str(&format!(",\"fixability\":{}", json_str(&f.to_string())));
+    }
+
+    if let Some(ref dym) = diag.did_you_mean {
+        out.push_str(&format!(",\"did_you_mean\":{}", json_str(dym)));
     }
 
     out.push('}');
@@ -276,8 +357,200 @@ pub mod codes {
     pub const LINEAR_DUPLICATE: &str = "linear_duplicate";
     pub const LINEAR_UNUSED: &str = "linear_unused";
 
+    // Imports
+    pub const IMPORT_CYCLE: &str = "import_cycle";
+    pub const IMPORT_NOT_FOUND: &str = "import_not_found";
+
+    // Indentation
+    pub const PARSE_INDENTATION: &str = "indentation";
+
     // Codegen
     pub const COMPILE_ERROR: &str = "compile_error";
+}
+
+// ── LLM Error Enrichment ───────────────────────────────
+// Adds llm_hint, fixability, and did_you_mean to diagnostics
+// for the top-10 most frequent LLM errors.
+
+/// Enrich a diagnostic with LLM-actionable metadata.
+/// Call this before rendering to add hints, fixability, and did-you-mean.
+pub fn enrich_diagnostic(diag: &mut Diagnostic) {
+    // Skip if already enriched
+    if diag.llm_hint.is_some() {
+        return;
+    }
+
+    match diag.code {
+        codes::TYPE_MISMATCH => {
+            diag.fixability = Some(Fixability::Trivial);
+            let (expected, found) = extract_expected_found(&diag.notes);
+            diag.llm_hint = Some(format!(
+                "Change the expression to produce {} instead of {}. \
+                 Common fixes: type conversion, different operator, or fix the literal value.",
+                expected, found
+            ));
+        }
+        codes::TYPE_ARITY => {
+            diag.fixability = Some(Fixability::Trivial);
+            diag.llm_hint = Some(
+                "Wrong number of arguments. Check the function signature and add/remove arguments.".into()
+            );
+        }
+        codes::TYPE_UNBOUND_VAR => {
+            diag.fixability = Some(Fixability::Easy);
+            let name = extract_name_from_message(&diag.message);
+            diag.llm_hint = Some(format!(
+                "Variable '{}' is not defined. Check spelling, add it as a parameter, or define it in a where-block.",
+                name
+            ));
+        }
+        codes::TYPE_INFINITE => {
+            diag.fixability = Some(Fixability::Hard);
+            diag.llm_hint = Some(
+                "Infinite type detected — the type refers to itself. \
+                 Restructure to break the cycle, e.g. wrap in an ADT constructor.".into()
+            );
+        }
+        codes::TYPE_PATTERN => {
+            diag.fixability = Some(Fixability::Easy);
+            diag.llm_hint = Some(
+                "Pattern does not match the expected type. Check constructor names and arity.".into()
+            );
+        }
+        codes::PARSE_UNEXPECTED_TOKEN => {
+            diag.fixability = Some(Fixability::Trivial);
+            // Apply did-you-mean rules for common LLM syntax mistakes
+            apply_syntax_did_you_mean(diag);
+            if diag.llm_hint.is_none() {
+                diag.llm_hint = Some(
+                    "Unexpected token. Check for missing operators, extra punctuation, \
+                     or unsupported syntax (no if/then/else, no commas in lists, no return).".into()
+                );
+            }
+        }
+        codes::PARSE_EXPECTED_EXPR => {
+            diag.fixability = Some(Fixability::Trivial);
+            diag.llm_hint = Some(
+                "Expected an expression. Every construct in Synoema is an expression — \
+                 there are no statements.".into()
+            );
+        }
+        codes::LEX_UNTERMINATED_STRING => {
+            diag.fixability = Some(Fixability::Trivial);
+            diag.llm_hint = Some(
+                "String literal is missing the closing quote. Add a matching '\"' at the end.".into()
+            );
+        }
+        codes::EVAL_NO_MATCH => {
+            diag.fixability = Some(Fixability::Easy);
+            diag.llm_hint = Some(
+                "No pattern matched the input value. Add a catch-all pattern or handle the missing case.".into()
+            );
+        }
+        codes::EVAL_DIV_ZERO => {
+            diag.fixability = Some(Fixability::Trivial);
+            diag.llm_hint = Some(
+                "Division by zero. Guard with a conditional: ? divisor == 0 -> default : x / divisor".into()
+            );
+        }
+        codes::LINEAR_UNUSED => {
+            diag.fixability = Some(Fixability::Easy);
+            diag.llm_hint = Some(
+                "Linear variable declared but not used. Use it in the body or remove it from parameters.".into()
+            );
+        }
+        codes::LINEAR_DUPLICATE => {
+            diag.fixability = Some(Fixability::Easy);
+            diag.llm_hint = Some(
+                "Linear variable used more than once. Use it exactly once, or copy the value first.".into()
+            );
+        }
+        codes::PARSE_INDENTATION => {
+            diag.fixability = Some(Fixability::Easy);
+            if diag.llm_hint.is_none() {
+                diag.llm_hint = Some(
+                    "Synoema uses the offside rule (like Haskell/Python). \
+                     Indent the body of a definition further than its name. \
+                     Use consistent 2-space indentation.".into()
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Apply did-you-mean rules for common LLM syntax mistakes.
+fn apply_syntax_did_you_mean(diag: &mut Diagnostic) {
+    let msg = diag.message.to_lowercase();
+
+    // if/then/else → ternary
+    if msg.contains("if") || msg.contains("then") || msg.contains("else") {
+        diag.did_you_mean = Some("? condition -> then_expr : else_expr".into());
+        diag.llm_hint = Some(
+            "Synoema has no if/then/else. Use ternary: ? cond -> x : y".into()
+        );
+        return;
+    }
+
+    // Commas in lists → spaces
+    if msg.contains(",") || msg.contains("comma") {
+        diag.did_you_mean = Some("[1 2 3] (space-separated, no commas)".into());
+        diag.llm_hint = Some(
+            "Lists use spaces, not commas: [1 2 3] not [1, 2, 3]".into()
+        );
+        return;
+    }
+
+    // return → expression-based
+    if msg.contains("return") {
+        diag.did_you_mean = Some("just write the expression (Synoema is expression-based)".into());
+        diag.llm_hint = Some(
+            "Synoema has no 'return'. The last expression is the result.".into()
+        );
+        return;
+    }
+
+    // -> without backslash (lambda)
+    if msg.contains("->") && !msg.contains("\\") {
+        diag.did_you_mean = Some("\\x -> body (lambda needs backslash)".into());
+        diag.llm_hint = Some(
+            "Lambda syntax requires backslash: \\x -> x + 1".into()
+        );
+    }
+}
+
+/// Extract expected/found types from diagnostic notes.
+fn extract_expected_found(notes: &[String]) -> (String, String) {
+    let mut expected = "the expected type".to_string();
+    let mut found = "the actual type".to_string();
+    for note in notes {
+        if let Some(rest) = note.strip_prefix("expected: ") {
+            expected = rest.to_string();
+        } else if let Some(rest) = note.strip_prefix("found: ") {
+            found = rest.to_string();
+        }
+    }
+    (expected, found)
+}
+
+/// Extract a variable/function name from an error message.
+fn extract_name_from_message(msg: &str) -> String {
+    // Try to find a quoted name like 'foo' or `foo`
+    if let Some(start) = msg.find('\'') {
+        if let Some(end) = msg[start + 1..].find('\'') {
+            return msg[start + 1..start + 1 + end].to_string();
+        }
+    }
+    if let Some(start) = msg.find('`') {
+        if let Some(end) = msg[start + 1..].find('`') {
+            return msg[start + 1..start + 1 + end].to_string();
+        }
+    }
+    // Fallback: try "Unbound variable: name" pattern
+    if let Some(rest) = msg.strip_prefix("Unbound variable: ") {
+        return rest.trim().to_string();
+    }
+    "<unknown>".to_string()
 }
 
 // ── Tests ───────────────────────────────────────────────
@@ -355,5 +628,211 @@ mod tests {
         assert_eq!(get_source_line(src, 3), Some("line three"));
         assert_eq!(get_source_line(src, 4), None);
         assert_eq!(get_source_line(src, 0), None);
+    }
+
+    // ── Enrichment tests ──────────────────────────────────
+
+    #[test]
+    fn enrich_type_mismatch() {
+        let mut d = Diagnostic::error(codes::TYPE_MISMATCH, "expected Int, found Bool")
+            .with_note("expected: Int")
+            .with_note("found: Bool");
+        enrich_diagnostic(&mut d);
+        assert_eq!(d.fixability, Some(Fixability::Trivial));
+        assert!(d.llm_hint.as_ref().unwrap().contains("Int"));
+        assert!(d.llm_hint.as_ref().unwrap().contains("Bool"));
+    }
+
+    #[test]
+    fn enrich_type_arity() {
+        let mut d = Diagnostic::error(codes::TYPE_ARITY, "wrong number of arguments");
+        enrich_diagnostic(&mut d);
+        assert_eq!(d.fixability, Some(Fixability::Trivial));
+        assert!(d.llm_hint.is_some());
+    }
+
+    #[test]
+    fn enrich_unbound_var() {
+        let mut d = Diagnostic::error(codes::TYPE_UNBOUND_VAR, "Unbound variable: foo");
+        enrich_diagnostic(&mut d);
+        assert_eq!(d.fixability, Some(Fixability::Easy));
+        assert!(d.llm_hint.as_ref().unwrap().contains("foo"));
+    }
+
+    #[test]
+    fn enrich_infinite_type() {
+        let mut d = Diagnostic::error(codes::TYPE_INFINITE, "infinite type");
+        enrich_diagnostic(&mut d);
+        assert_eq!(d.fixability, Some(Fixability::Hard));
+    }
+
+    #[test]
+    fn enrich_pattern_mismatch() {
+        let mut d = Diagnostic::error(codes::TYPE_PATTERN, "pattern mismatch");
+        enrich_diagnostic(&mut d);
+        assert_eq!(d.fixability, Some(Fixability::Easy));
+    }
+
+    #[test]
+    fn enrich_unexpected_token() {
+        let mut d = Diagnostic::error(codes::PARSE_UNEXPECTED_TOKEN, "unexpected token");
+        enrich_diagnostic(&mut d);
+        assert_eq!(d.fixability, Some(Fixability::Trivial));
+        assert!(d.llm_hint.is_some());
+    }
+
+    #[test]
+    fn enrich_unterminated_string() {
+        let mut d = Diagnostic::error(codes::LEX_UNTERMINATED_STRING, "unterminated string");
+        enrich_diagnostic(&mut d);
+        assert_eq!(d.fixability, Some(Fixability::Trivial));
+        assert!(d.llm_hint.as_ref().unwrap().contains("closing quote"));
+    }
+
+    #[test]
+    fn enrich_no_match() {
+        let mut d = Diagnostic::error(codes::EVAL_NO_MATCH, "no pattern matched");
+        enrich_diagnostic(&mut d);
+        assert_eq!(d.fixability, Some(Fixability::Easy));
+        assert!(d.llm_hint.as_ref().unwrap().contains("catch-all"));
+    }
+
+    #[test]
+    fn enrich_div_zero() {
+        let mut d = Diagnostic::error(codes::EVAL_DIV_ZERO, "division by zero");
+        enrich_diagnostic(&mut d);
+        assert_eq!(d.fixability, Some(Fixability::Trivial));
+    }
+
+    #[test]
+    fn enrich_linear_unused() {
+        let mut d = Diagnostic::error(codes::LINEAR_UNUSED, "unused linear var");
+        enrich_diagnostic(&mut d);
+        assert_eq!(d.fixability, Some(Fixability::Easy));
+    }
+
+    #[test]
+    fn enrich_linear_duplicate() {
+        let mut d = Diagnostic::error(codes::LINEAR_DUPLICATE, "duplicate linear var");
+        enrich_diagnostic(&mut d);
+        assert_eq!(d.fixability, Some(Fixability::Easy));
+    }
+
+    #[test]
+    fn enrich_indentation() {
+        let mut d = Diagnostic::error(codes::PARSE_INDENTATION, "indentation error");
+        enrich_diagnostic(&mut d);
+        assert_eq!(d.fixability, Some(Fixability::Easy));
+        assert!(d.llm_hint.as_ref().unwrap().contains("offside"));
+    }
+
+    // ── Did-you-mean tests ─────────────────────────────────
+
+    #[test]
+    fn did_you_mean_if_then_else() {
+        let mut d = Diagnostic::error(codes::PARSE_UNEXPECTED_TOKEN, "unexpected if token");
+        enrich_diagnostic(&mut d);
+        assert!(d.did_you_mean.as_ref().unwrap().contains("?"));
+        assert!(d.llm_hint.as_ref().unwrap().contains("ternary"));
+    }
+
+    #[test]
+    fn did_you_mean_comma() {
+        let mut d = Diagnostic::error(codes::PARSE_UNEXPECTED_TOKEN, "unexpected ','");
+        enrich_diagnostic(&mut d);
+        assert!(d.did_you_mean.as_ref().unwrap().contains("space-separated"));
+    }
+
+    #[test]
+    fn did_you_mean_return() {
+        let mut d = Diagnostic::error(codes::PARSE_UNEXPECTED_TOKEN, "unexpected return");
+        enrich_diagnostic(&mut d);
+        assert!(d.did_you_mean.as_ref().unwrap().contains("expression"));
+    }
+
+    // ── JSON output with enrichment fields ─────────────────
+
+    #[test]
+    fn json_includes_llm_fields() {
+        let d = Diagnostic::error(codes::TYPE_MISMATCH, "expected Int, found Bool")
+            .with_llm_hint("Fix the type")
+            .with_fixability(Fixability::Trivial)
+            .with_did_you_mean("use Int instead");
+        let json = render_json(&d);
+        assert!(json.contains("\"llm_hint\":\"Fix the type\""));
+        assert!(json.contains("\"fixability\":\"trivial\""));
+        assert!(json.contains("\"did_you_mean\":\"use Int instead\""));
+    }
+
+    #[test]
+    fn json_omits_null_llm_fields() {
+        let d = Diagnostic::error(codes::TYPE_MISMATCH, "expected Int, found Bool");
+        let json = render_json(&d);
+        assert!(!json.contains("llm_hint"));
+        assert!(!json.contains("fixability"));
+        assert!(!json.contains("did_you_mean"));
+    }
+
+    // ── Human renderer with enrichment ─────────────────────
+
+    #[test]
+    fn human_shows_hint() {
+        let d = Diagnostic::error(codes::TYPE_MISMATCH, "expected Int, found Bool")
+            .with_llm_hint("Fix this")
+            .with_did_you_mean("? cond -> x : y");
+        let output = render_human(&d, None);
+        assert!(output.contains("hint: Fix this"));
+        assert!(output.contains("did you mean: ? cond -> x : y"));
+    }
+
+    #[test]
+    fn enrich_skips_if_already_enriched() {
+        let mut d = Diagnostic::error(codes::TYPE_MISMATCH, "expected Int, found Bool")
+            .with_llm_hint("Custom hint");
+        enrich_diagnostic(&mut d);
+        assert_eq!(d.llm_hint.as_ref().unwrap(), "Custom hint");
+    }
+
+    // ── Fixability display ─────────────────────────────────
+
+    #[test]
+    fn fixability_display() {
+        assert_eq!(format!("{}", Fixability::Trivial), "trivial");
+        assert_eq!(format!("{}", Fixability::Easy), "easy");
+        assert_eq!(format!("{}", Fixability::Medium), "medium");
+        assert_eq!(format!("{}", Fixability::Hard), "hard");
+    }
+
+    // ── Builder methods ────────────────────────────────────
+
+    #[test]
+    fn builder_chain() {
+        let d = Diagnostic::error(codes::TYPE_MISMATCH, "test")
+            .with_llm_hint("hint")
+            .with_fixability(Fixability::Easy)
+            .with_did_you_mean("suggestion");
+        assert_eq!(d.llm_hint.as_ref().unwrap(), "hint");
+        assert_eq!(d.fixability, Some(Fixability::Easy));
+        assert_eq!(d.did_you_mean.as_ref().unwrap(), "suggestion");
+    }
+
+    // ── Helper tests ───────────────────────────────────────
+
+    #[test]
+    fn extract_expected_found_works() {
+        let notes = vec![
+            "expected: Int".to_string(),
+            "found: String".to_string(),
+        ];
+        let (e, f) = extract_expected_found(&notes);
+        assert_eq!(e, "Int");
+        assert_eq!(f, "String");
+    }
+
+    #[test]
+    fn extract_name_from_message_quoted() {
+        assert_eq!(extract_name_from_message("Unbound variable 'foo'"), "foo");
+        assert_eq!(extract_name_from_message("Unbound variable: bar"), "bar");
+        assert_eq!(extract_name_from_message("something else"), "<unknown>");
     }
 }

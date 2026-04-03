@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 //! # synoema-types
 //! Hindley-Milner type inference for the Synoema programming language.
 
@@ -22,6 +25,25 @@ pub fn typecheck(source: &str) -> Result<TypeEnv, TypeError> {
     let program = resolve_modules(program);
     let mut inf = Infer::new();
     inf.infer_program(&program)
+}
+
+/// Type-check a pre-parsed and import-resolved Program.
+pub fn typecheck_program(program: &synoema_parser::Program) -> Result<TypeEnv, TypeError> {
+    let resolved = resolve_modules(program.clone());
+    let mut inf = Infer::new();
+    inf.infer_program(&resolved)
+}
+
+/// Type-check with error recovery: returns typed environment + all errors found.
+/// Useful for LLM workflows where all errors should be reported in one pass.
+pub fn typecheck_recovering(source: &str) -> (Result<TypeEnv, TypeError>, Vec<TypeError>) {
+    let program = match synoema_parser::parse(source) {
+        Ok(p) => p,
+        Err(e) => return (Err(TypeError::other(format!("Parse error: {}", e))), vec![]),
+    };
+    let program = resolve_modules(program);
+    let mut inf = Infer::new();
+    inf.infer_program_recovering(&program)
 }
 
 /// Infer the type of a single expression.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 use crate::*;
 
 fn toks(src: &str) -> Vec<Token> {
@@ -63,6 +66,7 @@ fn upper_ids() {
 fn keywords() {
     assert_eq!(raw("mod"), vec![Token::KwMod, Token::Eof]);
     assert_eq!(raw("use"), vec![Token::KwUse, Token::Eof]);
+    assert_eq!(raw("import"), vec![Token::KwImport, Token::Eof]);
     assert_eq!(raw("trait"), vec![Token::KwTrait, Token::Eof]);
     assert_eq!(raw("impl"), vec![Token::KwImpl, Token::Eof]);
     assert_eq!(raw("lazy"), vec![Token::KwLazy, Token::Eof]);
@@ -71,6 +75,7 @@ fn keywords() {
 #[test]
 fn keyword_prefix_is_identifier() {
     assert_eq!(raw("module"), vec![Token::LowerId("module".into()), Token::Eof]);
+    assert_eq!(raw("importing"), vec![Token::LowerId("importing".into()), Token::Eof]);
     assert_eq!(raw("implementation"), vec![Token::LowerId("implementation".into()), Token::Eof]);
 }
 
@@ -277,4 +282,160 @@ fn record_braces() {
         Token::RBrace,
         Token::Eof,
     ]);
+}
+
+// ── Doc Comments ─────────────────────────────────────────
+
+#[test]
+fn doc_comment_basic() {
+    let t = raw("--- Sort a list.");
+    assert_eq!(t, vec![Token::DocComment("Sort a list.".into()), Token::Eof]);
+}
+
+#[test]
+fn doc_comment_empty() {
+    let t = raw("---");
+    assert_eq!(t, vec![Token::DocComment("".into()), Token::Eof]);
+}
+
+#[test]
+fn doc_comment_vs_regular() {
+    // -- is stripped (becomes Newline), --- is preserved
+    let t = raw("-- regular\n--- doc");
+    assert_eq!(t, vec![
+        Token::Newline,
+        Token::Newline,
+        Token::DocComment("doc".into()),
+        Token::Eof,
+    ]);
+}
+
+#[test]
+fn doc_comment_four_dashes() {
+    // ---- is a doc comment with content "- text"
+    let t = raw("---- extra dashes");
+    assert_eq!(t, vec![Token::DocComment("- extra dashes".into()), Token::Eof]);
+}
+
+#[test]
+fn doc_comment_before_func() {
+    let t = toks("--- Factorial.\nfac 0 = 1");
+    assert!(t.contains(&Token::DocComment("Factorial.".into())));
+    assert!(t.contains(&Token::LowerId("fac".into())));
+}
+
+#[test]
+fn doc_comment_example_line() {
+    let t = raw("--- example: fac 5 == 120");
+    assert_eq!(t, vec![Token::DocComment("example: fac 5 == 120".into()), Token::Eof]);
+}
+
+// ── String Interpolation ─────────────────────────────────
+
+#[test]
+fn interp_simple() {
+    // "hello ${name}" → StringFragment("hello ") InterpStart LowerId("name") InterpEnd
+    let t = raw(r#""hello ${name}""#);
+    assert_eq!(t, vec![
+        Token::StringFragment("hello ".into()),
+        Token::InterpStart,
+        Token::LowerId("name".into()),
+        Token::InterpEnd,
+        Token::Eof,
+    ]);
+}
+
+#[test]
+fn interp_no_prefix() {
+    // "${x}" → InterpStart LowerId("x") InterpEnd
+    let t = raw(r#""${x}""#);
+    assert_eq!(t, vec![
+        Token::InterpStart,
+        Token::LowerId("x".into()),
+        Token::InterpEnd,
+        Token::Eof,
+    ]);
+}
+
+#[test]
+fn interp_with_suffix() {
+    // "${x} end" → InterpStart LowerId("x") InterpEnd StringFragment(" end")
+    let t = raw(r#""${x} end""#);
+    assert_eq!(t, vec![
+        Token::InterpStart,
+        Token::LowerId("x".into()),
+        Token::InterpEnd,
+        Token::StringFragment(" end".into()),
+        Token::Eof,
+    ]);
+}
+
+#[test]
+fn interp_two_parts() {
+    // "a ${x} b ${y} c"
+    let t = raw(r#""a ${x} b ${y} c""#);
+    assert_eq!(t, vec![
+        Token::StringFragment("a ".into()),
+        Token::InterpStart,
+        Token::LowerId("x".into()),
+        Token::InterpEnd,
+        Token::StringFragment(" b ".into()),
+        Token::InterpStart,
+        Token::LowerId("y".into()),
+        Token::InterpEnd,
+        Token::StringFragment(" c".into()),
+        Token::Eof,
+    ]);
+}
+
+#[test]
+fn interp_expression() {
+    // "${x + 1}" → InterpStart x + 1 InterpEnd
+    let t = raw(r#""${x + 1}""#);
+    assert_eq!(t, vec![
+        Token::InterpStart,
+        Token::LowerId("x".into()),
+        Token::Plus,
+        Token::Int(1),
+        Token::InterpEnd,
+        Token::Eof,
+    ]);
+}
+
+#[test]
+fn interp_escape_dollar() {
+    // "\$ is money" — no interpolation
+    let t = raw(r#""\$ is money""#);
+    assert_eq!(t, vec![Token::Str("$ is money".into()), Token::Eof]);
+}
+
+#[test]
+fn interp_dollar_no_brace() {
+    // "$5" — dollar not followed by { is literal
+    let t = raw(r#""$5""#);
+    assert_eq!(t, vec![Token::Str("$5".into()), Token::Eof]);
+}
+
+#[test]
+fn interp_nested_braces() {
+    // "${f {x = 1}}" — braces inside interpolation
+    let t = raw(r#""${f {x = 1}}""#);
+    assert_eq!(t, vec![
+        Token::InterpStart,
+        Token::LowerId("f".into()),
+        Token::LBrace,
+        Token::LowerId("x".into()),
+        Token::Assign,
+        Token::Int(1),
+        Token::RBrace,
+        Token::InterpEnd,
+        Token::Eof,
+    ]);
+}
+
+#[test]
+fn interp_no_interpolation_plain_string() {
+    // "hello" stays Token::Str
+    let t = raw(r#""hello""#);
+    assert_eq!(t, vec![Token::Str("hello".into()), Token::Eof]);
 }

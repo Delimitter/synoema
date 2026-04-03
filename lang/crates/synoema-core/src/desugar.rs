@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 //! Desugaring: AST → Core IR
 //!
 //! Transformations performed:
@@ -87,6 +90,12 @@ pub fn desugar_program(program: &Program) -> CoreProgram {
             Decl::ImplDecl { .. } => {
                 // Impl methods already merged above via impl_eqs
             }
+            Decl::TypeAlias { .. } => {
+                // Type aliases are handled by the type checker, not needed in Core
+            }
+            Decl::Test { .. } => {
+                // Test declarations are handled by the test runner, not needed in Core
+            }
         }
     }
 
@@ -129,11 +138,17 @@ fn desugar_func(fresh: &mut Fresh, equations: &[Equation]) -> CoreExpr {
     if arity == 1 {
         // Single argument: generate Case directly
         let arg = fresh.gen("arg");
-        let alts = equations.iter().map(|eq| {
+        let mut alts: Vec<Alt> = equations.iter().map(|eq| {
             let pat = desugar_pattern(&eq.pats[0]);
             let body = desugar_expr(fresh, &eq.body);
             Alt { pat, body }
         }).collect();
+
+        // Add RuntimeError fallback if no wildcard/var catch-all exists
+        let has_catch_all = alts.iter().any(|a| matches!(a.pat, CorePat::Wildcard | CorePat::Var(_)));
+        if !has_catch_all {
+            alts.push(Alt { pat: CorePat::Wildcard, body: CoreExpr::RuntimeError("non-exhaustive patterns".into()) });
+        }
 
         CoreExpr::Lam(
             arg.clone(),
@@ -158,10 +173,7 @@ fn build_equation_chain(
     args: &[Name],
 ) -> CoreExpr {
     if equations.is_empty() {
-        return CoreExpr::Lit(Lit::Int(0)); // non-exhaustive fallback
-    }
-    if equations.len() == 1 {
-        return build_single_equation(fresh, &equations[0], args);
+        return CoreExpr::RuntimeError("non-exhaustive patterns".into());
     }
 
     let eq = &equations[0];
@@ -316,7 +328,10 @@ fn wrap_lambdas(fresh: &mut Fresh, pats: &[Pat], body: CoreExpr) -> CoreExpr {
                     arg.clone(),
                     Box::new(CoreExpr::Case(
                         Box::new(CoreExpr::Var(arg)),
-                        vec![Alt { pat: core_pat, body: result }],
+                        vec![
+                            Alt { pat: core_pat, body: result },
+                            Alt { pat: CorePat::Wildcard, body: CoreExpr::RuntimeError("non-exhaustive patterns".into()) },
+                        ],
                     )),
                 );
             }
@@ -474,6 +489,25 @@ fn desugar_expr(fresh: &mut Fresh, expr: &Expr) -> CoreExpr {
         // ── Concurrency (Phase BC) ───────────────────
         ExprKind::Scope(body) => CoreExpr::Scope(Box::new(desugar_expr(fresh, body))),
         ExprKind::Spawn(expr) => CoreExpr::Spawn(Box::new(desugar_expr(fresh, expr))),
+
+        // Prop/Implies are only used in test declarations, not desugared to Core
+        ExprKind::Prop(_, body) => desugar_expr(fresh, body),
+        ExprKind::When(body, cond) => {
+            // body when cond  ≡  ? cond -> body : true  (if cond false, test is vacuously true)
+            CoreExpr::Case(
+                Box::new(desugar_expr(fresh, cond)),
+                vec![
+                    Alt {
+                        pat: CorePat::Lit(Lit::Bool(true)),
+                        body: desugar_expr(fresh, body),
+                    },
+                    Alt {
+                        pat: CorePat::Lit(Lit::Bool(false)),
+                        body: CoreExpr::Lit(Lit::Bool(true)),
+                    },
+                ],
+            )
+        }
     }
 }
 
