@@ -6,19 +6,9 @@ merge xs ys =
   : ? head xs <= head ys -> (head xs : merge (tail xs) ys)
   : (head ys : merge xs (tail ys))
 
-take_n n xs =
-  ? n == 0 -> []
-  : ? xs == [] -> []
-  : (head xs : take_n (n - 1) (tail xs))
-
-drop_n n xs =
-  ? n == 0 -> xs
-  : ? xs == [] -> []
-  : drop_n (n - 1) (tail xs)
-
 msort xs =
   n = length xs / 2
   ? n == 0 -> xs
-  : merge (msort (take_n n xs)) (msort (drop_n n xs))
+  : merge (msort (take n xs)) (msort (drop n xs))
 
 main = msort [5 3 8 1 9 2 7 4 6]

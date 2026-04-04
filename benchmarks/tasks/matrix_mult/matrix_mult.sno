@@ -1,16 +1,8 @@
 -- SPDX-License-Identifier: MIT-0
 
-get xs n =
-  ? n == 0 -> head xs
-  : get (tail xs) (n - 1)
+dot a b = foldl (\acc p -> acc + index 0 p * index 1 p) 0 (zip a b)
 
-dot a b = get a 0 * get b 0 + get a 1 * get b 1 + get a 2 * get b 2
-
-col m j =
-  c0 = get (get m 0) j
-  c1 = get (get m 1) j
-  c2 = get (get m 2) j
-  [c0 c1 c2]
+col m j = map (\r -> index j r) m
 
 row_mul r b =
   v0 = dot r (col b 0)
@@ -18,11 +10,7 @@ row_mul r b =
   v2 = dot r (col b 2)
   [v0 v1 v2]
 
-mat_mul a b =
-  x = row_mul (get a 0) b
-  y = row_mul (get a 1) b
-  z = row_mul (get a 2) b
-  x ++ y ++ z
+mat_mul a b = foldl (\acc r -> acc ++ row_mul r b) [] a
 
 join_sp xs =
   ? xs == [] -> ""
