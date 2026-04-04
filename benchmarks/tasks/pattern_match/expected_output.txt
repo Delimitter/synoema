@@ -1,0 +1,3 @@
+Circle: 78.5
+Rectangle: 24
+Triangle: 15

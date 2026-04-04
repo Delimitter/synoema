@@ -1,0 +1,1 @@
+Write a function that counts the number of Collatz steps to reach 1. Demonstrate with collatz(27).

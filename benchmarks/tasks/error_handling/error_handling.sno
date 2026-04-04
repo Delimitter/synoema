@@ -1,0 +1,14 @@
+-- SPDX-License-Identifier: MIT-0
+
+Result a e = Ok a | Err e
+
+divide x 0 = Err "division by zero"
+divide x y = Ok (x / y)
+
+show_result (Ok v) = "Ok " ++ show v
+show_result (Err e) = "Err " ++ e
+
+main =
+  r1 = divide 10 0
+  r2 = divide 10 2
+  show_result r1 ++ "\n" ++ show_result r2

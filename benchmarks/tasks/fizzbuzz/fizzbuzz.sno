@@ -1,0 +1,9 @@
+-- SPDX-License-Identifier: MIT-0
+
+fizzbuzz n =
+  ? n % 15 == 0 -> "FizzBuzz"
+  : ? n % 3 == 0 -> "Fizz"
+  : ? n % 5 == 0 -> "Buzz"
+  : show n
+
+main = fizzbuzz 15

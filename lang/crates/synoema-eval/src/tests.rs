@@ -195,6 +195,28 @@ fn pattern_match_list() {
     assert_eq!(ev.apply(f, list).unwrap(), Value::Int(3));
 }
 
+#[test]
+fn pattern_singleton_list() {
+    let env = run_ok("f [x] = x\nf (x:xs) = x\nf [] = 0");
+    let mut ev = Evaluator::new();
+    let f = env.lookup("f").unwrap().clone();
+    let singleton = Value::List(vec![Value::Int(42)]);
+    assert_eq!(ev.apply(f, singleton).unwrap(), Value::Int(42));
+}
+
+#[test]
+fn pattern_match_multiarg_numeric() {
+    let (val, _) = run_main(
+        "f 0 xs = \"zero\"\nf n xs = \"other\"\nmain = f 3 [1]"
+    );
+    assert_eq!(val, Value::Str("other".into()));
+
+    let (val2, _) = run_main(
+        "f 0 xs = \"zero\"\nf n xs = \"other\"\nmain = f 0 [1]"
+    );
+    assert_eq!(val2, Value::Str("zero".into()));
+}
+
 // ── Full Programs ─────────────────────────────────────
 
 #[test]
@@ -1074,6 +1096,121 @@ fn foldl_builtin() {
     );
 }
 
+// ── List builtins: zip, index, take, drop, reverse ──────────────────────────
+
+#[test]
+fn zip_builtin() {
+    assert_eq!(
+        ev("zip [1 2 3] [4 5 6]"),
+        Value::List(vec![
+            Value::List(vec![Value::Int(1), Value::Int(4)]),
+            Value::List(vec![Value::Int(2), Value::Int(5)]),
+            Value::List(vec![Value::Int(3), Value::Int(6)]),
+        ])
+    );
+}
+
+#[test]
+fn zip_unequal_lengths() {
+    assert_eq!(
+        ev("zip [1 2] [10 20 30]"),
+        Value::List(vec![
+            Value::List(vec![Value::Int(1), Value::Int(10)]),
+            Value::List(vec![Value::Int(2), Value::Int(20)]),
+        ])
+    );
+}
+
+#[test]
+fn index_builtin() {
+    assert_eq!(ev("index 0 [10 20 30]"), Value::Int(10));
+    assert_eq!(ev("index 1 [10 20 30]"), Value::Int(20));
+    assert_eq!(ev("index 2 [10 20 30]"), Value::Int(30));
+}
+
+#[test]
+fn take_builtin() {
+    assert_eq!(
+        ev("take 2 [1 2 3 4]"),
+        Value::List(vec![Value::Int(1), Value::Int(2)])
+    );
+}
+
+#[test]
+fn take_more_than_length() {
+    assert_eq!(
+        ev("take 10 [1 2 3]"),
+        Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)])
+    );
+}
+
+#[test]
+fn drop_builtin() {
+    assert_eq!(
+        ev("drop 2 [1 2 3 4]"),
+        Value::List(vec![Value::Int(3), Value::Int(4)])
+    );
+}
+
+#[test]
+fn drop_more_than_length() {
+    assert_eq!(
+        ev("drop 10 [1 2 3]"),
+        Value::List(vec![])
+    );
+}
+
+#[test]
+fn reverse_builtin() {
+    assert_eq!(
+        ev("reverse [1 2 3]"),
+        Value::List(vec![Value::Int(3), Value::Int(2), Value::Int(1)])
+    );
+}
+
+#[test]
+fn reverse_empty() {
+    assert_eq!(ev("reverse []"), Value::List(vec![]));
+}
+
+// ── List builtins in file mode (run_main) ───────────────────────────────────
+
+#[test]
+fn foldl_file_mode() {
+    let (val, _) = run_main("main = foldl (\\a x -> a + x) 0 [1 2 3]");
+    assert_eq!(val, Value::Int(6));
+}
+
+#[test]
+fn zip_file_mode() {
+    let (val, _) = run_main("main = length (zip [1 2 3] [4 5 6])");
+    assert_eq!(val, Value::Int(3));
+}
+
+#[test]
+fn index_file_mode() {
+    let (val, _) = run_main("main = index 1 [10 20 30]");
+    assert_eq!(val, Value::Int(20));
+}
+
+#[test]
+fn take_file_mode() {
+    let (val, _) = run_main("main = length (take 2 [1 2 3 4])");
+    assert_eq!(val, Value::Int(2));
+}
+
+#[test]
+fn drop_file_mode() {
+    let (val, _) = run_main("main = length (drop 2 [1 2 3 4])");
+    assert_eq!(val, Value::Int(2));
+}
+
+#[test]
+fn reverse_file_mode() {
+    let (val, _) = run_main("main = head (reverse [1 2 3])");
+    assert_eq!(val, Value::Int(3));
+}
+
 // ── Phase 18: String stdlib ───────────────────────────────────────────────────
 
 #[test]
@@ -1388,7 +1525,6 @@ fn fd_open_missing_file_is_err() {
 
 #[test]
 fn fd_open_write_creates_file() {
-    use std::io::Write;
     // Create a temp file path
     let tmp = std::env::temp_dir().join("synoema_test_fd_open_write.txt");
     let tmp_path = tmp.to_str().unwrap().replace('\\', "/");
@@ -1780,6 +1916,35 @@ fn record_pattern_punning() {
     assert_eq!(val, Value::Int(7));
 }
 
+// ── Record Update ───────────────────────────────────────────
+
+#[test]
+fn record_update_basic() {
+    let val = ev("{...{x=1, y=2}, x=10}");
+    assert_eq!(val, Value::Record(vec![
+        ("x".into(), Value::Int(10)),
+        ("y".into(), Value::Int(2)),
+    ]));
+}
+
+#[test]
+fn record_update_preserves_other_fields() {
+    let val = ev("({...{x=1, y=2}, x=10}).y");
+    assert_eq!(val, Value::Int(2));
+}
+
+#[test]
+fn record_update_multiple_fields() {
+    let (val, _) = run_main("r = {x=1, y=2, z=3}\nmain = {...r, x=10, y=20}.z");
+    assert_eq!(val, Value::Int(3));
+}
+
+#[test]
+fn record_update_nested_base() {
+    let (val, _) = run_main("r = {a=1, b=2}\nmain = ({...r, a=99}).a");
+    assert_eq!(val, Value::Int(99));
+}
+
 // ── Wildcard Import ─────────────────────────────────────────
 
 #[test]
@@ -1816,4 +1981,494 @@ use Vec (*)
 main = dot (make 3 4) (make 1 2)";
     let (val, _) = run_main(src);
     assert_eq!(val, Value::Int(11));
+}
+
+// ── env / env_or / args ─────────────────────────────────────
+
+#[test]
+fn env_home_returns_nonempty() {
+    // HOME is set on all Unix/macOS systems
+    let (val, _) = run_main("main = env \"HOME\"");
+    match val {
+        Value::Str(s) => assert!(!s.is_empty(), "HOME should not be empty"),
+        other => panic!("Expected Str, got {:?}", other),
+    }
+}
+
+#[test]
+fn env_missing_returns_empty() {
+    let (val, _) = run_main("main = env \"NONEXISTENT_VAR_SYNOEMA_12345\"");
+    assert_eq!(val, Value::Str(String::new()));
+}
+
+#[test]
+fn env_or_missing_returns_default() {
+    let (val, _) = run_main("main = env_or \"NONEXISTENT_VAR_SYNOEMA_12345\" \"fallback\"");
+    assert_eq!(val, Value::Str("fallback".into()));
+}
+
+#[test]
+fn args_empty_by_default() {
+    let (val, _) = run_main("main = args");
+    assert_eq!(val, Value::List(vec![]));
+}
+
+#[test]
+fn args_injected_via_with_args() {
+    let src = "main = args";
+    let program = synoema_parser::parse(src).unwrap();
+    let program = synoema_types::resolve_modules(program);
+    synoema_types::typecheck_program(&program).unwrap();
+    let mut evaluator = Evaluator::with_args(vec!["a".into(), "b".into(), "c".into()]);
+    let env = evaluator.eval_program(&program).unwrap();
+    let val = env.lookup("args").unwrap().clone();
+    assert_eq!(val, Value::List(vec![
+        Value::Str("a".into()),
+        Value::Str("b".into()),
+        Value::Str("c".into()),
+    ]));
+}
+
+// ── Prelude: Result type + combinators ────────────────
+
+#[test]
+fn result_map_ok_on_ok() {
+    let (v, _) = run_main("main = map_ok (\\x -> x + 1) (Ok 5)");
+    assert_eq!(format!("{}", v), "Ok 6");
+}
+
+#[test]
+fn result_map_ok_on_err() {
+    let (v, _) = run_main("main = map_ok (\\x -> x + 1) (Err \"e\")");
+    assert_eq!(format!("{}", v), "Err e");
+}
+
+#[test]
+fn result_map_err_on_err() {
+    let (v, _) = run_main("main = map_err (\\e -> e ++ \"!\") (Err \"fail\")");
+    assert_eq!(format!("{}", v), "Err fail!");
+}
+
+#[test]
+fn result_unwrap_ok() {
+    let v = ev("unwrap (Ok 42)");
+    assert_eq!(v, Value::Int(42));
+}
+
+#[test]
+fn result_unwrap_or_on_err() {
+    let v = ev("unwrap_or 0 (Err \"fail\")");
+    assert_eq!(v, Value::Int(0));
+}
+
+#[test]
+fn result_unwrap_or_on_ok() {
+    let v = ev("unwrap_or 0 (Ok 5)");
+    assert_eq!(v, Value::Int(5));
+}
+
+#[test]
+fn result_is_ok_true() {
+    let v = ev("is_ok (Ok 1)");
+    assert_eq!(v, Value::Bool(true));
+}
+
+#[test]
+fn result_is_ok_false() {
+    let v = ev("is_ok (Err \"x\")");
+    assert_eq!(v, Value::Bool(false));
+}
+
+#[test]
+fn result_is_err_true() {
+    let v = ev("is_err (Err \"x\")");
+    assert_eq!(v, Value::Bool(true));
+}
+
+#[test]
+fn result_is_err_false() {
+    let v = ev("is_err (Ok 1)");
+    assert_eq!(v, Value::Bool(false));
+}
+
+#[test]
+fn result_and_then_ok() {
+    let (v, _) = run_main("main = and_then (\\x -> Ok (x * 2)) (Ok 5)");
+    assert_eq!(format!("{}", v), "Ok 10");
+}
+
+#[test]
+fn result_and_then_err() {
+    let (v, _) = run_main("main = and_then (\\x -> Ok (x * 2)) (Err \"e\")");
+    assert_eq!(format!("{}", v), "Err e");
+}
+
+#[test]
+fn result_pipe_chain() {
+    let v = ev("Ok 5 |> map_ok (\\n -> n * 2) |> unwrap_or 0");
+    assert_eq!(v, Value::Int(10));
+}
+
+#[test]
+fn error_builtin_panics() {
+    let result = eval_main("main = error \"boom\"");
+    assert!(result.is_err(), "error should produce a runtime error");
+    let diag = result.unwrap_err();
+    assert!(format!("{}", diag).contains("boom"), "error message should contain 'boom'");
+}
+
+// ── Ternary where-bindings ──────────────────────────────
+
+#[test]
+fn ternary_else_where_binding() {
+    let src = "\
+f x =
+  ? x > 0 -> x
+  : y = x + 1
+    y * 2
+main = f (-3)";
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Int(-4));
+}
+
+#[test]
+fn ternary_else_multiple_where_bindings() {
+    let src = "\
+g x =
+  ? x > 0 -> x
+  : y = x + 1
+    z = y * 2
+    z + 10
+main = g (-3)";
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Int(6));
+}
+
+#[test]
+fn ternary_nested_with_where_bindings() {
+    let src = "\
+classify x =
+  ? x > 0 -> 1
+  : ? x == 0 -> 0
+    : y = x * (-1)
+      y + 100
+main = classify (-5)";
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Int(105));
+}
+
+#[test]
+fn ternary_else_where_binding_positive_branch() {
+    let src = "\
+f x =
+  ? x > 0 -> x
+  : y = x + 1
+    y * 2
+main = f 5";
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Int(5));
+}
+
+#[test]
+fn ternary_where_binding_bsearch_pattern() {
+    let src = "\
+bsearch target lo hi =
+  ? lo > hi -> -1
+  : mid = (lo + hi) / 2
+    ? mid == target -> mid
+    : ? mid < target -> bsearch target (mid + 1) hi
+      : bsearch target lo (mid - 1)
+main = bsearch 7 0 10";
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Int(7));
+}
+
+// ── JSON Parsing ─────────────────────────────────────
+
+#[test]
+fn json_parse_null() {
+    let src = r#"main = json_parse "null""#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Con("Ok".into(), vec![
+        Value::Con("JNull".into(), vec![]),
+    ]));
+}
+
+#[test]
+fn json_parse_true() {
+    let src = r#"main = json_parse "true""#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Con("Ok".into(), vec![
+        Value::Con("JBool".into(), vec![Value::Bool(true)]),
+    ]));
+}
+
+#[test]
+fn json_parse_false() {
+    let src = r#"main = json_parse "false""#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Con("Ok".into(), vec![
+        Value::Con("JBool".into(), vec![Value::Bool(false)]),
+    ]));
+}
+
+#[test]
+fn json_parse_number() {
+    let src = r#"main = json_parse "42""#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Con("Ok".into(), vec![
+        Value::Con("JNum".into(), vec![Value::Int(42)]),
+    ]));
+}
+
+#[test]
+fn json_parse_negative_number() {
+    let src = r#"main = json_parse "-7""#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Con("Ok".into(), vec![
+        Value::Con("JNum".into(), vec![Value::Int(-7)]),
+    ]));
+}
+
+#[test]
+fn json_parse_string() {
+    let src = r#"main = json_parse "\"hello\"""#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Con("Ok".into(), vec![
+        Value::Con("JStr".into(), vec![Value::Str("hello".into())]),
+    ]));
+}
+
+#[test]
+fn json_parse_empty_array() {
+    let src = r#"main = json_parse "[]""#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Con("Ok".into(), vec![
+        Value::Con("JArr".into(), vec![Value::List(vec![])]),
+    ]));
+}
+
+#[test]
+fn json_parse_array() {
+    let src = r#"main = json_parse "[1, 2, 3]""#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Con("Ok".into(), vec![
+        Value::Con("JArr".into(), vec![Value::List(vec![
+            Value::Con("JNum".into(), vec![Value::Int(1)]),
+            Value::Con("JNum".into(), vec![Value::Int(2)]),
+            Value::Con("JNum".into(), vec![Value::Int(3)]),
+        ])]),
+    ]));
+}
+
+#[test]
+fn json_parse_empty_object() {
+    let src = r#"main = json_parse "{}""#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Con("Ok".into(), vec![
+        Value::Con("JObj".into(), vec![Value::List(vec![])]),
+    ]));
+}
+
+#[test]
+fn json_parse_object() {
+    let src = r#"main = json_parse "{\"a\": 1, \"b\": 2}""#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Con("Ok".into(), vec![
+        Value::Con("JObj".into(), vec![Value::List(vec![
+            Value::Con("MkPair".into(), vec![Value::Str("a".into()), Value::Con("JNum".into(), vec![Value::Int(1)])]),
+            Value::Con("MkPair".into(), vec![Value::Str("b".into()), Value::Con("JNum".into(), vec![Value::Int(2)])]),
+        ])]),
+    ]));
+}
+
+#[test]
+fn json_parse_nested() {
+    let src = r#"main = json_parse "{\"arr\": [1, null]}""#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Con("Ok".into(), vec![
+        Value::Con("JObj".into(), vec![Value::List(vec![
+            Value::Con("MkPair".into(), vec![
+                Value::Str("arr".into()),
+                Value::Con("JArr".into(), vec![Value::List(vec![
+                    Value::Con("JNum".into(), vec![Value::Int(1)]),
+                    Value::Con("JNull".into(), vec![]),
+                ])]),
+            ]),
+        ])]),
+    ]));
+}
+
+#[test]
+fn json_parse_error_trailing() {
+    let src = r#"main = json_parse "42 extra""#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Con("Err".into(), vec![
+        Value::Str("trailing content at position 3".into()),
+    ]));
+}
+
+#[test]
+fn json_parse_error_empty() {
+    let src = r#"main = json_parse """#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Con("Err".into(), vec![
+        Value::Str("unexpected end of input".into()),
+    ]));
+}
+
+#[test]
+fn json_parse_with_unwrap() {
+    let src = r#"main = unwrap (json_parse "42")"#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Con("JNum".into(), vec![Value::Int(42)]));
+}
+
+#[test]
+fn json_parse_json_get() {
+    let src = r#"
+main = unwrap (json_get "name" (unwrap (json_parse "{\"name\": \"Alice\"}")))"#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Con("JStr".into(), vec![Value::Str("Alice".into())]));
+}
+
+#[test]
+fn json_parse_string_escape() {
+    let src = r#"main = json_parse "\"hello\\nworld\"""#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Con("Ok".into(), vec![
+        Value::Con("JStr".into(), vec![Value::Str("hello\nworld".into())]),
+    ]));
+}
+
+#[test]
+fn json_parse_whitespace() {
+    let src = "main = json_parse \"  { \\\"a\\\" : 1 }  \"";
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Con("Ok".into(), vec![
+        Value::Con("JObj".into(), vec![Value::List(vec![
+            Value::Con("MkPair".into(), vec![Value::Str("a".into()), Value::Con("JNum".into(), vec![Value::Int(1)])]),
+        ])]),
+    ]));
+}
+
+// ── Map operations ──────────────────────────────────────
+
+#[test]
+fn map_lookup_existing_key() {
+    let (val, _) = run_main(r#"main = map_lookup "x" (map_insert "x" 42 map_empty)"#);
+    assert_eq!(val, Value::Con("Ok".into(), vec![Value::Int(42)]));
+}
+
+#[test]
+fn map_lookup_missing_key() {
+    let (val, _) = run_main(r#"main = map_lookup "y" map_empty"#);
+    assert_eq!(val, Value::Con("Err".into(), vec![Value::Str("key not found".into())]));
+}
+
+#[test]
+fn map_size_from_pairs() {
+    let (val, _) = run_main(r#"main = map_size (from_pairs [(MkPair "a" 1) (MkPair "b" 2)])"#);
+    assert_eq!(val, Value::Int(2));
+}
+
+#[test]
+fn map_keys_sorted() {
+    let (val, _) = run_main(r#"main = map_keys (from_pairs [(MkPair "b" 2) (MkPair "a" 1)])"#);
+    assert_eq!(val, Value::List(vec![Value::Str("a".into()), Value::Str("b".into())]));
+}
+
+#[test]
+fn map_insert_and_delete() {
+    let src = r#"
+m = map_insert "x" 1 (map_insert "y" 2 map_empty)
+main = map_size (map_delete "x" m)"#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Int(1));
+}
+
+#[test]
+fn map_has_key_true() {
+    let (val, _) = run_main(r#"main = has_key "x" (map_singleton "x" 99)"#);
+    assert_eq!(val, Value::Bool(true));
+}
+
+#[test]
+fn map_has_key_false() {
+    let (val, _) = run_main(r#"main = has_key "z" (map_singleton "x" 99)"#);
+    assert_eq!(val, Value::Bool(false));
+}
+
+#[test]
+fn map_get_with_default() {
+    let (val, _) = run_main(r#"main = map_get "missing" 0 map_empty"#);
+    assert_eq!(val, Value::Int(0));
+}
+
+#[test]
+fn map_values_list() {
+    let (val, _) = run_main(r#"main = map_values (from_pairs [(MkPair "a" 10) (MkPair "b" 20)])"#);
+    assert_eq!(val, Value::List(vec![Value::Int(10), Value::Int(20)]));
+}
+
+#[test]
+fn map_merge_two_maps() {
+    let src = r#"
+m1 = from_pairs [(MkPair "a" 1)]
+m2 = from_pairs [(MkPair "b" 2)]
+main = map_size (map_merge m1 m2)"#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Int(2));
+}
+
+// ── Record update: non-existing field error ────────────
+
+#[test]
+fn record_update_nonexisting_field_error() {
+    let result = eval_main("main = {...{x=1, y=2}, z=99}");
+    assert!(result.is_err(), "updating non-existing field should produce error");
+    let msg = format!("{}", result.unwrap_err());
+    assert!(msg.contains("type_mismatch") || msg.contains("field") || msg.contains("z"),
+        "error should mention the bad field or type mismatch, got: {}", msg);
+}
+
+// ── Tuple syntax (a, b) ─────────────────────────────────
+
+#[test]
+fn tuple_fst() {
+    assert_eq!(ev("(1, 2).fst"), Value::Int(1));
+}
+
+#[test]
+fn tuple_snd() {
+    assert_eq!(ev("(1, 2).snd"), Value::Int(2));
+}
+
+#[test]
+fn tuple_pattern_match() {
+    let src = "\
+f (a, b) = a + b
+main = f (3, 4)";
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Int(7));
+}
+
+#[test]
+fn tuple_nested() {
+    assert_eq!(ev("((1, 2), 3).fst.snd"), Value::Int(2));
+}
+
+#[test]
+fn tuple_with_exprs() {
+    assert_eq!(ev("(2 + 3, 10 * 2).fst"), Value::Int(5));
+    assert_eq!(ev("(2 + 3, 10 * 2).snd"), Value::Int(20));
+}
+
+#[test]
+fn tuple_as_record() {
+    let val = ev("(42, true)");
+    assert_eq!(val, Value::Record(vec![
+        ("fst".into(), Value::Int(42)),
+        ("snd".into(), Value::Bool(true)),
+    ]));
 }

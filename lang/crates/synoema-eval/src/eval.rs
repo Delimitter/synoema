@@ -87,11 +87,17 @@ fn err_io(msg: impl Into<String>) -> EvalError { EvalError::with_kind(EvalErrorK
 pub struct Evaluator {
     /// Output buffer (for testing — captures print output)
     pub output: Vec<String>,
+    /// CLI arguments passed after `--` separator (injected as `args` builtin)
+    pub args: Vec<String>,
 }
 
 impl Evaluator {
     pub fn new() -> Self {
-        Evaluator { output: Vec::new() }
+        Evaluator { output: Vec::new(), args: Vec::new() }
+    }
+
+    pub fn with_args(args: Vec<String>) -> Self {
+        Evaluator { output: Vec::new(), args }
     }
 
     /// Evaluate a complete program, return the environment
@@ -125,8 +131,8 @@ impl Evaluator {
             }
         }
 
-        // Second pass: register all functions (to enable mutual recursion)
-        // Prepend impl equations where applicable
+        // Second pass: register all functions (to enable mutual recursion).
+        // Prepend impl equations where applicable.
         for decl in &program.decls {
             if let Decl::Func { name, equations, .. } = decl {
                 let prepend = impl_eqs.remove(name).unwrap_or_default();
@@ -135,7 +141,7 @@ impl Evaluator {
                 let func = Value::Func {
                     name: name.clone(),
                     equations: all_eqs,
-                    env: env.clone(),
+                    env: Arc::new(env.clone()),  // temporary, replaced in pass 3
                 };
                 env.insert(name.clone(), func);
             }
@@ -146,13 +152,18 @@ impl Evaluator {
             let func = Value::Func {
                 name: method_name.clone(),
                 equations,
-                env: env.clone(),
+                env: Arc::new(env.clone()),  // temporary, replaced in pass 3
             };
             env.insert(method_name, func);
         }
 
-        // Update function closures to capture the complete environment
-        // (enables mutual recursion)
+        // Third pass: update function closures to capture the complete environment
+        // (enables mutual recursion).
+        //
+        // Memory fix: with Arc<Env> in Value::Func, env.clone() is O(N) instead
+        // of O(N!) — cloning N Values where each clone is Arc::clone = O(1).
+        // The old code with owned Env caused 106 GB memory explosion because
+        // each snapshot.clone() recursively deep-copied all nested Envs.
         let snapshot = env.clone();
         for decl in &program.decls {
             if let Decl::Func { name, .. } = decl {
@@ -161,7 +172,7 @@ impl Evaluator {
                     let func = Value::Func {
                         name: name.clone(),
                         equations,
-                        env: snapshot.clone(),
+                        env: Arc::new(snapshot.clone()),
                     };
                     env.insert(name.clone(), func);
                 }
@@ -176,7 +187,7 @@ impl Evaluator {
                         let func = Value::Func {
                             name: method_name.clone(),
                             equations,
-                            env: snapshot.clone(),
+                            env: Arc::new(snapshot.clone()),
                         };
                         env.insert(method_name.clone(), func);
                     }
@@ -236,7 +247,7 @@ impl Evaluator {
                 Ok(Value::Closure {
                     params: pats.clone(),
                     body: *body.clone(),
-                    env: env.clone(),
+                    env: Arc::new(env.clone()),
                 })
             }
 
@@ -349,6 +360,23 @@ impl Evaluator {
                 Ok(Value::Record(pairs))
             }
 
+            // ── Record update ────────────────────────
+            ExprKind::RecordUpdate { base, updates } => {
+                let base_val = self.eval(env, base)?;
+                let Value::Record(mut fields) = base_val else {
+                    return Err(err("record update requires a record as base"));
+                };
+                for (name, expr) in updates {
+                    let val = self.eval(env, expr)?;
+                    if let Some(entry) = fields.iter_mut().find(|(n, _)| n == name) {
+                        entry.1 = val;
+                    } else {
+                        return Err(err(format!("field '{}' not found in record", name)));
+                    }
+                }
+                Ok(Value::Record(fields))
+            }
+
             // ── Field access ────────────────────────
             ExprKind::Field(obj, field) => {
                 let obj_val = self.eval(env, obj)?;
@@ -436,7 +464,7 @@ impl Evaluator {
                     Ok(Value::Closure {
                         params: rest,
                         body,
-                        env: local,
+                        env: Arc::new(local),
                     })
                 }
             }
@@ -452,7 +480,7 @@ impl Evaluator {
                             local.insert(name.clone(), Value::Func {
                                 name: name.clone(),
                                 equations: equations.clone(),
-                                env: env.clone(),
+                                env: Arc::clone(&env),
                             });
                             let body_val = self.eval(&local, &eq.body)?;
                             return self.apply(body_val, arg);
@@ -475,32 +503,39 @@ impl Evaluator {
                         local.insert(name.clone(), Value::Func {
                             name: name.clone(),
                             equations: equations.clone(),
-                            env: env.clone(),
+                            env: Arc::clone(&env),
                         });
                     }
 
-                    // For curried functions, the first pattern position must be
-                    // consistent (e.g., all Var, or matching constructors).
-                    // Bind using the first equation's first pattern:
+                    // Filter: keep only equations whose first pattern matches,
+                    // and bind any variables from those patterns.
+                    let mut remaining: Vec<Equation> = Vec::new();
                     for eq in &equations {
-                        if self.try_bind_pattern(&eq.pats[0], &arg, &mut local) {
-                            break;
+                        let mut probe = local.child();
+                        if self.try_bind_pattern(&eq.pats[0], &arg, &mut probe) {
+                            // Merge bindings from this pattern into local env
+                            for (k, v) in probe.bindings() {
+                                local.insert(k.clone(), v.clone());
+                            }
+                            remaining.push(Equation {
+                                pats: eq.pats[1..].to_vec(),
+                                body: eq.body.clone(),
+                                span: eq.span,
+                            });
                         }
                     }
 
-                    // Build remaining equations with first pattern stripped
-                    let remaining: Vec<Equation> = equations.iter().map(|eq| {
-                        Equation {
-                            pats: eq.pats[1..].to_vec(),
-                            body: eq.body.clone(),
-                            span: eq.span,
-                        }
-                    }).collect();
+                    if remaining.is_empty() {
+                        return Err(err_no_match(format!(
+                            "No matching pattern in function '{}' for argument {}",
+                            name, arg
+                        )));
+                    }
 
                     return Ok(Value::Func {
                         name: name.clone(),
                         equations: remaining,
-                        env: local,
+                        env: Arc::new(local),
                     });
                 }
 
@@ -516,7 +551,7 @@ impl Evaluator {
                         local.insert(name.clone(), Value::Func {
                             name: name.clone(),
                             equations: equations.clone(),
-                            env: env.clone(),
+                            env: Arc::clone(&env),
                         });
                     }
 
@@ -532,7 +567,7 @@ impl Evaluator {
                             return Ok(Value::Func {
                                 name: name.clone(),
                                 equations: remaining,
-                                env: local,
+                                env: Arc::new(local),
                             });
                         }
                     }
@@ -770,18 +805,23 @@ impl Evaluator {
             ("print", 1), ("show", 1), ("show_bool", 1), ("length", 1),
             ("head", 1), ("tail", 1), ("even", 1), ("odd", 1),
             ("not", 1), ("sum", 1), ("filter", 2), ("map", 2),
-            ("foldl", 3),
+            ("foldl", 3), ("zip", 2), ("index", 2), ("take", 2), ("drop", 2),
+            ("reverse", 1),
             // Float math builtins
             ("sqrt", 1), ("floor", 1), ("ceil", 1), ("round", 1), ("abs", 1),
             // String builtins
             ("str_slice", 3), ("str_find", 3), ("str_starts_with", 2),
-            ("str_trim", 1), ("str_len", 1), ("json_escape", 1), ("file_read", 1),
+            ("str_trim", 1), ("str_len", 1), ("json_escape", 1), ("json_parse", 1), ("file_read", 1),
             // I/O builtins (for stress_server.sno)
             ("tcp_listen", 1), ("tcp_accept", 1),
             ("fd_readline", 1), ("fd_write", 2), ("fd_close", 1), ("fd_popen", 1),
             ("fd_open", 1), ("fd_open_write", 1),
             // Concurrency builtins (Phase C)
             ("send", 2), ("recv", 1),
+            // Environment variables
+            ("env", 1), ("env_or", 2),
+            // Error: runtime panic with message
+            ("error", 1),
         ] {
             env.insert(name.to_string(), Value::Builtin(name.to_string(), *arity));
         }
@@ -790,6 +830,9 @@ impl Evaluator {
         // Nil / empty list constructors
         env.insert("Nil".into(), Value::List(vec![]));
         env.insert("None".into(), Value::Con("None".into(), vec![]));
+        // CLI args: injected as `args : [String]`
+        let arg_vals: Vec<Value> = self.args.iter().map(|s| Value::Str(s.clone())).collect();
+        env.insert("args".into(), Value::List(arg_vals));
         env
     }
 
@@ -904,6 +947,61 @@ impl Evaluator {
                     _ => Err(err("foldl requires a list")),
                 }
             },
+            "zip" => {
+                match (&args[0], &args[1]) {
+                    (Value::List(a), Value::List(b)) => {
+                        let pairs: Vec<Value> = a.iter().zip(b.iter())
+                            .map(|(x, y)| Value::List(vec![x.clone(), y.clone()]))
+                            .collect();
+                        Ok(Value::List(pairs))
+                    }
+                    _ => Err(err("zip requires two lists")),
+                }
+            },
+            "index" => {
+                let idx = match &args[0] {
+                    Value::Int(n) => *n,
+                    _ => return Err(err("index requires Int as first argument")),
+                };
+                match &args[1] {
+                    Value::List(l) => {
+                        if idx < 0 || idx as usize >= l.len() {
+                            Err(err(format!("index {} out of bounds (length {})", idx, l.len())))
+                        } else {
+                            Ok(l[idx as usize].clone())
+                        }
+                    }
+                    _ => Err(err("index requires a list")),
+                }
+            },
+            "take" => {
+                let n = match &args[0] {
+                    Value::Int(n) => (*n).max(0) as usize,
+                    _ => return Err(err("take requires Int as first argument")),
+                };
+                match &args[1] {
+                    Value::List(l) => Ok(Value::List(l.iter().take(n).cloned().collect())),
+                    _ => Err(err("take requires a list")),
+                }
+            },
+            "drop" => {
+                let n = match &args[0] {
+                    Value::Int(n) => (*n).max(0) as usize,
+                    _ => return Err(err("drop requires Int as first argument")),
+                };
+                match &args[1] {
+                    Value::List(l) => Ok(Value::List(l.iter().skip(n).cloned().collect())),
+                    _ => Err(err("drop requires a list")),
+                }
+            },
+            "reverse" => match &args[0] {
+                Value::List(l) => {
+                    let mut rev = l.clone();
+                    rev.reverse();
+                    Ok(Value::List(rev))
+                }
+                _ => Err(err("reverse requires a list")),
+            },
             "compose#" => {
                 // args[0]=f, args[1]=g, args[2]=x  →  g (f x)
                 let fx = self.apply(args[0].clone(), args[2].clone())?;
@@ -970,11 +1068,39 @@ impl Evaluator {
                     .replace('\t', "\\t");
                 Ok(Value::Str(s))
             }
+            "json_parse" => {
+                let s = sval(&args[0])?;
+                match json_parse_value(s.as_bytes(), 0) {
+                    Ok((val, pos)) => {
+                        // Skip trailing whitespace
+                        let end = skip_ws(s.as_bytes(), pos);
+                        if end != s.len() {
+                            Ok(Value::Con("Err".into(), vec![
+                                Value::Str(format!("trailing content at position {}", end)),
+                            ]))
+                        } else {
+                            Ok(Value::Con("Ok".into(), vec![val]))
+                        }
+                    }
+                    Err(msg) => Ok(Value::Con("Err".into(), vec![Value::Str(msg)])),
+                }
+            }
             "file_read" => {
                 let path = sval(&args[0])?;
                 std::fs::read_to_string(path)
                     .map(Value::Str)
                     .map_err(|e| err_io(format!("file_read: {}", e)))
+            }
+
+            // ── Environment variables ────────────────────────────
+            "env" => {
+                let name = sval(&args[0])?;
+                Ok(Value::Str(std::env::var(name).unwrap_or_default()))
+            }
+            "env_or" => {
+                let name = sval(&args[0])?;
+                let default = sval(&args[1])?;
+                Ok(Value::Str(std::env::var(name).unwrap_or_else(|_| default.to_string())))
             }
 
             // ── I/O: TCP + process ───────────────────────────────
@@ -1119,6 +1245,13 @@ impl Evaluator {
                 _ => Err(err("recv: argument must be Chan")),
             },
 
+            "error" => {
+                let msg = match &args[0] {
+                    Value::Str(s) => s.clone(),
+                    v => format!("{}", v),
+                };
+                Err(err(msg))
+            },
             name if name.starts_with("ctor:") => {
                 let ctor_name = &name[5..];
                 Ok(Value::Con(ctor_name.to_string(), args.to_vec()))
@@ -1154,4 +1287,137 @@ fn cmp_op(l: Value, r: Value, pred: fn(std::cmp::Ordering) -> bool) -> EResult<V
     l.partial_cmp(&r)
         .map(|o| Value::Bool(pred(o)))
         .ok_or_else(|| err("Cannot compare these values"))
+}
+
+// ── JSON Parser (recursive descent) ──────────────────
+
+fn skip_ws(b: &[u8], mut i: usize) -> usize {
+    while i < b.len() && matches!(b[i], b' ' | b'\t' | b'\n' | b'\r') { i += 1; }
+    i
+}
+
+fn json_parse_value(b: &[u8], pos: usize) -> Result<(Value, usize), String> {
+    let i = skip_ws(b, pos);
+    if i >= b.len() { return Err("unexpected end of input".into()); }
+    match b[i] {
+        b'n' => json_parse_null(b, i),
+        b't' | b'f' => json_parse_bool(b, i),
+        b'"' => json_parse_string(b, i),
+        b'[' => json_parse_array(b, i),
+        b'{' => json_parse_object(b, i),
+        b'-' | b'0'..=b'9' => json_parse_number(b, i),
+        c => Err(format!("unexpected character '{}' at position {}", c as char, i)),
+    }
+}
+
+fn json_parse_null(b: &[u8], i: usize) -> Result<(Value, usize), String> {
+    if b[i..].starts_with(b"null") {
+        Ok((Value::Con("JNull".into(), vec![]), i + 4))
+    } else {
+        Err(format!("expected 'null' at position {}", i))
+    }
+}
+
+fn json_parse_bool(b: &[u8], i: usize) -> Result<(Value, usize), String> {
+    if b[i..].starts_with(b"true") {
+        Ok((Value::Con("JBool".into(), vec![Value::Bool(true)]), i + 4))
+    } else if b[i..].starts_with(b"false") {
+        Ok((Value::Con("JBool".into(), vec![Value::Bool(false)]), i + 5))
+    } else {
+        Err(format!("expected 'true' or 'false' at position {}", i))
+    }
+}
+
+fn json_parse_number(b: &[u8], i: usize) -> Result<(Value, usize), String> {
+    let mut j = i;
+    if j < b.len() && b[j] == b'-' { j += 1; }
+    if j >= b.len() || !b[j].is_ascii_digit() {
+        return Err(format!("expected digit at position {}", j));
+    }
+    while j < b.len() && b[j].is_ascii_digit() { j += 1; }
+    let s = std::str::from_utf8(&b[i..j]).unwrap();
+    let n: i64 = s.parse().map_err(|_| format!("invalid number at position {}", i))?;
+    Ok((Value::Con("JNum".into(), vec![Value::Int(n)]), j))
+}
+
+fn json_parse_string(b: &[u8], i: usize) -> Result<(Value, usize), String> {
+    let (s, end) = json_parse_raw_string(b, i)?;
+    Ok((Value::Con("JStr".into(), vec![Value::Str(s)]), end))
+}
+
+fn json_parse_raw_string(b: &[u8], i: usize) -> Result<(String, usize), String> {
+    if b[i] != b'"' { return Err(format!("expected '\"' at position {}", i)); }
+    let mut j = i + 1;
+    let mut s = String::new();
+    while j < b.len() {
+        match b[j] {
+            b'"' => return Ok((s, j + 1)),
+            b'\\' => {
+                j += 1;
+                if j >= b.len() { return Err("unexpected end in string escape".into()); }
+                match b[j] {
+                    b'"'  => s.push('"'),
+                    b'\\' => s.push('\\'),
+                    b'/'  => s.push('/'),
+                    b'n'  => s.push('\n'),
+                    b'r'  => s.push('\r'),
+                    b't'  => s.push('\t'),
+                    b'b'  => s.push('\u{0008}'),
+                    b'f'  => s.push('\u{000C}'),
+                    c => { s.push('\\'); s.push(c as char); }
+                }
+                j += 1;
+            }
+            c => { s.push(c as char); j += 1; }
+        }
+    }
+    Err("unterminated string".into())
+}
+
+fn json_parse_array(b: &[u8], i: usize) -> Result<(Value, usize), String> {
+    let mut j = i + 1; // skip '['
+    let mut elems = Vec::new();
+    j = skip_ws(b, j);
+    if j < b.len() && b[j] == b']' {
+        return Ok((Value::Con("JArr".into(), vec![Value::List(vec![])]), j + 1));
+    }
+    loop {
+        let (val, next) = json_parse_value(b, j)?;
+        elems.push(val);
+        j = skip_ws(b, next);
+        if j >= b.len() { return Err("unterminated array".into()); }
+        if b[j] == b']' { break; }
+        if b[j] != b',' { return Err(format!("expected ',' or ']' at position {}", j)); }
+        j += 1; // skip ','
+    }
+    Ok((Value::Con("JArr".into(), vec![Value::List(elems)]), j + 1))
+}
+
+fn json_parse_object(b: &[u8], i: usize) -> Result<(Value, usize), String> {
+    let mut j = i + 1; // skip '{'
+    let mut pairs = Vec::new();
+    j = skip_ws(b, j);
+    if j < b.len() && b[j] == b'}' {
+        return Ok((Value::Con("JObj".into(), vec![Value::List(vec![])]), j + 1));
+    }
+    loop {
+        j = skip_ws(b, j);
+        if j >= b.len() || b[j] != b'"' {
+            return Err(format!("expected string key at position {}", j));
+        }
+        let (key, next) = json_parse_raw_string(b, j)?;
+        j = skip_ws(b, next);
+        if j >= b.len() || b[j] != b':' {
+            return Err(format!("expected ':' at position {}", j));
+        }
+        j += 1; // skip ':'
+        let (val, next) = json_parse_value(b, j)?;
+        pairs.push(Value::Con("MkPair".into(), vec![Value::Str(key), val]));
+        j = skip_ws(b, next);
+        if j >= b.len() { return Err("unterminated object".into()); }
+        if b[j] == b'}' { break; }
+        if b[j] != b',' { return Err(format!("expected ',' or '}}' at position {}", j)); }
+        j += 1; // skip ','
+    }
+    Ok((Value::Con("JObj".into(), vec![Value::List(pairs)]), j + 1))
 }

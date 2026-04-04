@@ -1,0 +1,258 @@
+SYNOEMA BYTECODE v1
+source: examples/quicksort.sno
+
+[Core IR]
+CoreProgram {
+    defs: [
+        CoreDef {
+            name: "qsort",
+            body: Lam(
+                "arg$1",
+                Case(
+                    Var(
+                        "arg$1",
+                    ),
+                    [
+                        Alt {
+                            pat: Con(
+                                "Nil",
+                                [],
+                            ),
+                            body: MkList(
+                                [],
+                            ),
+                        },
+                        Alt {
+                            pat: Con(
+                                "Cons",
+                                [
+                                    Var(
+                                        "p",
+                                    ),
+                                    Var(
+                                        "xs",
+                                    ),
+                                ],
+                            ),
+                            body: Let(
+                                "lo",
+                                App(
+                                    App(
+                                        Var(
+                                            "concatMap",
+                                        ),
+                                        Lam(
+                                            "x",
+                                            Case(
+                                                App(
+                                                    App(
+                                                        PrimOp(
+                                                            Lte,
+                                                        ),
+                                                        Var(
+                                                            "x",
+                                                        ),
+                                                    ),
+                                                    Var(
+                                                        "p",
+                                                    ),
+                                                ),
+                                                [
+                                                    Alt {
+                                                        pat: Lit(
+                                                            Bool(
+                                                                true,
+                                                            ),
+                                                        ),
+                                                        body: MkList(
+                                                            [
+                                                                Var(
+                                                                    "x",
+                                                                ),
+                                                            ],
+                                                        ),
+                                                    },
+                                                    Alt {
+                                                        pat: Lit(
+                                                            Bool(
+                                                                false,
+                                                            ),
+                                                        ),
+                                                        body: MkList(
+                                                            [],
+                                                        ),
+                                                    },
+                                                ],
+                                            ),
+                                        ),
+                                    ),
+                                    Var(
+                                        "xs",
+                                    ),
+                                ),
+                                Let(
+                                    "hi",
+                                    App(
+                                        App(
+                                            Var(
+                                                "concatMap",
+                                            ),
+                                            Lam(
+                                                "x",
+                                                Case(
+                                                    App(
+                                                        App(
+                                                            PrimOp(
+                                                                Gt,
+                                                            ),
+                                                            Var(
+                                                                "x",
+                                                            ),
+                                                        ),
+                                                        Var(
+                                                            "p",
+                                                        ),
+                                                    ),
+                                                    [
+                                                        Alt {
+                                                            pat: Lit(
+                                                                Bool(
+                                                                    true,
+                                                                ),
+                                                            ),
+                                                            body: MkList(
+                                                                [
+                                                                    Var(
+                                                                        "x",
+                                                                    ),
+                                                                ],
+                                                            ),
+                                                        },
+                                                        Alt {
+                                                            pat: Lit(
+                                                                Bool(
+                                                                    false,
+                                                                ),
+                                                            ),
+                                                            body: MkList(
+                                                                [],
+                                                            ),
+                                                        },
+                                                    ],
+                                                ),
+                                            ),
+                                        ),
+                                        Var(
+                                            "xs",
+                                        ),
+                                    ),
+                                    App(
+                                        App(
+                                            PrimOp(
+                                                Concat,
+                                            ),
+                                            App(
+                                                Var(
+                                                    "qsort",
+                                                ),
+                                                Var(
+                                                    "lo",
+                                                ),
+                                            ),
+                                        ),
+                                        App(
+                                            App(
+                                                PrimOp(
+                                                    Concat,
+                                                ),
+                                                MkList(
+                                                    [
+                                                        Var(
+                                                            "p",
+                                                        ),
+                                                    ],
+                                                ),
+                                            ),
+                                            App(
+                                                Var(
+                                                    "qsort",
+                                                ),
+                                                Var(
+                                                    "hi",
+                                                ),
+                                            ),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        },
+                        Alt {
+                            pat: Wildcard,
+                            body: RuntimeError(
+                                "non-exhaustive patterns",
+                            ),
+                        },
+                    ],
+                ),
+            ),
+        },
+        CoreDef {
+            name: "main",
+            body: App(
+                Var(
+                    "qsort",
+                ),
+                MkList(
+                    [
+                        Lit(
+                            Int(
+                                5,
+                            ),
+                        ),
+                        Lit(
+                            Int(
+                                3,
+                            ),
+                        ),
+                        Lit(
+                            Int(
+                                8,
+                            ),
+                        ),
+                        Lit(
+                            Int(
+                                1,
+                            ),
+                        ),
+                        Lit(
+                            Int(
+                                9,
+                            ),
+                        ),
+                        Lit(
+                            Int(
+                                2,
+                            ),
+                        ),
+                        Lit(
+                            Int(
+                                7,
+                            ),
+                        ),
+                        Lit(
+                            Int(
+                                4,
+                            ),
+                        ),
+                        Lit(
+                            Int(
+                                6,
+                            ),
+                        ),
+                    ],
+                ),
+            ),
+        },
+    ],
+    ctor_tags: {},
+}

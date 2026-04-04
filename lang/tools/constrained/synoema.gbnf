@@ -96,13 +96,17 @@ atom ::= lower-id
        | string-lit
        | char-lit
        | bool-lit
+       | tuple-expr
        | "(" ws expr ws ")"
        | list-expr
        | lambda-expr
        | record-expr
 
+tuple-expr ::= "(" ws expr ws "," ws expr ws ")"
+
 record-expr ::= "{" ws "}"
               | "{" ws record-field (ws "," ws record-field)* ws "}"
+              | "{" ws "..." ws expr (ws "," ws record-field)* ws "}"
 
 record-field ::= lower-id ws "=" ws expr | lower-id
 
@@ -126,6 +130,7 @@ pattern ::= "_"
           | string-lit
           | bool-lit
           | upper-id (ws pattern)*
+          | "(" ws pattern ws "," ws pattern ws ")"
           | "(" ws pattern ws ":" ws pattern ws ")"
           | "(" ws pattern ws ")"
           | "[" ws "]"

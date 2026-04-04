@@ -1,0 +1,1 @@
+Build a data structure representing a person with name, age, and a list of hobbies. Print it.

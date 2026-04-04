@@ -1,0 +1,1 @@
+Write a fizzbuzz function that returns 'Fizz' for multiples of 3, 'Buzz' for multiples of 5, 'FizzBuzz' for multiples of both, and the number as string otherwise. Demonstrate with fizzbuzz(15).

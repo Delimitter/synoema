@@ -1,0 +1,1 @@
+Define a linked list type and implement append and length functions. Demonstrate with a list [1,2,3], append 4, print length.

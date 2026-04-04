@@ -36,6 +36,30 @@ struct TcoContext {
     self_name: String,
     loop_block: cranelift_codegen::ir::Block,
     params: Vec<Variable>,
+    emit_regions: bool,
+}
+
+/// Static analysis: does a Core IR expression contain any heap-allocating nodes?
+/// Used to skip region_enter/region_exit for leaf (non-allocating) functions.
+fn needs_heap(expr: &CoreExpr) -> bool {
+    match expr {
+        CoreExpr::Var(_) | CoreExpr::PrimOp(_) | CoreExpr::RuntimeError(_) => false,
+        CoreExpr::Lit(lit) => matches!(lit, Lit::Str(_)),
+        CoreExpr::App(f, a) => needs_heap(f) || needs_heap(a),
+        CoreExpr::Lam(_, body) => needs_heap(body),
+        CoreExpr::Let(_, val, body) | CoreExpr::LetRec(_, val, body) => {
+            needs_heap(val) || needs_heap(body)
+        }
+        CoreExpr::Case(scrut, alts) => {
+            needs_heap(scrut) || alts.iter().any(|alt| needs_heap(&alt.body))
+        }
+        CoreExpr::FieldAccess(base, _) => needs_heap(base),
+        CoreExpr::Region(body) => needs_heap(body),
+        // Heap-allocating nodes:
+        CoreExpr::MkList(_) | CoreExpr::MkClosure { .. } | CoreExpr::Record(_)
+        | CoreExpr::RecordUpdate { .. } | CoreExpr::Con(_)
+        | CoreExpr::Scope(_) | CoreExpr::Spawn(_) => true,
+    }
 }
 
 /// The Synoema JIT compiler
@@ -87,10 +111,14 @@ impl Compiler {
         builder.symbol("synoema_str_trim", runtime::synoema_str_trim as *const u8);
         builder.symbol("synoema_str_len", runtime::synoema_str_len as *const u8);
         builder.symbol("synoema_json_escape", runtime::synoema_json_escape as *const u8);
+        builder.symbol("synoema_json_parse", runtime::synoema_json_parse as *const u8);
+        builder.symbol("synoema_error", runtime::synoema_error as *const u8);
         builder.symbol("synoema_concatmap", runtime::synoema_concatmap as *const u8);
         builder.symbol("synoema_record_new", runtime::synoema_record_new as *const u8);
         builder.symbol("synoema_record_set", runtime::synoema_record_set as *const u8);
         builder.symbol("synoema_record_get", runtime::synoema_record_get as *const u8);
+        builder.symbol("synoema_record_clone", runtime::synoema_record_clone as *const u8);
+        builder.symbol("synoema_record_set_field", runtime::synoema_record_set_field as *const u8);
         builder.symbol("synoema_val_eq", runtime::synoema_val_eq as *const u8);
         builder.symbol("synoema_make_con", runtime::synoema_make_con as *const u8);
         builder.symbol("synoema_con_set", runtime::synoema_con_set as *const u8);
@@ -127,6 +155,11 @@ impl Compiler {
         builder.symbol("synoema_map", runtime::synoema_map as *const u8);
         builder.symbol("synoema_filter", runtime::synoema_filter as *const u8);
         builder.symbol("synoema_foldl", runtime::synoema_foldl as *const u8);
+        builder.symbol("synoema_zip", runtime::synoema_zip as *const u8);
+        builder.symbol("synoema_index", runtime::synoema_index as *const u8);
+        builder.symbol("synoema_take", runtime::synoema_take as *const u8);
+        builder.symbol("synoema_drop", runtime::synoema_drop as *const u8);
+        builder.symbol("synoema_reverse", runtime::synoema_reverse as *const u8);
         // Concurrency channel functions
         builder.symbol("synoema_chan_new",  runtime::synoema_chan_new  as *const u8);
         builder.symbol("synoema_chan_send", runtime::synoema_chan_send as *const u8);
@@ -242,6 +275,8 @@ impl Compiler {
         decl(self, "synoema_str_trim", "str_trim", &sig1)?;
         decl(self, "synoema_str_len", "str_len", &sig1)?;
         decl(self, "synoema_json_escape", "json_escape", &sig1)?;
+        decl(self, "synoema_json_parse", "json_parse", &sig1)?;
+        decl(self, "synoema_error", "error", &sig1)?;
         // fn(i64, i64) -> i64
         decl(self, "synoema_cons", "synoema_cons", &sig2)?;
         decl(self, "synoema_concat", "synoema_concat", &sig2)?;
@@ -257,9 +292,12 @@ impl Compiler {
         decl(self, "synoema_env_alloc", "synoema_env_alloc", &sig1)?;
         // Records: fn(i64) -> i64
         decl(self, "synoema_record_new", "synoema_record_new", &sig1)?;
+        decl(self, "synoema_record_clone", "synoema_record_clone", &sig1)?;
         // Records: fn(i64, i64) -> i64
         decl(self, "synoema_record_get", "synoema_record_get", &sig2)?;
-        // Records: fn(i64, i64, i64) -> i64 (unused return — record_set)
+        // Records: fn(i64, i64, i64) -> void
+        decl(self, "synoema_record_set_field", "synoema_record_set_field", &sig3_void)?;
+        // Records: fn(i64, i64, i64, i64) -> void (record_set)
         decl(self, "synoema_record_set", "synoema_record_set", &sig4)?;
         // Universal equality + list equality
         decl(self, "synoema_val_eq", "synoema_val_eq", &sig2)?;
@@ -270,6 +308,12 @@ impl Compiler {
         decl(self, "synoema_map",    "map",    &sig2)?;
         decl(self, "synoema_filter", "filter", &sig2)?;
         decl(self, "synoema_foldl",  "foldl",  &sig3_ret)?;
+        // List builtins
+        decl(self, "synoema_zip",     "zip",     &sig2)?;
+        decl(self, "synoema_index",   "index",   &sig2)?;
+        decl(self, "synoema_take",    "take",    &sig2)?;
+        decl(self, "synoema_drop",    "drop",    &sig2)?;
+        decl(self, "synoema_reverse", "reverse", &sig1)?;
         // String stdlib: fn(i64, i64, i64) -> i64
         decl(self, "synoema_str_slice", "str_slice", &sig3_ret)?;
         decl(self, "synoema_str_find", "str_find", &sig3_ret)?;
@@ -511,18 +555,24 @@ impl Compiler {
         builder.switch_to_block(loop_header);
         // Don't seal loop_header yet — TCO jumps will add predecessors.
 
-        // TCO auto-region: enter a new region at each loop iteration.
-        // region_exit is emitted before each back-edge (tail call → jump to loop_header).
-        // Base-case returns do NOT exit the region — arena_reset handles final cleanup.
-        let region_enter_id = *self.functions.get("synoema_region_enter")
-            .ok_or_else(|| cerr("synoema_region_enter not declared"))?;
-        let region_enter_ref = self.module.declare_func_in_func(region_enter_id, builder.func);
-        builder.ins().call(region_enter_ref, &[]);
+        // Skip region_enter/region_exit for functions that never allocate heap memory.
+        let emit_regions = needs_heap(inner);
+
+        if emit_regions {
+            // TCO auto-region: enter a new region at each loop iteration.
+            // region_exit is emitted before each back-edge (tail call → jump to loop_header).
+            // Base-case returns do NOT exit the region — arena_reset handles final cleanup.
+            let region_enter_id = *self.functions.get("synoema_region_enter")
+                .ok_or_else(|| cerr("synoema_region_enter not declared"))?;
+            let region_enter_ref = self.module.declare_func_in_func(region_enter_id, builder.func);
+            builder.ins().call(region_enter_ref, &[]);
+        }
 
         let tco_ctx = TcoContext {
             self_name: name.to_string(),
             loop_block: loop_header,
             params: param_vars,
+            emit_regions,
         };
 
         let ctor_tags = self.ctor_tags.clone();
@@ -558,12 +608,10 @@ fn compile_expr(
         CoreExpr::Lit(Lit::Bool(b)) => Ok(builder.ins().iconst(types::I64, if *b {1} else {0})),
         CoreExpr::Lit(Lit::Unit) => Ok(builder.ins().iconst(types::I64, 0)), // unit = 0
         CoreExpr::Lit(Lit::Str(s)) => {
-            // Leak a copy of the string bytes to get a stable pointer, then call
-            // synoema_str_new(data_ptr, len) which allocates a tagged StrNode.
-            let bytes = s.as_bytes().to_vec().into_boxed_slice();
-            let data_ptr = bytes.as_ptr() as i64;
-            let len = bytes.len() as i64;
-            Box::leak(bytes);
+            // Use the AST string's pointer directly — the AST outlives JIT execution.
+            // synoema_str_new copies bytes into the arena at runtime.
+            let data_ptr = s.as_ptr() as i64;
+            let len = s.len() as i64;
             let data_ptr_val = builder.ins().iconst(types::I64, data_ptr);
             let len_val = builder.ins().iconst(types::I64, len);
             let str_new_id = *funcs.get("synoema_str_new")
@@ -781,10 +829,12 @@ fn compile_expr(
                             builder.def_var(*var, *val);
                         }
                         // TCO auto-region: exit region before back-edge to free per-iteration heap
-                        let region_exit_id = *funcs.get("synoema_region_exit")
-                            .ok_or_else(|| cerr("synoema_region_exit not declared"))?;
-                        let region_exit_ref = module.declare_func_in_func(region_exit_id, builder.func);
-                        builder.ins().call(region_exit_ref, &[]);
+                        if tco.emit_regions {
+                            let region_exit_id = *funcs.get("synoema_region_exit")
+                                .ok_or_else(|| cerr("synoema_region_exit not declared"))?;
+                            let region_exit_ref = module.declare_func_in_func(region_exit_id, builder.func);
+                            builder.ins().call(region_exit_ref, &[]);
+                        }
                         builder.ins().jump(tco.loop_block, &[]);
                         let unreachable = builder.create_block();
                         builder.switch_to_block(unreachable);
@@ -951,6 +1001,31 @@ fn compile_expr(
             let rec_get_ref = module.declare_func_in_func(rec_get_id, builder.func);
             let get_call = builder.ins().call(rec_get_ref, &[rec_ptr, hash_val]);
             Ok(builder.inst_results(get_call)[0])
+        }
+
+        CoreExpr::RecordUpdate { base, updates } => {
+            // 1. Compile base → base_ptr
+            let base_ptr = compile_expr(builder, vars, vc, funcs, module, ctor_tags, base, None)?;
+
+            // 2. Clone the base record: synoema_record_clone(base_ptr) → new_ptr
+            let clone_id = *funcs.get("synoema_record_clone")
+                .ok_or_else(|| cerr("synoema_record_clone not declared"))?;
+            let clone_ref = module.declare_func_in_func(clone_id, builder.func);
+            let clone_call = builder.ins().call(clone_ref, &[base_ptr]);
+            let new_ptr = builder.inst_results(clone_call)[0];
+
+            // 3. For each update: compile val, call synoema_record_set_field(new_ptr, hash, val)
+            let set_field_id = *funcs.get("synoema_record_set_field")
+                .ok_or_else(|| cerr("synoema_record_set_field not declared"))?;
+            for (field_name, val_expr) in updates {
+                let val = compile_expr(builder, vars, vc, funcs, module, ctor_tags, val_expr, None)?;
+                let hash = crate::runtime::field_name_hash(field_name);
+                let hash_val = builder.ins().iconst(types::I64, hash);
+                let set_ref = module.declare_func_in_func(set_field_id, builder.func);
+                builder.ins().call(set_ref, &[new_ptr, hash_val, val]);
+            }
+
+            Ok(new_ptr)
         }
 
         // ── Region inference: enter/exit arena region around body ────────────────

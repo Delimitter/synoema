@@ -68,6 +68,7 @@ pub enum Token {
     Colon,      // :
     Dot,        // .
     DotDot,     // ..
+    DotDotDot,  // ...
     Assign,     // =
     At,         // @
     Bar,        // |
@@ -133,7 +134,7 @@ impl Token {
             Token::Star => "'*'", Token::StarStar => "'**'", Token::Slash => "'/'",
             Token::Percent => "'%'", Token::Question => "'?'",
             Token::Colon => "':'", Token::Dot => "'.'",
-            Token::DotDot => "'..'", Token::Assign => "'='",
+            Token::DotDot => "'..'", Token::DotDotDot => "'...'", Token::Assign => "'='",
             Token::At => "'@'", Token::Bar => "'|'",
             Token::Backslash => "'\\'", Token::Underscore => "'_'",
             Token::Comma => "','",

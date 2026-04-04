@@ -1,0 +1,1 @@
+Concatenate strings 'Hello' and ' World', get the length, and print both the concatenated string and its length.

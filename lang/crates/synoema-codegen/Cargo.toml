@@ -10,11 +10,11 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-synoema-lexer = { path = "../synoema-lexer", version = "0.1.0" }
-synoema-parser = { path = "../synoema-parser", version = "0.1.0" }
-synoema-core = { path = "../synoema-core", version = "0.1.0" }
-synoema-types = { path = "../synoema-types", version = "0.1.0" }
-synoema-diagnostic = { path = "../synoema-diagnostic", version = "0.1.0" }
+synoema-lexer = { path = "../synoema-lexer", version = "0.1.0-alpha.1" }
+synoema-parser = { path = "../synoema-parser", version = "0.1.0-alpha.1" }
+synoema-core = { path = "../synoema-core", version = "0.1.0-alpha.1" }
+synoema-types = { path = "../synoema-types", version = "0.1.0-alpha.1" }
+synoema-diagnostic = { path = "../synoema-diagnostic", version = "0.1.0-alpha.1" }
 cranelift-codegen = "0.104"
 cranelift-frontend = "0.104"
 cranelift-module = "0.104"

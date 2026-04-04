@@ -80,6 +80,14 @@ pub enum CoreExpr {
     /// Interpreter: no-op (Rust RAII handles memory).
     Region(Box<CoreExpr>),
 
+    /// Record update: `{...base, field1 = val1, field2 = val2}`
+    /// Copies all fields from base, overrides the listed fields.
+    /// Interpreter: runtime merge. JIT: clone + set_field per update.
+    RecordUpdate {
+        base: Box<CoreExpr>,
+        updates: Vec<(Name, CoreExpr)>,
+    },
+
     /// Runtime error (e.g. non-exhaustive pattern match).
     /// Interpreter: panic with message. JIT: FFI call to abort.
     RuntimeError(String),
@@ -249,6 +257,13 @@ impl std::fmt::Display for CoreExpr {
             }
             CoreExpr::FieldAccess(expr, name) => {
                 write!(f, "({}).{}", expr, name)
+            }
+            CoreExpr::RecordUpdate { base, updates } => {
+                write!(f, "{{...{}", base)?;
+                for (name, val) in updates {
+                    write!(f, ", {} = {}", name, val)?;
+                }
+                write!(f, "}}")
             }
             CoreExpr::Region(body) => write!(f, "(region {})", body),
             CoreExpr::Scope(body) => write!(f, "(scope {})", body),

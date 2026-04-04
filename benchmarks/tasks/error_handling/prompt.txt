@@ -1,0 +1,1 @@
+Write a safe division function that returns an error for division by zero. Demonstrate with divide(10, 0) and divide(10, 2).

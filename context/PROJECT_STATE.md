@@ -9,9 +9,12 @@
 
 **Версия: 0.1.0-alpha.1** — alpha-стадия, синтаксис и API могут меняться. Политика версий: [docs/versioning.md](../docs/versioning.md)
 
-- **842 теста**, все зелёные, 0 warnings
-- **Phases 9.2–21** завершены + TCO в JIT + String stdlib в JIT + Doc-as-Code + LLM Cost Reduction v1 + Region Inference
-- JIT поддерживает: int, bool, float, string, list, closures, records, record patterns, modules, ADTs, ==, !=, list comprehensions, IO (print/readline), show (все типы), type class dispatch, higher-order stdlib, **self-recursive TCO**, **string stdlib** (str_slice/find/starts_with/trim/len/json_escape)
+- **937 тестов**, все зелёные, 0 warnings
+- **Prelude:** `lang/prelude/prelude.sno` — Result type + combinators (map_ok, map_err, unwrap, unwrap_or, is_ok, is_err, and_then)
+- **`error : String -> a`** builtin — runtime panic в interpreter + JIT
+- **npm дистрибуция:** `npx synoema-mcp` — 5 пакетов (launcher + 4 платформенных бинарника), версии синхронизированы из git tag через CI
+- **Phases 9.2–23** завершены + TCO в JIT + String stdlib в JIT + Doc-as-Code + LLM Cost Reduction v1 + Region Inference
+- JIT поддерживает: int, bool, float, string, list, closures, records, record patterns, **record update**, modules, ADTs, ==, !=, list comprehensions, IO (print/readline), show (все типы), type class dispatch, higher-order stdlib, **self-recursive TCO**, **string stdlib** (str_slice/find/starts_with/trim/len/json_escape)
 - Interpreter: всё вышеперечисленное + сетевые примитивы (tcp_listen/accept, fd_*/popen)
 - Type checker: Hindley-Milner + row polymorphism + linear types (LinearArrow) + **type aliases** (`type Pos = {x: Int, y: Int}`)
 - Система диагностики: synoema-diagnostic, структурированные ошибки с span, JSON/human рендереры, **LLM error feedback** (llm_hint, fixability, did_you_mean для top-12 ошибок)
@@ -58,7 +61,14 @@ synoema-repo/
 │   ├── tests/                  # Интеграционные тесты (lexer, parser)
 │   └── spec/                   # Формальная спецификация
 │
+├── benchmarks/                    # ← СРАВНИТЕЛЬНЫЙ BENCHMARK SUITE
+│   ├── runner/                 # Rust CLI (synoema-bench): orchestration, telemetry, reports
+│   ├── scripts/                # Python: token_count.py (tiktoken), llm_generate.py (OpenRouter)
+│   ├── tasks/                  # 16 задач × 5 языков (sno, py, js, ts, cpp)
+│   └── results/                # Результаты прогонов (gitignored)
+│
 ├── docs/
+│   ├── benchmarks.md           # Документация benchmark suite
 │   ├── articles/               # 14 статей (7 RU + 7 EN) + план серии
 │   ├── research/               # Научные основания (23 факта, 23 источника)
 │   └── specs/                  # Language Reference, Compiler Roadmap
@@ -78,7 +88,7 @@ synoema-repo/
 | Метрика | Значение |
 |---------|----------|
 | Строк Rust | ~12000 |
-| Тестов | 864 (все зелёные) |
+| Тестов | 937 (все зелёные) |
 | Warnings | 0 |
 | Крейтов | 8 (добавлен synoema-diagnostic) |
 | Примеров | 14 программ (.sno) |
@@ -90,8 +100,8 @@ synoema-repo/
 ## 4. Что работает
 
 ### Interpreter (`synoema run`) — ВСЕ фичи:
-- Pattern matching (single-arg, multi-arg, nested, cons)
-- Closures, higher-order functions (map, filter, fold)
+- Pattern matching (single-arg, multi-arg, nested, cons, singleton list `[x]`)
+- Closures, higher-order functions (map, filter, fold, zip, index, take, drop, reverse)
 - Списки: `[1 2 3]`, cons `x:xs`, concat `++`, comprehensions `[x | x <- xs, p x]`
 - Строки: `"hello"`, конкатенация `++`, `show`, интерполяция `"${expr}"`
 - Условия: `? cond -> then : else`
@@ -100,6 +110,7 @@ synoema-repo/
 - Pipe: `x |> f |> g`
 - Рекурсия: factorial, fibonacci, quicksort, ackermann
 - **Records (Phase 9.4):** `{x = 3, y = 4}`, field access `p.x`, pattern matching
+- **Record update:** `{...r, x = 10}` — копировать record, перезаписать поля (interpreter + JIT)
 - **Modules (Phase 9.5):** `mod Math`, `use Math (square pi)` — lexical namespacing
 - **Multi-file imports:** `import "path.sno"` — recursive loading, cycle detection, diamond caching
 - **Row polymorphism (Phase 11.2):** `get_x r = r.x` принимает `{x=3, y=4}` и `{x=1, z=true}` — Rémy-style row unification
@@ -152,7 +163,7 @@ Average:      4.4× faster
 
 ## 6. Известные баги
 
-0 известных багов, 864/864 тестов зелёные.
+0 известных багов, 937/937 тестов зелёные.
 
 ### Исправленные баги:
 | Баг | Решение |
@@ -231,6 +242,7 @@ INTERPRETER            CRANELIFT JIT
 cd synoema/
 cargo build                    # Сборка
 cargo test                     # 264 теста
+cargo run -p synoema-repl -- init myapp                    # Scaffold проекта
 cargo run -p synoema-repl -- run examples/quicksort.sno   # Interpreter
 cargo run -p synoema-repl -- jit examples/factorial.sno    # JIT
 cargo run -p synoema-repl -- eval "6 * 7"                  # Eval

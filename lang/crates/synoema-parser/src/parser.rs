@@ -593,8 +593,21 @@ impl Parser {
 
             Token::LBracket => {
                 self.advance();
+                // [] → Nil, [x] → Cons(x, Nil), [x y z] → Cons(x, Cons(y, Cons(z, Nil)))
+                if self.eat(&Token::RBracket) {
+                    return Ok(Pat::Con("Nil".into(), vec![]));
+                }
+                let mut elems = Vec::new();
+                while self.peek() != &Token::RBracket && self.peek() != &Token::Eof {
+                    elems.push(self.parse_pattern()?);
+                }
                 self.expect(&Token::RBracket)?;
-                Ok(Pat::Con("Nil".into(), vec![]))
+                // Fold right: [a b c] → Cons(a, Cons(b, Cons(c, Nil)))
+                let mut pat = Pat::Con("Nil".into(), vec![]);
+                for elem in elems.into_iter().rev() {
+                    pat = Pat::Cons(Box::new(elem), Box::new(pat));
+                }
+                Ok(pat)
             }
 
             Token::LBrace => {
@@ -627,6 +640,14 @@ impl Parser {
             let rest = self.parse_pattern()?;
             self.expect(&Token::RParen)?;
             Ok(Pat::Cons(Box::new(p), Box::new(rest)))
+        } else if self.eat(&Token::Comma) {
+            // (a, b) tuple pattern → desugars to {fst = a, snd = b}
+            let p2 = self.parse_pattern()?;
+            self.expect(&Token::RParen)?;
+            Ok(Pat::Record(vec![
+                ("fst".to_string(), p),
+                ("snd".to_string(), p2),
+            ]))
         } else {
             self.expect(&Token::RParen)?;
             Ok(Pat::Paren(Box::new(p)))
@@ -746,12 +767,31 @@ impl Parser {
                 self.expect(&Token::Arrow)?;
                 // Then-branch: parse above Cons (:) level so : is separator, not cons
                 let then_e = self.parse_pratt(14)?;
-                // Allow newline before `:` for multi-line conditionals:
+                // Allow newline/indent before `:` for multi-line conditionals:
                 //   ? cond -> then_expr
                 //   : else_expr
+                // Also handle nested ternary where `:` is at deeper indent:
+                //   ? cond -> ? inner_cond -> expr
+                //     : else_expr
                 self.skip_newlines();
+                let ate_indent = self.eat(&Token::Indent);
                 self.expect(&Token::Colon)?;
-                let else_e = self.parse_expr()?;
+                let else_e = if self.eat(&Token::Indent) {
+                    // Indented block after `:` — parse as block body
+                    self.parse_block_body()?
+                } else if self.is_binding_ahead() {
+                    // Inline where-bindings after `:`:
+                    //   ? cond -> expr
+                    //   : y = x + 1
+                    //     z = y * 2
+                    //     z
+                    self.parse_ternary_else_bindings(span)?
+                } else {
+                    self.parse_expr()?
+                };
+                if ate_indent {
+                    self.eat(&Token::Dedent);
+                }
                 Ok(Expr::new(ExprKind::Cond(
                     Box::new(cond), Box::new(then_e), Box::new(else_e)
                 ), span))
@@ -834,6 +874,15 @@ impl Parser {
                     return Ok(Expr::new(ExprKind::Lit(Lit::Unit), span));
                 }
                 let e = self.parse_expr()?;
+                // (a, b) tuple syntax → desugars to {fst = a, snd = b}
+                if self.eat(&Token::Comma) {
+                    let e2 = self.parse_expr()?;
+                    self.expect(&Token::RParen)?;
+                    return Ok(Expr::new(ExprKind::Record(vec![
+                        ("fst".to_string(), e),
+                        ("snd".to_string(), e2),
+                    ]), span));
+                }
                 self.expect(&Token::RParen)?;
                 Ok(Expr::new(ExprKind::Paren(Box::new(e)), span))
             }
@@ -842,23 +891,44 @@ impl Parser {
 
             Token::LBrace => {
                 self.advance();
-                let mut fields = Vec::new();
                 self.skip_newlines();
-                while self.peek() != &Token::RBrace && self.peek() != &Token::Eof {
-                    let fname = self.expect_lower_id()?;
-                    let val = if self.peek() == &Token::Assign {
+                if self.peek() == &Token::DotDotDot {
+                    // Record update: {...base, field = val, ...}
+                    self.advance(); // consume ...
+                    let base = self.parse_expr()?;
+                    let mut updates = Vec::new();
+                    if self.peek() == &Token::Comma {
                         self.advance();
-                        self.parse_expr()?
-                    } else {
-                        // Record punning: {x} → {x = x}
-                        Expr::new(ExprKind::Var(fname.clone()), span)
-                    };
-                    fields.push((fname, val));
-                    self.eat(&Token::Comma);
-                    self.skip_newlines();
+                        self.skip_newlines();
+                        while self.peek() != &Token::RBrace && self.peek() != &Token::Eof {
+                            let fname = self.expect_lower_id()?;
+                            self.expect(&Token::Assign)?;
+                            let val = self.parse_expr()?;
+                            updates.push((fname, val));
+                            self.eat(&Token::Comma);
+                            self.skip_newlines();
+                        }
+                    }
+                    self.expect(&Token::RBrace)?;
+                    Ok(Expr::new(ExprKind::RecordUpdate { base: Box::new(base), updates }, span))
+                } else {
+                    let mut fields = Vec::new();
+                    while self.peek() != &Token::RBrace && self.peek() != &Token::Eof {
+                        let fname = self.expect_lower_id()?;
+                        let val = if self.peek() == &Token::Assign {
+                            self.advance();
+                            self.parse_expr()?
+                        } else {
+                            // Record punning: {x} → {x = x}
+                            Expr::new(ExprKind::Var(fname.clone()), span)
+                        };
+                        fields.push((fname, val));
+                        self.eat(&Token::Comma);
+                        self.skip_newlines();
+                    }
+                    self.expect(&Token::RBrace)?;
+                    Ok(Expr::new(ExprKind::Record(fields), span))
                 }
-                self.expect(&Token::RBrace)?;
-                Ok(Expr::new(ExprKind::Record(fields), span))
             }
 
             _ => Err(self.error(format!("Expected expression, got {:?}", self.peek()))),
@@ -1071,6 +1141,38 @@ impl Parser {
         }
 
         Ok(result)
+    }
+
+    /// Parse where-bindings that appear inline after ternary `:`.
+    ///
+    /// Handles patterns like:
+    /// ```text
+    /// ? cond -> expr
+    /// : y = x + 1
+    ///   y * 2
+    /// ```
+    fn parse_ternary_else_bindings(&mut self, span: Span) -> PResult<Expr> {
+        let mut bindings = Vec::new();
+
+        // Parse inline binding(s): name = expr
+        let bspan = self.peek_span();
+        let bname = self.expect_lower_id()?;
+        self.expect(&Token::Assign)?;
+        let value = if self.eat(&Token::Indent) {
+            self.parse_block_body()?
+        } else {
+            self.parse_expr()?
+        };
+        bindings.push(Binding { name: bname, value, span: bspan });
+
+        // If an INDENT follows, parse remaining bindings + final expression
+        if self.eat(&Token::Indent) {
+            let body = self.parse_block_body()?;
+            Ok(Expr::new(ExprKind::Block(bindings, Box::new(body)), span))
+        } else {
+            // No indented block — error: we need a final expression after bindings
+            Err(self.error("Where-binding in ternary else must be followed by an indented expression"))
+        }
     }
 
     /// Look ahead to see if current position is `lowerId =` (binding)

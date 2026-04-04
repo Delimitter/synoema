@@ -43,7 +43,7 @@
 
 | Аудитория | Директория | Что писать |
 |-----------|-----------|-----------|
-| Человек-пользователь | `docs/user/` | Туториалы, синтаксис с объяснениями, примеры |
+| Человек-пользователь | `README.md`, `docs/LANGUAGE.md`, `CONTRIBUTING.md` | Quick Wins, справочник языка, dev guide |
 | LLM-пользователь | `docs/llm/` | Quick reference, таблицы операторов, аксиомы, GBNF. Стиль: ≤1800 токенов, без prose |
 | LLM-разработчик (Claude agent) | `context/` | Rules, Architecture, Project State, Dev Guide, Phases |
 | Формальная спецификация | `docs/specs/` | Language reference, grammar, roadmap |
@@ -62,7 +62,7 @@
 | Новый синтаксис / оператор | `docs/llm/synoema.md` (таблица операторов), `docs/specs/language_reference.md` (EBNF), `docs/user/syntax.md` если существует |
 | Новая фича в interpreter/JIT | `context/PROJECT_STATE.md` (что работает), `context/PHASES.md` (фаза), `CLAUDE.md` (статус если меняются метрики) |
 | Новый crate или изменение LOC | `context/ARCHITECTURE.md` (таблица crates + LOC), `context/PROJECT_STATE.md` |
-| Новая CLI команда | `CLAUDE.md` (секция Команды), `docs/user/README.md` |
+| Новая CLI команда | `CLAUDE.md` (секция Команды), `README.md` |
 | Изменение ABI / FFI | `context/ARCHITECTURE.md` (Tagged Pointer ABI / Runtime FFI паттерн) |
 | Новый MCP инструмент | `docs/mcp.md` |
 | Изменение тестов (количество) | `CLAUDE.md` (строка статуса), `docs/testing.md`, `context/PROJECT_STATE.md` |
@@ -122,6 +122,14 @@ docs/llm/
 
 **Когда файл нарушает лимит — разбить, не сжимать:** если фрагмент не помещается в 400–600 токенов при сохранении всех конструкций — делить на два файла (например `types-adt.md` + `types-classes.md`), не выбрасывать конструкции.
 
+#### 7d. Язык документации
+
+| Аудитория | Язык | Стиль |
+|-----------|------|-------|
+| LLM-пользователь (`docs/llm/`) | Английский | Минифицированный: таблицы, списки, сниппеты. Без prose |
+| Человек-пользователь (`README.md`, `docs/`, `CONTRIBUTING.md`) | Английский | Human-readable: полные предложения, объяснения |
+| LLM-разработчик (`context/`, `CLAUDE.md`) | Русский | Произвольный (prose или минифицированный) |
+
 ### 8. Лицензирование и IP
 
 **Многокомпонентная лицензия:** проект использует разные лицензии для разных компонентов.
@@ -157,6 +165,28 @@ docs/llm/
 - `CONTRIBUTING.md` — DCO + правила контрибуции
 - `SECURITY.md` — политика раскрытия уязвимостей
 - `docs/IP_STRATEGY.md` — стратегия IP (внутренний)
+
+### 9. Версионирование
+
+**Монолитная версия:** все пользовательские компоненты экосистемы разделяют один номер версии.
+
+**Источник истины:** `lang/Cargo.toml` → `[workspace.package].version`
+
+| Компонент | Файл | Механизм синхронизации |
+|-----------|------|----------------------|
+| Lang crates (8) | `lang/Cargo.toml` | Workspace inheritance (авто) |
+| MCP Cargo | `mcp/Cargo.toml` | Ручная синхронизация при релизе |
+| MCP runtime | `mcp/synoema-mcp/src/main.rs` | `env!("CARGO_PKG_VERSION")` (авто) |
+| npm пакеты | `npm/*/package.json` | CI из git tag (авто) |
+| VSCode расширение | `vscode-extension/package.json` | Ручная синхронизация, `X.Y.Z` без pre-release (ограничение Marketplace) |
+| Документация | `README.md`, `docs/*.md` | Ручная синхронизация |
+
+**Правила:**
+- Хардкод версий запрещён — в Rust использовать `env!("CARGO_PKG_VERSION")`
+- Inter-crate зависимости в `lang/crates/*/Cargo.toml` ОБЯЗАНЫ указывать полную pre-release версию (например `version = "0.1.0-alpha.1"`) — Cargo semver требует явного указания pre-release
+- Pre-release теги (`-alpha.N`, `-beta.N`) обязательны до стабильного 1.0
+- Внутренние инструменты (benchmarks) исключены из политики
+- Полная документация: `docs/versioning.md`
 
 ## Чеклист для новой фичи
 

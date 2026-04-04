@@ -1,0 +1,10 @@
+-- SPDX-License-Identifier: MIT-0
+-- JSON parsing and encoding example
+
+--- Parse a JSON string and extract a field.
+--- example: main == ()
+main =
+  src = "{\"name\": \"Alice\", \"age\": 30}"
+  parsed = unwrap (json_parse src)
+  name = unwrap (json_get "name" parsed)
+  print ("Name: " ++ show name) ; print ("Full: " ++ show parsed)

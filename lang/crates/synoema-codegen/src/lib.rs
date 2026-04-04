@@ -9,7 +9,7 @@
 pub mod compiler;
 pub mod runtime;
 pub use compiler::{Compiler, CompileError};
-pub use runtime::arena_reset;
+pub use runtime::{arena_reset, arena_offset, arena_overflow_count, arena_region_depth};
 
 use std::path::Path;
 use synoema_diagnostic::{Diagnostic, codes};
@@ -33,6 +33,14 @@ fn compile_err(e: CompileError) -> Diagnostic {
     Diagnostic::error(codes::COMPILE_ERROR, format!("{}", e))
 }
 
+// ── Prelude ─────────────────────────────────────────────
+
+const PRELUDE: &str = include_str!("../../../prelude/prelude.sno");
+
+fn prepend_prelude(user_source: &str) -> String {
+    format!("{}\n{}", PRELUDE, user_source)
+}
+
 /// Parse, desugar, and JIT-compile a Synoema program, returning main() result as i64.
 /// Strings are returned as tagged i64 pointers (use `display_result` for human-readable output).
 pub fn compile_and_run(source: &str) -> Result<i64, Diagnostic> {
@@ -41,7 +49,8 @@ pub fn compile_and_run(source: &str) -> Result<i64, Diagnostic> {
 
 /// Like `compile_and_run` but with import resolution from `base_dir`.
 pub fn compile_and_run_with_base_dir(source: &str, base_dir: Option<&Path>) -> Result<i64, Diagnostic> {
-    let program = synoema_parser::parse(source)
+    let full_source = prepend_prelude(source);
+    let program = synoema_parser::parse(&full_source)
         .map_err(|e| parse_err(&e))?;
     let program = if let Some(dir) = base_dir {
         synoema_parser::resolve_imports(program, dir).map_err(import_err)?
@@ -68,6 +77,20 @@ pub fn compile_and_display(source: &str) -> Result<String, Diagnostic> {
 pub fn compile_and_display_with_base_dir(source: &str, base_dir: Option<&Path>) -> Result<String, Diagnostic> {
     let result = compile_and_run_with_base_dir(source, base_dir)?;
     Ok(runtime::display_value(result))
+}
+
+/// Extract Core IR for build artifacts without executing.
+pub fn extract_core_ir(source: &str, base_dir: Option<&Path>) -> Result<String, Diagnostic> {
+    let program = synoema_parser::parse(source)
+        .map_err(|e| parse_err(&e))?;
+    let program = if let Some(dir) = base_dir {
+        synoema_parser::resolve_imports(program, dir).map_err(import_err)?
+    } else { program };
+    let program = synoema_types::resolve_modules(program);
+    let core = synoema_core::desugar_program(&program);
+    let core = synoema_core::optimize_program(core);
+    let core = synoema_core::annotate_regions(core);
+    Ok(format!("{:#?}", core))
 }
 
 #[cfg(test)]
@@ -601,9 +624,9 @@ main = mySum (MyCons 1 (MyCons 2 (MyCons 3 MyNil)))
         let result = run_jit("
 Maybe a = Just a | None
 Pair a b = MkPair a b
-unwrap (Just (MkPair x y)) = x + y
-unwrap None = 0
-main = unwrap (Just (MkPair 10 32))
+my_unwrap (Just (MkPair x y)) = x + y
+my_unwrap None = 0
+main = my_unwrap (Just (MkPair 10 32))
 ").unwrap();
         assert_eq!(result, 42);
     }
@@ -1437,5 +1460,64 @@ main = \"color=\" ++ show Green";
     fn jit_region_sum_range() {
         // sum of [1..100] — range allocates, sum consumes
         assert_eq!(jit("main = sum [1..100]"), 5050);
+    }
+
+    // ── Prelude: Result + error in JIT ───────────────
+
+    #[test]
+    fn jit_result_unwrap_ok() {
+        assert_eq!(jit("main = unwrap (Ok 42)"), 42);
+    }
+
+    #[test]
+    fn jit_result_unwrap_or_on_err() {
+        assert_eq!(jit("main = unwrap_or 0 (Err \"fail\")"), 0);
+    }
+
+    #[test]
+    fn jit_result_is_ok() {
+        assert_eq!(jit("main = ? is_ok (Ok 1) -> 1 : 0"), 1);
+    }
+
+    // ── display_value: list/ADT/record formatting ────────────
+
+    #[test]
+    fn display_list_literal() {
+        assert_eq!(jit_str("main = [1 2 3]"), "[1 2 3]");
+    }
+
+    #[test]
+    fn display_list_tail() {
+        assert_eq!(jit_str("main = tail [1 2 3]"), "[2 3]");
+    }
+
+    #[test]
+    fn display_list_empty_is_zero() {
+        assert_eq!(jit_str("main = tail [1]"), "0");
+    }
+
+    #[test]
+    fn display_list_singleton() {
+        assert_eq!(jit_str("main = [42]"), "[42]");
+    }
+
+    #[test]
+    fn display_list_cons() {
+        assert_eq!(jit_str("main = 1 : 2 : 3 : []"), "[1 2 3]");
+    }
+
+    #[test]
+    fn display_list_range() {
+        assert_eq!(jit_str("main = [1..5]"), "[1 2 3 4 5]");
+    }
+
+    #[test]
+    fn display_adt_none() {
+        assert_eq!(jit_str("Maybe a = Just a | None\nmain = None"), "None");
+    }
+
+    #[test]
+    fn display_adt_just() {
+        assert_eq!(jit_str("Maybe a = Just a | None\nmain = Just 42"), "Just 42");
     }
 }

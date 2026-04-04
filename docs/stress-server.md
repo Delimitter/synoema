@@ -1,49 +1,49 @@
 # Stress Test Server
 
-`lang/examples/stress_server.sno` — HTTP-сервер для интерактивного дашборда нагрузочных тестов, написанный на Synoema.
+`lang/examples/stress_server.sno` — an HTTP server for an interactive stress test dashboard, written in Synoema.
 
-Сервер демонстрирует возможности языка: сетевое I/O, SSE-стриминг, обработка строк, tail-рекурсивный event loop — всё в ~70 строках кода.
+The server demonstrates language capabilities: network I/O, SSE streaming, string processing, tail-recursive event loop — all in ~70 lines of code.
 
-## Запуск
+## Running
 
 ```bash
 cd lang/
 cargo run -p synoema-repl -- run examples/stress_server.sno
 ```
 
-Откройте в браузере: **http://localhost:8765/stress_tests.html**
+Open in your browser: **http://localhost:8765/stress_tests.html**
 
-## Маршруты
+## Routes
 
-| Метод | Путь | Описание |
-|-------|------|----------|
-| `GET` | `/` | Дашборд нагрузочных тестов (HTML) |
-| `GET` | `/stress_tests.html` | То же |
-| `GET` | `/run/<suite>` | SSE-стрим `cargo test` для указанного crate |
-| `GET` | `/run/<suite>?slow=1` | То же (параметр slow игнорируется, передаётся для совместимости) |
-| `GET` | всё остальное | 404 Not Found |
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/` | Stress test dashboard (HTML) |
+| `GET` | `/stress_tests.html` | Same |
+| `GET` | `/run/<suite>` | SSE stream of `cargo test` for the specified crate |
+| `GET` | `/run/<suite>?slow=1` | Same (slow parameter is ignored, passed for compatibility) |
+| `GET` | everything else | 404 Not Found |
 
-Доступные значения `<suite>`: `lexer`, `parser`, `types`, `core`, `eval`, `codegen`.
+Available `<suite>` values: `lexer`, `parser`, `types`, `core`, `eval`, `codegen`.
 
-## SSE-протокол
+## SSE Protocol
 
-Каждый ответ на `/run/<suite>` — это поток Server-Sent Events (Content-Type: `text/event-stream`).
+Each response to `/run/<suite>` is a Server-Sent Events stream (Content-Type: `text/event-stream`).
 
-Каждая строка вывода `cargo test`:
+Each line of `cargo test` output:
 ```
 data: {"line":"test result: ok. 51 passed; 0 failed"}
 
 ```
 
-Завершение прогона:
+End of test run:
 ```
 data: {"exit":0}
 
 ```
 
-Строки JSON-эскейпятся (`json_escape` builtin): символы `\`, `"`, `\n`, `\r`, `\t` экранируются.
+Lines are JSON-escaped (`json_escape` builtin): characters `\`, `"`, `\n`, `\r`, `\t` are escaped.
 
-## Архитектура
+## Architecture
 
 ```
 tcp_listen 8765
@@ -52,7 +52,7 @@ tcp_listen 8765
 server_loop
     │  tcp_accept
     ▼
-handle_client          ← читает первую строку HTTP-запроса
+handle_client          ← reads the first line of the HTTP request
     │  parse_path
     ▼
 dispatch
@@ -61,7 +61,7 @@ dispatch
     └── *          → handle_404
 ```
 
-`stream_proc` — tail-рекурсивная функция, которая читает строки из дочернего процесса и отправляет SSE-события клиенту:
+`stream_proc` is a tail-recursive function that reads lines from the child process and sends SSE events to the client:
 
 ```synoema
 stream_proc proc_fd client_fd =
@@ -70,45 +70,45 @@ stream_proc proc_fd client_fd =
                : (fd_write client_fd (sse_data line) ; stream_proc proc_fd client_fd)
 ```
 
-## Встроенные I/O-функции
+## Built-in I/O Functions
 
-Сервер использует fd-based I/O API интерпретатора. Все fd — целые числа ≥ 100.
+The server uses the interpreter's fd-based I/O API. All fds are integers >= 100.
 
-| Функция | Тип | Описание |
-|---------|-----|----------|
-| `tcp_listen port` | `Int -> Int` | Создаёт TCP-слушатель на 127.0.0.1:port, возвращает fd |
-| `tcp_accept fd` | `Int -> Int` | Принимает входящее соединение, возвращает client fd |
-| `fd_readline fd` | `Int -> String` | Читает одну строку (без `\n`), возвращает `""` при EOF |
-| `fd_write fd s` | `Int -> String -> ()` | Пишет строку в fd, сбрасывает буфер |
-| `fd_close fd` | `Int -> ()` | Закрывает соединение / процесс |
-| `fd_popen cmd` | `String -> Int` | Запускает `sh -c cmd`, возвращает fd stdout |
+| Function | Type | Description |
+|----------|------|-------------|
+| `tcp_listen port` | `Int -> Int` | Creates a TCP listener on 127.0.0.1:port, returns fd |
+| `tcp_accept fd` | `Int -> Int` | Accepts an incoming connection, returns client fd |
+| `fd_readline fd` | `Int -> String` | Reads one line (without `\n`), returns `""` at EOF |
+| `fd_write fd s` | `Int -> String -> ()` | Writes a string to fd, flushes buffer |
+| `fd_close fd` | `Int -> ()` | Closes the connection / process |
+| `fd_popen cmd` | `String -> Int` | Runs `sh -c cmd`, returns fd of stdout |
 
-`fd_popen` автоматически добавляет `$HOME/.cargo/bin` в PATH, поэтому `cargo` доступен без абсолютного пути.
+`fd_popen` automatically adds `$HOME/.cargo/bin` to PATH, so `cargo` is available without an absolute path.
 
-## Встроенные строковые функции
+## Built-in String Functions
 
-| Функция | Тип | Описание |
-|---------|-----|----------|
-| `str_len s` | `String -> Int` | Длина строки в байтах |
-| `str_slice s from to` | `String -> Int -> Int -> String` | Подстрока `[from, to)` |
-| `str_find s pat from` | `String -> String -> Int -> Int` | Первое вхождение `pat` начиная с `from`, -1 если нет |
-| `str_starts_with s prefix` | `String -> String -> Bool` | Проверка префикса |
-| `str_trim s` | `String -> String` | Удаление пробелов по краям |
-| `json_escape s` | `String -> String` | Эскейп для JSON-строки |
-| `file_read path` | `String -> String` | Чтение файла целиком |
+| Function | Type | Description |
+|----------|------|-------------|
+| `str_len s` | `String -> Int` | String length in bytes |
+| `str_slice s from to` | `String -> Int -> Int -> String` | Substring `[from, to)` |
+| `str_find s pat from` | `String -> String -> Int -> Int` | First occurrence of `pat` starting from `from`, -1 if not found |
+| `str_starts_with s prefix` | `String -> String -> Bool` | Prefix check |
+| `str_trim s` | `String -> String` | Trim whitespace from both ends |
+| `json_escape s` | `String -> String` | Escape for JSON string |
+| `file_read path` | `String -> String` | Read entire file |
 
-## Ограничения
+## Limitations
 
-- Однопоточный: каждый запрос обрабатывается до конца перед принятием следующего. SSE-стрим блокирует accept loop до завершения `cargo test`.
-- Слушает только `127.0.0.1` (loopback), не доступен извне.
-- Только HTTP/1.0: нет keep-alive, нет chunked transfer.
+- Single-threaded: each request is handled to completion before accepting the next one. The SSE stream blocks the accept loop until `cargo test` finishes.
+- Listens on `127.0.0.1` (loopback) only, not accessible externally.
+- HTTP/1.0 only: no keep-alive, no chunked transfer.
 
-## Сравнение с Python-версией
+## Comparison with Python Version
 
 | | Synoema (`stress_server.sno`) | Python (`stress_server.py`) |
 |---|---|---|
-| Строк кода | ~70 | ~80 |
-| Зависимости | встроенные builtins | stdlib (`http.server`, `subprocess`) |
-| Запуск | `cargo run -p synoema-repl -- run ...` | `python3 stress_server.py` |
-| API | идентично | идентично |
-| Типизация | статическая (HM inference) | динамическая |
+| Lines of code | ~70 | ~80 |
+| Dependencies | built-in builtins | stdlib (`http.server`, `subprocess`) |
+| Running | `cargo run -p synoema-repl -- run ...` | `python3 stress_server.py` |
+| API | identical | identical |
+| Typing | static (HM inference) | dynamic |

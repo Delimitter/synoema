@@ -7,39 +7,37 @@ Grammar: `lang/tools/constrained/synoema.gbnf` (use for constrained decoding).
 
 ---
 
-## 1. Mental model: what NOT to write
+## 1. Overrides
 
-Override your Haskell/Python priors first:
-
-| Instead of (Haskell/Python) | Write in Synoema | Why |
-|------------------------------|------------------|-----|
-| `if c then x else y` | `? c -> x : y` | 3 tokens, no keywords |
-| `let x = e in body` | indented block: `x = e` then `body` | offside rule |
-| `def f(x):` / `fn x ->` / `fun` | `f x = body` | no def keyword |
-| `return x` | last expression = value | expression-oriented |
-| `where` clause | local bindings indented before last expr | — |
-| `case x of` | multi-equation `f Con = ...` | — |
-| `data T = A \| B` | `T = A \| B` | no `data` |
-| `class` / `instance` | `trait` / `impl` | — |
-| `import M` | `use M (f g)` or `use M (*)` | selective or wildcard |
-| `[1, 2, 3]` | `[1 2 3]` | **no commas** |
-| `x:xs` bare in pattern | `(x:xs)` | **parens required** |
-| `s1 + s2` (strings) | `s1 ++ s2` | `+` = numbers only |
-| `f"x={x}"` / `` `x=${x}` `` | `"x=${x}"` | `${}` interpolation |
-| `do { a; b }` | `a ; b` or `<-` bind | — |
-| `// comment` | `-- comment` | — |
-| `/// doc comment` | `--- doc comment` | preserved in AST |
+| Instead of | Synoema |
+|------------|---------|
+| `if c then x else y` | `? c -> x : y` |
+| `let x = e in body` | indented `x = e` then `body` |
+| `def f(x):` / `fn` / `fun` | `f x = body` |
+| `return x` | last expression = value |
+| `where` clause | local bindings indented before last expr |
+| `case x of` | multi-equation `f Con = ...` |
+| `data T = A \| B` | `T = A \| B` |
+| `class` / `instance` | `trait` / `impl` |
+| `import M` | `use M (f g)` or `use M (*)` |
+| `[1, 2, 3]` | `[1 2 3]` — **no commas** |
+| `x:xs` bare in pattern | `(x:xs)` — **parens required** |
+| `s1 + s2` (strings) | `s1 ++ s2` — `+` = numbers only |
+| `f"x={x}"` / `` `x=${x}` `` | `"x=${x}"` |
+| `do { a; b }` | `a ; b` or `<-` bind |
+| `// comment` | `-- comment` |
+| `/// doc comment` | `--- doc comment` |
 
 ---
 
-## 2. Core axioms
+## 2. Axioms
 
-- **No def keyword** — `name args = body`; patterns via multiple equations
-- **Offside rule** — indentation defines blocks (2-space), like Python/Haskell
-- **Expression-oriented** — every construct returns a value; last expr = result
-- **Immutable** — all bindings are immutable
-- **Strict** — eager evaluation, left-to-right; no lazy thunks
-- **Types inferred** — annotations optional; `f : Int -> Int` is documentation
+- `name args = body` — no def keyword; patterns via multiple equations
+- Indentation = blocks (2-space) — offside rule
+- Expression-oriented — last expr = result
+- All bindings immutable
+- Strict eval, left-to-right
+- Types inferred — annotations optional: `f : Int -> Int`
 
 ---
 
@@ -83,6 +81,10 @@ head (x:_)  = x
 tail (_:xs) = xs
 isEmpty []  = true
 isEmpty _   = false
+
+-- singleton/multi-element list pattern
+only [x]    = x        -- matches exactly [x]
+sum3 [a b c] = a+b+c   -- matches exactly 3 elements
 
 -- lambda
 square = \x -> x * x
@@ -156,8 +158,21 @@ mixed     = {x, y, sum = x + y}  -- mixed
 dist {x, y} = x * x + y * y      -- pattern punning
 dist2 {x = a, y = b} = a * a + b * b  -- explicit still works
 
--- "update": create new record
-move_x pt dx = {x = pt.x + dx, y = pt.y}
+-- record update: copy all fields, override listed
+move_x pt dx = {...pt, x = pt.x + dx}    -- {...base, field = val}
+```
+
+---
+
+## 7a. Maps (prelude)
+
+```sno
+-- sorted association list: Map k v = MkMap [Pair k v]
+m = map_insert "b" 2 (map_insert "a" 1 map_empty)
+map_lookup "a" m          -- Ok 1
+map_get "x" 0 m           -- 0 (default)
+map_keys m                -- ["a" "b"] (sorted)
+from_pairs [(MkPair "x" 1) (MkPair "y" 2)]  -- build from list
 ```
 
 ---
@@ -290,8 +305,16 @@ main =                      -- monadic bind
 | `foldl` | `(b->a->b) -> b -> [a] -> b` | left fold |
 | `concatMap` | `(a->[b]) -> [a] -> [b]` | map + flatten |
 | `sum` | `[Int] -> Int` | sum list |
+| `zip` | `[a] -> [b] -> [(a,b)]` | pair elements |
+| `index` | `[a] -> Int -> a` | 0-based index |
+| `take` `drop` | `Int -> [a] -> [a]` | first/skip n |
+| `reverse` | `[a] -> [a]` | reverse list |
 | `sqrt` `floor` `ceil` `abs` `round` | `Float -> Float` | math |
 | `str_len` `str_slice` `str_find` `str_trim` | String ops | see stdlib.md |
+| `map_insert` `map_lookup` `map_keys` | Map ops | sorted assoc list |
+| `json_parse` `json_encode` `json_get` | JSON ops | Result-wrapped |
+| `env` `env_or` | `String -> String` | env variables |
+| `args` | `[String]` | CLI args after `--` |
 
 ---
 

@@ -37,13 +37,13 @@ pub enum Value {
     Closure {
         params: Vec<Pat>,
         body: Expr,
-        env: Env,
+        env: Arc<Env>,
     },
     /// Multi-equation function (pattern matching across equations)
     Func {
         name: String,
         equations: Vec<Equation>,
-        env: Env,
+        env: Arc<Env>,
     },
     /// Built-in function
     Builtin(String, usize), // name, arity
@@ -181,6 +181,11 @@ impl Env {
         let mut e = self.clone();
         e.push_scope();
         e
+    }
+
+    /// Return bindings from the topmost frame (useful after try_bind_pattern into a child).
+    pub fn bindings(&self) -> &std::collections::HashMap<String, Value> {
+        self.frames.last().unwrap()
     }
 
     /// Iterate over all bindings (most recent scope first)

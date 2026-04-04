@@ -1,4 +1,4 @@
-# Серия статей: «Токенная экономика кода»
+# Серия статей: «Token Economics of Code» (11 статей)
 
 ## Лейтмотив
 
@@ -15,319 +15,222 @@
 
 ## Площадки публикации
 
-| Площадка | Формат | Аудитория |
-|----------|--------|-----------|
-| Хабр | Длинная техническая статья, русский | RU-разработчики |
-| Hacker News | Ссылка + discussion | Глобальное PL/ML сообщество |
-| r/ProgrammingLanguages | Пост с деталями дизайна | PL-энтузиасты |
-| r/LocalLLaMA | Пост про constrained decoding | LLM-практики |
-| arXiv (опционально) | Preprint, формат ACL/PLDI | Академия |
-| dev.to / Medium | Серия постов, English | Широкая аудитория |
-| Telegram (свой канал) | Короткие заметки по ходу | Ранние подписчики |
+| Площадка | Формат | Аудитория | Приоритет |
+|----------|--------|-----------|-----------|
+| Medium | Серия постов, English | Широкая аудитория | PRIMARY |
+| dev.to | Серия постов, English | Разработчики | PRIMARY |
+| Hacker News | Show HN + discussion | Глобальное PL/ML сообщество | LAUNCH (#6) |
+| Хабр | Длинная техническая статья, русский | RU-разработчики | SECONDARY |
+| r/ProgrammingLanguages | Пост с деталями дизайна | PL-энтузиасты | SECONDARY |
+| r/LocalLLaMA | Пост про constrained decoding | LLM-практики | SECONDARY |
+| arXiv (опционально) | Preprint, формат ACL/PLDI | Академия | FUTURE |
+| Telegram (свой канал) | Короткие заметки по ходу | Ранние подписчики | ONGOING |
 
 ---
 
-## Статья 1: «Почему каждый токен стоит дороже, чем вы думаете»
+## Структура серии: 4 фазы
 
-### Подзаголовок
-Квадратичная цена внимания: как длина контекста убивает ваш бюджет на AI
+```
+ФАЗА 1: ТЕОРИЯ          ФАЗА 2: РЕШЕНИЕ         ФАЗА 3: ДАННЫЕ           ФАЗА 4: ЗАПУСК
+(опубликовано)           (обновить)              (новые статьи)           (обновить)
+═══════════════          ═══════════             ══════════════           ══��═══════════
 
-### Тезисы
-
-1. **Inference = 90%+ энергопотребления LLM** (TokenPowerBench, arxiv:2512.03024).
-   Тренировка — разовые расходы. Inference — постоянные. Рынок inference: $106B
-   в 2025 → $250B к 2030.
-
-2. **Квадратичная стоимость attention.** Transformer с контекстом n токенов
-   тратит O(n² · d) вычислений. Сократить n на 50% = сэкономить 75% compute
-   на attention. Это не линейная экономия — это квадратичная.
-
-3. **Реальные числа.** GPT-4o: ~$3/M input tokens, ~$15/M output tokens.
-   Команда из 10 разработчиков на Cursor, 1000 запросов/день, средний контекст
-   2000 токенов = ~$900/месяц только на input. Сократить контекст на 46%
-   = $414/месяц экономии. На 100 разработчиков — $50K/год.
-
-4. **Энергетический след.** 3-4 Дж на выходной токен (LLaMA-65B на A100).
-   Миллиард запросов/день (ChatGPT) × 500 токенов = ~1.5 ТДж/день.
-   Сокращение токенов — прямое сокращение углеродного следа.
-
-5. **Проблема babbling.** 3 из 10 моделей генерируют избыточный контент
-   (Towards Green AI, 2026). Подавление babbling экономит 44-89% энергии.
-   Но что если сам язык не позволяет babble?
-
-### Формат
-~2000 слов. Графики: стоимость vs длина контекста (квадратичная кривая),
-сравнение расходов по моделям, энергия на токен по поколениям GPU.
-
-### Ключевая мысль
-Оптимизация токенов — не микрооптимизация. Это фундаментальный рычаг,
-влияющий на стоимость, скорость, энергопотребление и качество.
-
-### Synoema teaser (последний абзац)
-«В следующей статье мы рассмотрим, как дизайн языка программирования
-влияет на количество токенов — и почему Python тратит вдвое больше
-токенов, чем математически необходимо.»
+#1 Token Cost ✅          #4 JIT Compilation       #8  Token Benchmark      #6 Launch
+#2 BPE Anatomy ✅         #5 Hindley-Milner        #9  Runtime Benchmark    #7 Future Vision
+#3 Constrained ✅                                  #10 LLM Generation
+                                                   #11 Cost Calculator
+```
 
 ---
 
-## Статья 2: «Анатомия BPE: почему Python тратит 46% токенов впустую»
+## Фаза 1: Теория (✅ опубликовано на Medium)
 
-### Подзаголовок
-Как работает BPE-токенизация и что она означает для дизайна языков
+### Статья 1: «Why Every Token Costs More Than You Think»
+- **URL:** https://medium.com/@andbubnov/why-every-token-costs-more-than-you-think-47fef629bb5a
+- **Тезис:** Inference = 90%+ энергопотребления. Квадратичная стоимость attention.
+- **Формат:** ~2000 слов, графики стоимости
 
-### Тезисы
+### Статья 2: «The Anatomy of BPE: Why Python Wastes 46% of Tokens»
+- **URL:** https://medium.com/@andbubnov/the-anatomy-of-bpe-why-python-wastes-46-of-tokens-b21432c47a31
+- **Тезис:** 12 программ, 3 языка. Synoema -46% vs Python.
+- **Формат:** ~3000 слов, таблицы бенчмарков, side-by-side код
 
-1. **Как работает BPE.** Byte Pair Encoding: итеративное слияние частых пар
-   байтов. Результат — словарь из ~100K подслов. Каждый токен = кусок текста
-   переменной длины (1-15 символов).
-
-2. **Alignment problem.** Грамматические единицы языка (операторы, ключевые
-   слова, разделители) не совпадают с границами BPE-токенов. Пример:
-   `def factorial(n):` = 6 токенов, из которых `def `, `(`, `)`, `:` — чистый
-   синтаксический оверхед. Семантика — 2 слова: «factorial» и «n».
-
-3. **Бенчмарк: 12 программ, 3 языка.** Факториал, quicksort, map, fizzbuzz,
-   fibonacci, filter, sum, length, reverse, compose, maximum, zip.
-   Результат: Synoema 332 токенов, Python 615, Haskell 373.
-   Synoema = -46% vs Python, -11% vs Haskell.
-
-4. **Откуда берётся экономия.** По конструкциям:
-   - `def f(n): return` → `f n =` (4 токена → 1)
-   - `if/elif/else` → `? -> :` (4-5 токенов → 3)
-   - `[1, 2, 3]` → `[1 2 3]` (запятые = waste)
-   - `lambda x: x * 2` → `\x -> x * 2` (lambda = 1 лишний токен)
-
-5. **BPE-aligned grammar.** Все 33 оператора Synoema — ровно 1 BPE-токен
-   в cl100k_base. Это не совпадение — это constraint на дизайн грамматики.
-
-### Формат
-~3000 слов. Таблица бенчмарков (все 12 программ). Примеры кода side-by-side.
-Визуализация: как BPE разбивает Python vs Synoema код.
-
-### Ключевая мысль
-Языки программирования проектировались для людей. BPE-токенизаторы
-проектировались для естественного языка. Между ними — зазор в 46% токенов.
-Synoema — первый язык, спроектированный с учётом обоих.
+### Статья 3: «Type-Guided Constrained Decoding»
+- **URL:** https://medium.com/@andbubnov/type-guided-constrained-decoding-how-to-stop-llms-from-hallucinating-code-5e48d3239b1d
+- **Тезис:** 3 уровня constraints. BPE misalignment. XGrammar.
+- **Формат:** ~2500 слов, диаграмма слоёв constraints
 
 ---
 
-## Статья 3: «Type-guided constrained decoding: как заставить LLM не галлюцинировать код»
+## Фаза 2: Решение (обновлены)
 
-### Подзаголовок
-От GBNF-грамматик до type-directed generation: гарантии корректности вместо надежды
+### Статья 4: «Compilation for LLMs: Cranelift JIT»
+- **Файл:** `04_en_compilation.md`
+- **Тезис:** JIT 4.4× быстрее Python. Cranelift vs LLVM. Agentic compilation.
+- **Обновления:** 890+ тестов, ~12K LOC, 8 crates, полный JIT feature set, MCP
+- **Формат:** ~2500 слов, бенчмарки, architecture pipeline
 
-### Тезисы
-
-1. **Проблема галлюцинаций в коде.** LLM генерирует синтаксически невалидный
-   код в X% случаев (данные из Mündler et al., PLDI 2025 — 33.6% ошибок
-   связаны с типами). Это не «баг модели» — это отсутствие constraints.
-
-2. **Три уровня constraints:**
-   - Уровень 1: Грамматика (синтаксис) — GBNF, XGrammar, Outlines
-   - Уровень 2: Типы (семантика) — type-constrained decoding (PLDI 2025)
-   - Уровень 3: Спецификация (логика) — formal verification (будущее)
-
-3. **Как работает XGrammar.** Vocabulary splitting: context-independent tokens
-   (80%+) проверяются offline, context-dependent (20%) — runtime. Результат:
-   near-zero overhead в SGLang/vLLM/TensorRT-LLM.
-
-4. **BPE misalignment ломает constrained decoding.** Domino (ICML 2024):
-   мосты между BPE-токенами и грамматическими символами искажают
-   распределение вероятностей. Grammar-Aligned Decoding (NeurIPS 2024):
-   доказано теоретически. Synoema = нет мостов, нет искажений.
-
-5. **Демо: Synoema + SGLang.** GBNF-грамматика из 41 правила.
-   Пример curl-запроса. 100% синтаксическая корректность. Zero overhead.
-
-### Формат
-~2500 слов. Диаграмма: слои constraints. Код: GBNF фрагменты.
-Сравнение: unconstrained vs grammar-constrained vs type-constrained.
-
-### Ключевая мысль
-Constrained decoding — не костыль, а архитектурный принцип. Synoema
-спроектирован так, чтобы constraints были бесплатными: детерминированная
-CFG + BPE alignment = zero overhead + zero bridge tokens.
+### Статья 5: «Hindley-Milner for LLMs: Type Inference Without Annotations»
+- **Файл:** `05_en_hindley_milner.md`
+- **Тезис:** 100% type safety с 0 аннотаций. HM = optimal для LLM.
+- **Обновления:** секция Try It Yourself, связь с LLM generation quality, актуальные числа
+- **Формат:** ~2500 слов, примеры кода, сравнительная таблица
 
 ---
 
-## Статья 4: «Компиляция для LLM: зачем языку моделей нужен нативный код»
+## Фаза 3: Данные (новые статьи)
 
-### Подзаголовок
-Cranelift JIT, 4.4x быстрее Python, и почему это важно для агентов
+### Статья 8: «Token Efficiency: 16 Algorithms, 5 Languages, Zero Guesswork»
+- **Файл:** `08_en_token_benchmark.md`
+- **Тезис:** Полный breakdown Phase A данных. Где экономия, где нет (честно).
+- **Данные:** 16 задач × 5 языков (Synoema, Python, JS, TS, C++), tiktoken cl100k_base
+- **Hook:** "We measured every token. Here's what Python wastes."
+- **Формат:** ~3000 слов, таблицы по категориям, code examples side-by-side
+- **Требуется:** полный прогон Phase A для заполнения [PLACEHOLDER] данных
 
-### Тезисы
+### Статья 9: «JIT vs Interpreters: Benchmarking LLM-Generated Code Execution»
+- **Файл:** `09_en_runtime_benchmark.md`
+- **Тезис:** Runtime comparison с анализом. JIT overhead, TypeScript anomaly, honest comparison.
+- **Данные:** 12 задач, median of 5 runs, p5/p95
+- **Hook:** "Your AI agent writes Python. What if it compiled to native?"
+- **Формат:** ~3000 слов, таблицы, analysis по категориям
+- **Требуется:** стабилизация benchmark suite, полный прогон Phase B
 
-1. **Контекст: LLM-агенты пишут и запускают код.** Claude Code, Cursor,
-   OpenAI Codex, Devin — все генерируют код и исполняют. Если сгенерированный
-   код медленный, агент медленный. Если код течёт памятью, агент падает.
+### Статья 10: «Can LLMs Write Synoema? 10 Models, 9 Tasks, 50 Attempts Each»
+- **Файл:** `10_en_llm_generation.md`
+- **Тезис:** In-context learning нового языка. Error taxonomy. Constrained decoding hypothesis.
+- **Данные:** 10 моделей × 9 задач × 5 repeats = 450 runs
+- **Hook:** "We tested whether GPT-4o can learn a new language in-context."
+- **Формат:** ~3500 слов, heatmap, error taxonomy, methodology
+- **Требуется:** запуск Phase C с OpenRouter API key
+- **VIRAL ПОТЕНЦИАЛ:** самая высокая — модели + конкретные числа = shareable content
 
-2. **Проблема: Python = интерпретатор.** LLM пишет Python → Python
-   интерпретирует → медленно. Для одноразовых скриптов — ок. Для серверов,
-   pipeline'ов, data processing — нет.
-
-3. **Решение: компиляция в нативный код.** Synoema → Core IR (System F) →
-   Cranelift JIT → native x86-64. Без GC. Без runtime overhead.
-   Бенчмарки: fib(30) 5.9x, collatz(10K) 5.6x, gcd(100K) 1.7x.
-   Среднее: 4.4x быстрее Python.
-
-4. **Почему Cranelift, а не LLVM.** Чистый Rust (cargo build). 10x быстрее
-   компиляция. ~86% от LLVM performance. Важно для JIT: LLM генерирует
-   код → JIT компилирует за миллисекунды → исполняет на нативной скорости.
-
-5. **Будущее: agentic compilation.** LLM генерирует Synoema → type check →
-   JIT compile → execute → результат обратно в LLM. Весь цикл < 100ms.
-   Это невозможно с Python + pip install + virtualenv.
-
-### Формат
-~2500 слов. Бенчмарки с графиками. Архитектурная диаграмма pipeline.
-Сравнение: Python runtime vs Synoema JIT.
-
-### Ключевая мысль
-Код, сгенерированный LLM, должен не только быть корректным —
-он должен быть быстрым. Synoema компилируется в нативный код
-за миллисекунды, создавая основу для real-time agentic computation.
+### Статья 11: «The Real Cost: Token Savings Calculator for Engineering Teams»
+- **Файл:** `11_en_cost_calculator.md`
+- **Тезис:** Формулы → доллары. Сценарии по размеру команд. Break-even analysis.
+- **Данные:** Phase A токены + актуальные цены API (апрель 2026)
+- **Hook:** "How much is your team actually spending on syntactic overhead?"
+- **Формат:** ~2500 слов, таблицы по team size × model pricing
+- **Практический takeaway:** ready-to-use формулы для бюджетных обоснований
 
 ---
 
-## Статья 5: «Hindley-Milner для LLM: как вывод типов сокращает пространство ошибок»
+## Фаза 4: Запуск (обновлены)
 
-### Подзаголовок
-Полиморфная типизация без аннотаций: меньше токенов, больше гарантий
+### Статья 6: «Show HN: Synoema — The First Programming Language Designed for LLMs»
+- **Файл:** `06_en_launch.md`
+- **Тезис:** Всё вместе. 890+ тестов, ~12K LOC, MCP, prelude, region inference.
+- **Обновления:** все актуальные числа, новые фичи, актуальный roadmap
+- **Формат:** ~3000 слов, Show HN формат
+- **Стратегия:** публиковать ПОСЛЕ data-статей (#8-#11), когда аудитория прогрета данными
 
-### Тезисы
-
-1. **Типы = constraints на генерацию.** Если LLM знает, что функция
-   принимает `List Int → Int`, пространство допустимых продолжений
-   сужается на порядки. Type-constrained decoding сокращает ошибки
-   компиляции на 74.8% vs 9.0% для syntax-only (PLDI 2025).
-
-2. **Проблема: типы стоят токенов.** В TypeScript: `function add(a: number,
-   b: number): number` — 50% токенов — аннотации типов. В Java ещё хуже.
-   Каждый токен аннотации — чистый оверхед для LLM.
-
-3. **Решение: Hindley-Milner type inference.** Synoema выводит типы
-   автоматически. `add x y = x + y` → компилятор выводит `Int → Int → Int`.
-   `id x = x` → `∀a. a → a`. Ноль токенов на типы, 100% type safety.
-
-4. **Let-polymorphism.** `id` можно использовать как `id 42` (Int) и
-   `id true` (Bool) в одной программе. Это не Golang с его мономорфизмом.
-   Это ML-уровень выразительности с нулевым синтаксическим оверхедом.
-
-5. **Взаимодействие с constrained decoding.** Type environment можно
-   передать в decoder: на каждом шаге генерации LLM знает, какие типы
-   допустимы. Это второй уровень constraints поверх грамматики.
-
-### Формат
-~2000 слов. Примеры вывода типов. Сравнение: Python (duck typing, ошибки
-в runtime) vs TypeScript (аннотации, оверхед) vs Synoema (inference, 0 оверхед).
-
-### Ключевая мысль
-Идеальный язык для LLM: максимум типовых гарантий при нуле типовых
-аннотаций. Hindley-Milner — единственная система, которая это позволяет.
+### Статья 7: «The Future of Code Generation: From Prompts to Compilation»
+- **Файл:** `07_en_future.md`
+- **Тезис:** Agentic computation pipeline. 5 открытых вопросов.
+- **Обновления:** отмечено что реализовано, MCP как шаг к agentic pipeline, серия из 11 статей
+- **Формат:** ~2000 слов, visionary piece
 
 ---
 
-## Статья 6: «Synoema: первый язык программирования, спроектированный для LLM»
+## Порядок публикации (обновлённый)
 
-### Подзаголовок
-264 теста, 7055 строк Rust, 46% экономия токенов, 4.4x быстрее Python
+| Неделя | Статья | Medium | dev.to | Другое | Фокус |
+|--------|--------|--------|--------|--------|-------|
+| — | #1 Token Cost | ✅ | TODO | | Проблема |
+| — | #2 BPE Anatomy | ✅ | TODO | | Исследование |
+| — | #3 Constrained | ✅ | TODO | | Техническая глубина |
+| 1 | **#8 Token Benchmark** | NEXT | NEXT | r/ProgrammingLanguages | **Hard data** |
+| 2 | #4 JIT Compilation | NEXT | NEXT | | Performance story |
+| 3 | #9 Runtime Benchmark | NEXT | NEXT | | Charts, comparisons |
+| 4 | #5 Hindley-Milner | NEXT | NEXT | r/ProgrammingLanguages | Type system deep dive |
+| 5 | **#10 LLM Generation** | NEXT | NEXT | r/LocalLLaMA, HN | **Viral потенциал** |
+| 6 | #11 Cost Calculator | NEXT | NEXT | | Practical takeaway |
+| 7 | **#6 Launch** | NEXT | NEXT | **HN (Show HN)** | **ЗАПУСК** |
+| 8 | #7 Future | NEXT | NEXT | HN, Twitter/X | Vision, дискуссия |
 
-### Тезисы
+### Логика нового порядка
 
-1. **Обзор проекта.** Что это, зачем, для кого. Этимология (σύν + νόημα).
-   Философия: не для человека, не для машины, а для их взаимодействия.
-
-2. **Ключевые числа.** 46% меньше токенов vs Python. 4.4x быстрее Python
-   (Cranelift JIT). 33/33 операторов = 1 BPE-токен. 264 теста, 0 ошибок.
-   GBNF грамматика для constrained decoding.
-
-3. **Архитектура.** 7 crates: lexer → parser → types → core IR → eval →
-   codegen → repl. Два backend'а: interpreter (полная функциональность) +
-   JIT (нативная скорость). Показать примеры кода.
-
-4. **Как использовать.** `cargo install synoema`. `synoema run file.sno`.
-   `synoema jit file.sno`. Интеграция с SGLang/XGrammar.
-
-5. **Roadmap.** Closures в JIT, records, модули, LLVM backend,
-   playground в браузере.
-
-6. **Call to action.** GitHub, contributing, обратная связь.
-
-### Формат
-~3000 слов. Это launch-пост. Примеры кода, бенчмарки, ссылки на GitHub.
-Формат: как классические HN launch posts (Show HN).
-
-### Ключевая мысль
-Synoema — не теоретический проект. Это работающий компилятор с тестами,
-бенчмарками и интеграцией с реальной inference-инфраструктурой.
+1. **#1-#3 уже опубликованы** — задали теоретическую базу ("why")
+2. **#8 Token Benchmark** — переключение на данные. "We showed the theory, here are the numbers"
+3. **#4 JIT** — решение, подкреплённое данными из #8
+4. **#9 Runtime** — дополнительные данные, подкрепляет #4
+5. **#5 HM Types** — теория + данные из Phase C (связь с #10)
+6. **#10 LLM Generation** — самый viral контент (модели + числа)
+7. **#11 Cost Calculator** — практический takeaway перед launch
+8. **#6 Launch** — Show HN, аудитория уже прогрета 7 статьями
+9. **#7 Future** — завершение серии, open discussion
 
 ---
 
-## Статья 7 (бонус): «Будущее code generation: от промптов к компиляции»
+## Адаптация под платформы
 
-### Подзаголовок
-Что будет, когда LLM станут компиляторами
+### Medium (основной формат)
 
-### Тезисы
+| Элемент | Подход |
+|---------|--------|
+| Заголовок | Провокационный вопрос или сильное утверждение |
+| Intro | Storytelling hook, personal voice |
+| Глоссарий | Footnotes (Medium поддерживает) |
+| Данные | Embeds графиков, таблицы в markdown |
+| Визуалы | Диаграммы (Mermaid → PNG или Excalidraw) |
+| CTA | "Follow for Part N of Token Economics of Code" |
+| Серийность | "Part N of *Token Economics of Code*" в header/footer |
 
-1. **Текущая парадигма.** LLM → текст → парсер → AST → compile/interpret.
-   Генерация как строковая операция. Ошибки = текстовые ошибки.
+### dev.to (адаптация)
 
-2. **Следующая парадигма.** LLM → structured output → AST напрямую.
-   Constrained decoding = компиляция в обратном направлении:
-   вместо text → AST, грамматика направляет text generation.
+| Элемент | Отличия от Medium |
+|---------|-------------------|
+| Заголовок | Конкретное обещание с числами: "16 Algorithms, 5 Languages..." |
+| Intro | TL;DR сразу, без storytelling |
+| Глоссарий | Inline `> **Term:** definition` (не footnotes) |
+| Данные | ASCII таблицы (лучше рендерятся) |
+| Tags | `#benchmark #rust #llm #programming` (макс 4) |
+| CTA | "Try it: `cargo run ...`" + GitHub link |
+| Серийность | dev.to Series feature |
+| Дополнительно | Frontmatter: `series: Token Economics of Code` |
 
-3. **Видение.** Язык, оптимизированный под LLM + type-guided constrained
-   decoding + JIT compilation = agentic computation pipeline.
-   LLM думает → Synoema формализует → Cranelift исполняет → результат.
-
-4. **Открытые вопросы.**
-   - Может ли LLM выучить Synoema лучше, чем Python?
-   - Как fine-tuning на Synoema влияет на качество генерации?
-   - Нужен ли AST-level generation вместо text-level?
-   - Как масштабировать constrained decoding на контексты 1M+ токенов?
-
-### Формат
-~1500 слов. Visionary piece. Хорошо для HN/Twitter дискуссии.
+### Минимальные изменения при адаптации Medium → dev.to
+1. Заменить footnotes `[^term]` на inline blockquotes
+2. Добавить YAML frontmatter (title, tags, series)
+3. Добавить "Try it" CTA в конец
+4. Убрать "Follow for Part N" → "Part of [Token Economics of Code](series-link)"
 
 ---
-
-## График публикаций
-
-| Неделя | Статья | Площадка | Фокус |
-|--------|--------|----------|-------|
-| 1 | #1 Стоимость токенов | Хабр + dev.to | Проблема, привлечение внимания |
-| 2 | #2 BPE анатомия | Хабр + r/ProgrammingLanguages | Исследование, данные |
-| 3 | #3 Constrained decoding | Хабр + r/LocalLLaMA | Техническая глубина |
-| 4 | #6 Synoema launch | HN (Show HN) + Хабр + GitHub | ЗАПУСК |
-| 5 | #4 Компиляция для LLM | dev.to + Reddit | Performance story |
-| 6 | #5 Hindley-Milner | Хабр + r/ProgrammingLanguages | Type system deep dive |
-| 8 | #7 Будущее | HN + Twitter | Vision, дискуссия |
 
 ## Стратегия
 
-1. **Статьи 1-3 строят аудиторию** до запуска. Каждая — самостоятельно
-   ценный исследовательский материал, не реклама. Synoema упоминается
-   только в последнем абзаце как teaser.
+1. **Статьи 1-3 построили аудиторию** (теория, problem framing).
+   Synoema упоминается только в последнем абзаце.
 
-2. **Статья 6 — launch.** К этому моменту аудитория уже знакома с
-   проблемой (статья 1), знает про BPE (статья 2) и constrained decoding
-   (статья 3). Launch не нуждается в объяснении «зачем» — читатели уже
-   понимают.
+2. **Статьи 8-11 = data pivot.** Переход от "why" к "show me the numbers".
+   Каждая — самостоятельно ценный dataset, не реклама.
 
-3. **Статьи 4-5 — углубление** после запуска. Для тех, кто заинтересовался
-   и хочет понять технические детали.
+3. **Статья 6 — launch.** Публиковать после data-статей.
+   Аудитория уже видела данные и понимает контекст.
 
-4. **Статья 7 — vision.** Открывает дискуссию о будущем, привлекает
-   контрибьюторов с идеями.
+4. **Статья 7 — vision.** Открывает дискуссию, привлекает контрибьюторов.
+
+5. **#10 (LLM Generation) — ключевая для виральности.**
+   "Can GPT-4o learn a new language?" — кликабельный hook + конкретные числа.
+
+## Блокеры
+
+| Статья | Блокер | Действие |
+|--------|--------|----------|
+| #8 | Полный Phase A прогон всех 16 задач | Запустить benchmark suite |
+| #9 | Нестабильные runtime числа | Стабилизировать benchmark + запустить Phase B |
+| #10 | Phase C не запускался | Запустить с OpenRouter API key |
+| #11 | Зависит от #8 данных | Заполнить после Phase A |
 
 ## Метрики успеха
 
 | Метрика | Цель |
 |---------|------|
-| GitHub stars (через 2 месяца) | 500+ |
-| HN front page | 1 раз |
-| Хабр: суммарные просмотры серии | 50K+ |
+| GitHub stars (через 3 месяца) | 500+ |
+| HN front page | 1 раз (статья #6 или #10) |
+| Medium: суммарные views серии | 30K+ |
+| dev.to: суммарные views серии | 20K+ |
 | Контрибьюторы (PR/issues) | 10+ |
 | Telegram-канал подписчики | 200+ |
 | Упоминания в других статьях/блогах | 5+ |
+| Цитирования (академические) | 3+ (после arXiv preprint) |

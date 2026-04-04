@@ -5,6 +5,7 @@
 //!
 //! Usage:
 //!   synoema              — start REPL
+//!   synoema init [name]  — scaffold a new project
 //!   synoema run file.sno  — interpret a file
 //!   synoema jit file.sno  — JIT-compile and run via Cranelift
 //!   synoema eval "expr"  — evaluate an expression
@@ -15,6 +16,29 @@
 
 use std::io::{self, Write, BufRead};
 use synoema_diagnostic::{Diagnostic, render_human, render_json, enrich_diagnostic};
+
+mod fmt;
+
+// ── Project init templates ────────────────────────────────
+
+const TMPL_MAIN: &str = include_str!("../../../templates/main.sno.tmpl");
+const TMPL_TEST: &str = include_str!("../../../templates/test.sno.tmpl");
+const TMPL_PROJECT: &str = include_str!("../../../templates/project.sno.tmpl");
+const TMPL_AGENTS: &str = include_str!("../../../templates/AGENTS.md.tmpl");
+const TMPL_CLAUDE: &str = include_str!("../../../templates/CLAUDE.md.tmpl");
+const TMPL_GITIGNORE: &str = include_str!("../../../templates/gitignore.tmpl");
+
+// Tool-specific agent configs
+const TMPL_CURSORRULES: &str = include_str!("../../../templates/cursorrules.tmpl");
+const TMPL_COPILOT_INSTRUCTIONS: &str = include_str!("../../../templates/copilot-instructions.md.tmpl");
+const TMPL_WINDSURFRULES: &str = include_str!("../../../templates/windsurfrules.tmpl");
+const TMPL_CLINERULES: &str = include_str!("../../../templates/clinerules.tmpl");
+
+// MCP config templates
+
+// LLM documentation (embedded into generated projects)
+const LLM_SYNOEMA_REF: &str = include_str!("../../../../docs/llm/synoema.md");
+const LLM_STDLIB_REF: &str = include_str!("../../../../docs/llm/stdlib.md");
 
 // ── Error output ─────────────────────────────────────────
 
@@ -58,13 +82,20 @@ fn main() {
         result
     };
 
+    // Parse `--` separator: everything after `--` becomes script_args
+    let dash_dash = positional.iter().position(|a| *a == "--");
+    let script_args: Vec<String> = dash_dash
+        .map(|i| positional[i + 1..].iter().map(|s| s.to_string()).collect())
+        .unwrap_or_default();
+    let positional = dash_dash.map(|i| &positional[..i]).unwrap_or(&positional);
+
     match positional.first().copied() {
         Some("run") => {
             let path = positional.get(1).unwrap_or_else(|| {
                 eprintln!("Usage: synoema run <file.sno>");
                 std::process::exit(1);
             });
-            run_file(path, format);
+            run_file(path, format, script_args);
         }
         Some("jit") => {
             let path = positional.get(1).unwrap_or_else(|| {
@@ -104,31 +135,779 @@ fn main() {
             let ok = run_all_tests(path, format, filter.as_deref());
             if !ok { std::process::exit(1); }
         }
+        Some("init") => {
+            let force = positional.iter().any(|a| *a == "--force");
+            let no_git = positional.iter().any(|a| *a == "--no-git");
+            let mcp_binary = positional.iter().any(|a| *a == "--mcp-binary");
+            let ai_target = positional.iter().position(|a| *a == "--ai")
+                .and_then(|i| positional.get(i + 1))
+                .copied();
+            // Name arg: first positional after "init" that isn't a flag
+            let name_arg = positional.iter().skip(1)
+                .find(|a| !a.starts_with('-') && {
+                    // Skip the value after --ai
+                    let ai_pos = positional.iter().position(|x| *x == "--ai");
+                    let is_ai_val = ai_pos.map(|p| positional.get(p + 1) == Some(a)).unwrap_or(false);
+                    !is_ai_val
+                })
+                .copied();
+            init_project(name_arg, force, no_git, ai_target, mcp_binary);
+        }
+        Some("mcp-install") => {
+            let prefix = positional.iter().position(|a| *a == "--prefix")
+                .and_then(|i| positional.get(i + 1))
+                .copied();
+            let from_source = positional.iter().any(|a| *a == "--from-source");
+            mcp_install(prefix, from_source);
+        }
+        Some("mcp-update") => {
+            mcp_update();
+        }
+        Some("fmt") => {
+            let path = positional.get(1).unwrap_or_else(|| {
+                eprintln!("Usage: synoema fmt <file.sno | directory> [--check]");
+                std::process::exit(1);
+            });
+            let check = positional.iter().any(|a| *a == "--check");
+            fmt_command(path, check, format);
+        }
+        Some("build") => {
+            let path = positional.get(1).unwrap_or_else(|| {
+                eprintln!("Usage: synoema build [OPTIONS] <file.sno>");
+                std::process::exit(1);
+            });
+            let output = positional.iter().position(|a| *a == "-o" || *a == "--output")
+                .and_then(|i| positional.get(i + 1))
+                .copied();
+            let check_only = positional.iter().any(|a| *a == "--check");
+            let verbose = positional.iter().any(|a| *a == "-v" || *a == "--verbose");
+            build_file(path, output, check_only, verbose, format);
+        }
         Some("--help") | Some("-h") => {
             println!("Synoema v0.1 — A BPE-aligned programming language for LLM code generation");
             println!();
             println!("Usage:");
-            println!("  synoema              Start interactive REPL");
-            println!("  synoema run <file>   Interpret a source file");
-            println!("  synoema jit <file>   JIT-compile and run via Cranelift (native speed)");
-            println!("  synoema eval <expr>  Evaluate an expression");
-            println!("  synoema test <path>  Run tests (doctests + test declarations)");
-            println!("  synoema doc <path>   Generate documentation (Markdown)");
+            println!("  synoema                    Start interactive REPL");
+            println!("  synoema init [name]        Scaffold a new project");
+            println!("  synoema run <file>         Interpret a source file");
+            println!("  synoema jit <file>         JIT-compile and run via Cranelift (native speed)");
+            println!("  synoema eval <expr>        Evaluate an expression");
+            println!("  synoema fmt <path>         Format source files (in-place or --check)");
+            println!("  synoema build <file>       Build and compile to bytecode");
+            println!("  synoema test <path>        Run tests (doctests + test declarations)");
+            println!("  synoema doc <path>         Generate documentation (Markdown)");
+            println!("  synoema mcp-install        Install MCP server binary (no Node.js needed)");
+            println!("  synoema mcp-update         Update MCP server to latest version");
+            println!();
+            println!("Init options:");
+            println!("  --force                    Init even if directory is non-empty");
+            println!("  --no-git                   Skip .gitignore creation");
+            println!("  --ai <target>              Setup AI agent config + MCP server");
+            println!("                             Targets: claude, cursor, copilot, windsurf, cline, all");
+            println!("  --mcp-binary               Use local binary path instead of npx in MCP configs");
+            println!();
+            println!("MCP install options:");
+            println!("  --prefix <path>            Install to <path>/bin/ instead of ~/.synoema/bin/");
+            println!("  --from-source              Build from source instead of downloading binary");
             println!();
             println!("Options:");
-            println!("  --errors human       Human-readable errors with source snippets (default)");
-            println!("  --errors json        JSON errors for LLM/tool consumption");
+            println!("  --errors human             Human-readable errors with source snippets (default)");
+            println!("  --errors json              JSON errors for LLM/tool consumption");
             println!();
             println!("REPL commands:");
-            println!("  :type <expr>       Show inferred type");
-            println!("  :load <file>       Load a source file");
-            println!("  :quit              Exit REPL");
+            println!("  :type <expr>             Show inferred type");
+            println!("  :load <file>             Load a source file");
+            println!("  :quit                    Exit REPL");
         }
         _ => repl(format),
     }
 }
 
-fn run_file(path: &str, format: ErrorFormat) {
+// ── Project Init ─────────────────────────────────────────
+
+fn init_project(name_arg: Option<&str>, force: bool, no_git: bool, ai_target: Option<&str>, mcp_binary: bool) {
+    // Validate --ai target
+    let valid_targets = ["claude", "cursor", "copilot", "windsurf", "cline", "all"];
+    if let Some(target) = ai_target {
+        if !valid_targets.contains(&target) {
+            eprintln!("Error: unknown --ai target '{}'. Valid: {}", target, valid_targets.join(", "));
+            std::process::exit(1);
+        }
+    }
+
+    // Determine project name and root directory
+    let (name, root) = match name_arg {
+        Some(n) => {
+            let p = std::path::Path::new(n);
+            let root = if p.is_absolute() {
+                p.to_path_buf()
+            } else {
+                std::env::current_dir()
+                    .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                    .join(n)
+            };
+            let name = root.file_name()
+                .and_then(|f| f.to_str())
+                .unwrap_or(n)
+                .to_string();
+            (name, root)
+        }
+        None => {
+            let cwd = std::env::current_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let name = cwd.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("project")
+                .to_string();
+            (name, cwd)
+        }
+    };
+
+    // Check emptiness
+    if name_arg.is_some() && root.exists() && !force && is_dir_non_empty(&root) {
+        eprintln!("Error: '{}' already exists and is not empty. Use --force to overwrite.", root.display());
+        std::process::exit(1);
+    } else if name_arg.is_none() && !force && is_dir_non_empty(&root) {
+        eprintln!("Error: current directory is not empty. Use --force to overwrite.");
+        std::process::exit(1);
+    }
+
+    let src_dir = root.join("src");
+    let tests_dir = root.join("tests");
+
+    write_dir(&src_dir);
+    write_dir(&tests_dir);
+
+    // Core project files
+    write_file(&src_dir.join("main.sno"), &apply_tmpl(TMPL_MAIN, &name));
+    write_file(&tests_dir.join("test.sno"), &apply_tmpl(TMPL_TEST, &name));
+    write_file(&root.join("project.sno"), &apply_tmpl(TMPL_PROJECT, &name));
+    if !no_git {
+        write_file(&root.join(".gitignore"), TMPL_GITIGNORE);
+    }
+
+    // Always generate AGENTS.md (universal standard)
+    write_file(&root.join("AGENTS.md"), &apply_tmpl(TMPL_AGENTS, &name));
+
+    // Always copy LLM docs into the project
+    let docs_llm = root.join("docs").join("llm");
+    write_dir(&docs_llm);
+    write_file(&docs_llm.join("synoema.md"), LLM_SYNOEMA_REF);
+    write_file(&docs_llm.join("stdlib.md"), LLM_STDLIB_REF);
+
+    // AI agent-specific setup
+    let target = ai_target.unwrap_or("");
+    let wants = |t: &str| target == t || target == "all";
+
+    // Claude Code: CLAUDE.md + .claude/settings.json
+    if wants("claude") || ai_target.is_none() {
+        // Always create CLAUDE.md (thin pointer)
+        write_file(&root.join("CLAUDE.md"), &apply_tmpl(TMPL_CLAUDE, &name));
+    }
+    let mcp_mode = if mcp_binary { "binary" } else { "npx" };
+
+    if wants("claude") {
+        let claude_dir = root.join(".claude");
+        write_dir(&claude_dir);
+        write_file(&claude_dir.join("settings.json"), &mcp_config_json("mcpServers", mcp_binary));
+        println!("  Claude Code: CLAUDE.md + .claude/settings.json (MCP {mcp_mode})");
+    }
+
+    // Cursor: .cursorrules + .cursor/mcp.json
+    if wants("cursor") {
+        write_file(&root.join(".cursorrules"), &apply_tmpl(TMPL_CURSORRULES, &name));
+        let cursor_dir = root.join(".cursor");
+        write_dir(&cursor_dir);
+        write_file(&cursor_dir.join("mcp.json"), &mcp_config_json("mcpServers", mcp_binary));
+        println!("  Cursor: .cursorrules + .cursor/mcp.json (MCP {mcp_mode})");
+    }
+
+    // GitHub Copilot: .github/copilot-instructions.md + .github/copilot/mcp.json
+    if wants("copilot") {
+        let github_dir = root.join(".github");
+        write_dir(&github_dir);
+        write_file(&github_dir.join("copilot-instructions.md"), &apply_tmpl(TMPL_COPILOT_INSTRUCTIONS, &name));
+        let copilot_dir = github_dir.join("copilot");
+        write_dir(&copilot_dir);
+        write_file(&copilot_dir.join("mcp.json"), &mcp_config_json("servers", mcp_binary));
+        println!("  Copilot: .github/copilot-instructions.md + .github/copilot/mcp.json (MCP {mcp_mode})");
+    }
+
+    // Windsurf: .windsurfrules
+    if wants("windsurf") {
+        write_file(&root.join(".windsurfrules"), &apply_tmpl(TMPL_WINDSURFRULES, &name));
+        println!("  Windsurf: .windsurfrules (add MCP via Windsurf settings)");
+    }
+
+    // Cline: .clinerules + .vscode/mcp.json
+    if wants("cline") {
+        write_file(&root.join(".clinerules"), &apply_tmpl(TMPL_CLINERULES, &name));
+        let vscode_dir = root.join(".vscode");
+        write_dir(&vscode_dir);
+        write_file(&vscode_dir.join("mcp.json"), &mcp_config_json("servers", mcp_binary));
+        println!("  Cline: .clinerules + .vscode/mcp.json (MCP {mcp_mode})");
+    }
+
+    println!("Created Synoema project '{}'", name);
+    if ai_target.is_some() {
+        let version = env!("CARGO_PKG_VERSION");
+        if mcp_binary {
+            println!("MCP server: {} (binary mode)", mcp_default_bin_path());
+            println!("  Install binary: synoema mcp-install");
+        } else {
+            println!("MCP server: npx synoema-mcp@{} (auto-configured)", version);
+        }
+    }
+    println!();
+    if name_arg.is_some() {
+        println!("Next steps:");
+        println!("  cd {}", name);
+        println!("  synoema run src/main.sno");
+    } else {
+        println!("Next steps:");
+        println!("  synoema run src/main.sno");
+    }
+}
+
+fn apply_tmpl(tmpl: &str, name: &str) -> String {
+    tmpl.replace("{{name}}", name)
+        .replace("{{version}}", env!("CARGO_PKG_VERSION"))
+}
+
+fn mcp_config_json(key: &str, mcp_binary: bool) -> String {
+    let version = env!("CARGO_PKG_VERSION");
+    let (cmd, args) = if mcp_binary {
+        let bin = mcp_default_bin_path();
+        (bin, "[]".to_string())
+    } else {
+        ("npx".to_string(), format!("[\"synoema-mcp@{}\"]", version))
+    };
+    // key is "mcpServers" or "servers"
+    let type_field = if key == "servers" {
+        "\n      \"type\": \"stdio\","
+    } else {
+        ""
+    };
+    format!(
+        "{{\n  \"{key}\": {{\n    \"synoema\": {{{type_field}\n      \"command\": \"{cmd}\",\n      \"args\": {args}\n    }}\n  }}\n}}\n"
+    )
+}
+
+fn mcp_default_bin_path() -> String {
+    if cfg!(windows) {
+        let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "~".into());
+        format!("{}\\.synoema\\bin\\synoema-mcp.exe", home)
+    } else {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "~".into());
+        format!("{}/.synoema/bin/synoema-mcp", home)
+    }
+}
+
+// ── MCP Install / Update ─────────────────────────────────
+
+fn detect_platform() -> Option<(&'static str, &'static str)> {
+    let os = std::env::consts::OS;
+    let arch = std::env::consts::ARCH;
+    match (os, arch) {
+        ("macos", "aarch64") => Some(("darwin-arm64", "")),
+        ("macos", "x86_64")  => Some(("darwin-x64", "")),
+        ("linux", "x86_64")  => Some(("linux-x64", "")),
+        ("windows", "x86_64") => Some(("win32-x64", ".exe")),
+        _ => None,
+    }
+}
+
+fn mcp_install(prefix: Option<&str>, from_source: bool) {
+    let version = env!("CARGO_PKG_VERSION");
+
+    if from_source {
+        println!("Building synoema-mcp from source...");
+        // Try to find mcp/ relative to executable
+        let exe = std::env::current_exe().unwrap_or_default();
+        let mcp_dir = exe.parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+            .map(|p| p.join("mcp"))
+            .filter(|p| p.join("Cargo.toml").exists());
+
+        let mcp_dir = match mcp_dir {
+            Some(d) => d,
+            None => {
+                eprintln!("Error: cannot find mcp/ workspace. Clone the repo and run from there.");
+                eprintln!("  git clone https://github.com/Delimitter/synoema");
+                eprintln!("  cd synoema/mcp && cargo build --release");
+                std::process::exit(1);
+            }
+        };
+
+        let status = std::process::Command::new("cargo")
+            .args(["build", "--release"])
+            .current_dir(&mcp_dir)
+            .status();
+
+        match status {
+            Ok(s) if s.success() => {
+                let built = mcp_dir.join("target/release/synoema-mcp");
+                let dest = install_dest(prefix);
+                copy_binary(&built, &dest);
+                println!("Installed: {} (built from source)", dest.display());
+            }
+            _ => {
+                eprintln!("Error: cargo build failed. Ensure Rust toolchain is installed.");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    let (platform, ext) = match detect_platform() {
+        Some(p) => p,
+        None => {
+            eprintln!("Error: unsupported platform {}/{}",
+                std::env::consts::OS, std::env::consts::ARCH);
+            eprintln!("Use --from-source to build from source code.");
+            std::process::exit(1);
+        }
+    };
+
+    let binary_name = format!("synoema-mcp-{}-{}{}", version, platform, ext);
+    let url = format!(
+        "https://github.com/Delimitter/synoema/releases/download/v{}/{}",
+        version, binary_name
+    );
+
+    println!("Downloading {} ...", binary_name);
+    let dest = install_dest(prefix);
+    let dest_dir = dest.parent().unwrap();
+    std::fs::create_dir_all(dest_dir).unwrap_or_else(|e| {
+        eprintln!("Error creating directory '{}': {}", dest_dir.display(), e);
+        std::process::exit(1);
+    });
+
+    let ok = download_file(&url, &dest);
+    if !ok {
+        eprintln!("Error: download failed. Check your internet connection.");
+        eprintln!("Manual download: {}", url);
+        std::process::exit(1);
+    }
+
+    // Set executable permission on Unix
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755));
+    }
+
+    println!("Installed: {} (v{})", dest.display(), version);
+    println!();
+    println!("Add to your MCP config:");
+    println!("  \"command\": \"{}\"", dest.display());
+}
+
+fn install_dest(prefix: Option<&str>) -> std::path::PathBuf {
+    let ext = if cfg!(windows) { ".exe" } else { "" };
+    if let Some(p) = prefix {
+        std::path::PathBuf::from(p).join("bin").join(format!("synoema-mcp{}", ext))
+    } else {
+        let bin_name = format!("synoema-mcp{}", ext);
+        if cfg!(windows) {
+            let home = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".into());
+            std::path::PathBuf::from(home).join(".synoema").join("bin").join(bin_name)
+        } else {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+            std::path::PathBuf::from(home).join(".synoema").join("bin").join(bin_name)
+        }
+    }
+}
+
+fn download_file(url: &str, dest: &std::path::Path) -> bool {
+    let dest_str = dest.to_str().unwrap_or("output");
+
+    // Try curl first (macOS, most Linux)
+    if let Ok(status) = std::process::Command::new("curl")
+        .args(["-fsSL", "-o", dest_str, url])
+        .status()
+    {
+        if status.success() { return true; }
+    }
+
+    // Fallback: wget (some Linux)
+    if let Ok(status) = std::process::Command::new("wget")
+        .args(["-qO", dest_str, url])
+        .status()
+    {
+        if status.success() { return true; }
+    }
+
+    // Fallback: PowerShell (Windows)
+    if cfg!(windows) {
+        let ps_cmd = format!(
+            "Invoke-WebRequest -Uri '{}' -OutFile '{}'",
+            url, dest_str
+        );
+        if let Ok(status) = std::process::Command::new("powershell")
+            .args(["-Command", &ps_cmd])
+            .status()
+        {
+            if status.success() { return true; }
+        }
+    }
+
+    false
+}
+
+fn copy_binary(src: &std::path::Path, dest: &std::path::Path) {
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent).unwrap_or_else(|e| {
+            eprintln!("Error creating directory '{}': {}", parent.display(), e);
+            std::process::exit(1);
+        });
+    }
+    std::fs::copy(src, dest).unwrap_or_else(|e| {
+        eprintln!("Error copying binary: {}", e);
+        std::process::exit(1);
+    });
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o755));
+    }
+}
+
+fn mcp_update() {
+    // Find installed MCP binary
+    let default_bin = install_dest(None);
+    let bin_path = if default_bin.exists() {
+        default_bin
+    } else {
+        // Try PATH
+        match which_mcp() {
+            Some(p) => p,
+            None => {
+                eprintln!("No synoema-mcp binary found.");
+                eprintln!("Install first: synoema mcp-install");
+                std::process::exit(1);
+            }
+        }
+    };
+
+    // Get installed version via --version
+    let installed_version = match std::process::Command::new(&bin_path)
+        .arg("--version")
+        .output()
+    {
+        Ok(out) if out.status.success() => {
+            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            // Parse "synoema-mcp X.Y.Z" → "X.Y.Z"
+            s.strip_prefix("synoema-mcp ").unwrap_or(&s).to_string()
+        }
+        _ => {
+            eprintln!("Cannot determine installed version. Reinstall: synoema mcp-install");
+            std::process::exit(1);
+        }
+    };
+
+    println!("Installed: v{}", installed_version);
+    println!("Checking for updates...");
+
+    // Query GitHub releases API
+    let api_url = "https://api.github.com/repos/Delimitter/synoema/releases/latest";
+    let latest_version = match fetch_latest_version(api_url) {
+        Some(v) => v,
+        None => {
+            eprintln!("Cannot check for updates (GitHub API unavailable or rate limited).");
+            eprintln!("Manual check: https://github.com/Delimitter/synoema/releases");
+            std::process::exit(1);
+        }
+    };
+
+    if latest_version == installed_version {
+        println!("synoema-mcp is up to date (v{})", installed_version);
+        return;
+    }
+
+    println!("New version available: v{} → v{}", installed_version, latest_version);
+
+    let (platform, ext) = match detect_platform() {
+        Some(p) => p,
+        None => {
+            eprintln!("Cannot auto-update on this platform. Use --from-source.");
+            std::process::exit(1);
+        }
+    };
+
+    let binary_name = format!("synoema-mcp-{}-{}{}", latest_version, platform, ext);
+    let url = format!(
+        "https://github.com/Delimitter/synoema/releases/download/v{}/{}",
+        latest_version, binary_name
+    );
+
+    println!("Downloading {} ...", binary_name);
+    let ok = download_file(&url, &bin_path);
+    if !ok {
+        eprintln!("Download failed. Manual: {}", url);
+        std::process::exit(1);
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&bin_path, std::fs::Permissions::from_mode(0o755));
+    }
+
+    println!("Updated: {} → v{}", bin_path.display(), latest_version);
+}
+
+fn which_mcp() -> Option<std::path::PathBuf> {
+    let name = if cfg!(windows) { "synoema-mcp.exe" } else { "synoema-mcp" };
+    std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths)
+            .map(|p| p.join(name))
+            .find(|p| p.exists())
+    })
+}
+
+fn fetch_latest_version(api_url: &str) -> Option<String> {
+    // Use curl to fetch JSON, parse tag_name
+    let output = std::process::Command::new("curl")
+        .args(["-fsSL", "-H", "Accept: application/vnd.github+json", api_url])
+        .output()
+        .ok()?;
+
+    if !output.status.success() { return None; }
+
+    let body = String::from_utf8_lossy(&output.stdout);
+    // Simple parse: find "tag_name": "vX.Y.Z"
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("\"tag_name\"") {
+            // Extract version from "tag_name": "v0.1.0-alpha.1",
+            let v = trimmed.split('"').nth(3)?;
+            return Some(v.strip_prefix('v').unwrap_or(v).to_string());
+        }
+    }
+    None
+}
+
+fn is_dir_non_empty(path: &std::path::Path) -> bool {
+    path.exists() && path.read_dir()
+        .map(|mut d| d.next().is_some())
+        .unwrap_or(false)
+}
+
+fn write_dir(path: &std::path::Path) {
+    if let Err(e) = std::fs::create_dir_all(path) {
+        eprintln!("Error creating directory '{}': {}", path.display(), e);
+        std::process::exit(1);
+    }
+}
+
+fn write_file(path: &std::path::Path, content: &str) {
+    if let Err(e) = std::fs::write(path, content) {
+        eprintln!("Error writing '{}': {}", path.display(), e);
+        std::process::exit(1);
+    }
+}
+
+// ── Unit tests for init ───────────────────────────────────
+
+#[cfg(test)]
+mod init_tests {
+    use super::*;
+
+    fn tmp_dir(suffix: &str) -> std::path::PathBuf {
+        let base = std::env::temp_dir().join(format!("synoema_init_test_{}", suffix));
+        let _ = std::fs::remove_dir_all(&base);
+        base
+    }
+
+    fn init_project_at(root: &std::path::Path, name: &str, force: bool, no_git: bool, ai_target: Option<&str>) {
+        init_project_at_full(root, name, force, no_git, ai_target, false);
+    }
+
+    fn init_project_at_full(root: &std::path::Path, name: &str, force: bool, no_git: bool, ai_target: Option<&str>, mcp_binary: bool) {
+        if !force && is_dir_non_empty(root) {
+            panic!("directory non-empty and force=false");
+        }
+        let src_dir = root.join("src");
+        let tests_dir = root.join("tests");
+        write_dir(&src_dir);
+        write_dir(&tests_dir);
+        write_file(&src_dir.join("main.sno"), &apply_tmpl(TMPL_MAIN, name));
+        write_file(&tests_dir.join("test.sno"), &apply_tmpl(TMPL_TEST, name));
+        write_file(&root.join("project.sno"), &apply_tmpl(TMPL_PROJECT, name));
+        if !no_git {
+            write_file(&root.join(".gitignore"), TMPL_GITIGNORE);
+        }
+        // Always: AGENTS.md + docs
+        write_file(&root.join("AGENTS.md"), &apply_tmpl(TMPL_AGENTS, name));
+        let docs_llm = root.join("docs").join("llm");
+        write_dir(&docs_llm);
+        write_file(&docs_llm.join("synoema.md"), LLM_SYNOEMA_REF);
+        write_file(&docs_llm.join("stdlib.md"), LLM_STDLIB_REF);
+
+        let target = ai_target.unwrap_or("");
+        let wants = |t: &str| target == t || target == "all";
+
+        if wants("claude") || ai_target.is_none() {
+            write_file(&root.join("CLAUDE.md"), &apply_tmpl(TMPL_CLAUDE, name));
+        }
+        if wants("claude") {
+            let claude_dir = root.join(".claude");
+            write_dir(&claude_dir);
+            write_file(&claude_dir.join("settings.json"), &mcp_config_json("mcpServers", mcp_binary));
+        }
+        if wants("cursor") {
+            write_file(&root.join(".cursorrules"), &apply_tmpl(TMPL_CURSORRULES, name));
+            let cursor_dir = root.join(".cursor");
+            write_dir(&cursor_dir);
+            write_file(&cursor_dir.join("mcp.json"), &mcp_config_json("mcpServers", mcp_binary));
+        }
+        if wants("copilot") {
+            let github_dir = root.join(".github");
+            write_dir(&github_dir);
+            write_file(&github_dir.join("copilot-instructions.md"), &apply_tmpl(TMPL_COPILOT_INSTRUCTIONS, name));
+            let copilot_dir = github_dir.join("copilot");
+            write_dir(&copilot_dir);
+            write_file(&copilot_dir.join("mcp.json"), &mcp_config_json("servers", mcp_binary));
+        }
+        if wants("windsurf") {
+            write_file(&root.join(".windsurfrules"), &apply_tmpl(TMPL_WINDSURFRULES, name));
+        }
+        if wants("cline") {
+            write_file(&root.join(".clinerules"), &apply_tmpl(TMPL_CLINERULES, name));
+            let vscode_dir = root.join(".vscode");
+            write_dir(&vscode_dir);
+            write_file(&vscode_dir.join("mcp.json"), &mcp_config_json("servers", mcp_binary));
+        }
+    }
+
+    #[test]
+    fn init_creates_structure() {
+        let root = tmp_dir("creates");
+        init_project_at(&root, "myapp", false, false, None);
+        assert!(root.join("src/main.sno").exists(), "src/main.sno missing");
+        assert!(root.join("tests/test.sno").exists(), "tests/test.sno missing");
+        assert!(root.join("project.sno").exists(), "project.sno missing");
+        assert!(root.join("AGENTS.md").exists(), "AGENTS.md missing");
+        assert!(root.join("CLAUDE.md").exists(), "CLAUDE.md missing");
+        assert!(root.join(".gitignore").exists(), ".gitignore missing");
+        assert!(root.join("docs/llm/synoema.md").exists(), "docs/llm/synoema.md missing");
+        assert!(root.join("docs/llm/stdlib.md").exists(), "docs/llm/stdlib.md missing");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn init_name_substitution() {
+        let root = tmp_dir("name_sub");
+        init_project_at(&root, "coolapp", false, false, None);
+        let main_src = std::fs::read_to_string(root.join("src/main.sno")).unwrap();
+        assert!(main_src.contains("coolapp"), "name not substituted in main.sno");
+        let project_src = std::fs::read_to_string(root.join("project.sno")).unwrap();
+        assert!(project_src.contains("coolapp"), "name not substituted in project.sno");
+        let agents = std::fs::read_to_string(root.join("AGENTS.md")).unwrap();
+        assert!(agents.contains("coolapp"), "name not substituted in AGENTS.md");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn init_fails_nonempty_without_force() {
+        let root = tmp_dir("nonempty");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("existing.txt"), "content").unwrap();
+        assert!(is_dir_non_empty(&root));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn init_force_nonempty() {
+        let root = tmp_dir("force");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("existing.txt"), "content").unwrap();
+        init_project_at(&root, "forceapp", true, false, None);
+        assert!(root.join("src/main.sno").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn init_no_git() {
+        let root = tmp_dir("nogit");
+        init_project_at(&root, "nogitapp", false, true, None);
+        assert!(root.join("src/main.sno").exists());
+        assert!(!root.join(".gitignore").exists(), ".gitignore should not exist with --no-git");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn init_ai_cursor() {
+        let root = tmp_dir("ai_cursor");
+        init_project_at(&root, "cursorapp", false, false, Some("cursor"));
+        assert!(root.join("AGENTS.md").exists(), "AGENTS.md missing");
+        assert!(root.join(".cursorrules").exists(), ".cursorrules missing");
+        assert!(root.join(".cursor/mcp.json").exists(), ".cursor/mcp.json missing");
+        // No CLAUDE.md when --ai cursor (not claude/all)
+        assert!(!root.join("CLAUDE.md").exists(), "CLAUDE.md should not exist for --ai cursor");
+        let mcp = std::fs::read_to_string(root.join(".cursor/mcp.json")).unwrap();
+        assert!(mcp.contains("synoema-mcp"), "MCP config should reference synoema-mcp");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn init_ai_all() {
+        let root = tmp_dir("ai_all");
+        init_project_at(&root, "allapp", false, false, Some("all"));
+        assert!(root.join("AGENTS.md").exists(), "AGENTS.md missing");
+        assert!(root.join("CLAUDE.md").exists(), "CLAUDE.md missing");
+        assert!(root.join(".claude/settings.json").exists(), ".claude/settings.json missing");
+        assert!(root.join(".cursorrules").exists(), ".cursorrules missing");
+        assert!(root.join(".cursor/mcp.json").exists(), ".cursor/mcp.json missing");
+        assert!(root.join(".github/copilot-instructions.md").exists(), "copilot-instructions.md missing");
+        assert!(root.join(".github/copilot/mcp.json").exists(), "copilot mcp.json missing");
+        assert!(root.join(".windsurfrules").exists(), ".windsurfrules missing");
+        assert!(root.join(".clinerules").exists(), ".clinerules missing");
+        assert!(root.join(".vscode/mcp.json").exists(), ".vscode/mcp.json missing");
+        assert!(root.join("docs/llm/synoema.md").exists(), "docs/llm/synoema.md missing");
+        assert!(root.join("docs/llm/stdlib.md").exists(), "docs/llm/stdlib.md missing");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn init_ai_copilot() {
+        let root = tmp_dir("ai_copilot");
+        init_project_at(&root, "copilotapp", false, false, Some("copilot"));
+        assert!(root.join("AGENTS.md").exists(), "AGENTS.md missing");
+        assert!(root.join(".github/copilot-instructions.md").exists(), "copilot-instructions.md missing");
+        assert!(root.join(".github/copilot/mcp.json").exists(), "copilot mcp.json missing");
+        assert!(!root.join(".cursorrules").exists(), ".cursorrules should not exist for --ai copilot");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn init_mcp_version_pinning() {
+        let root = tmp_dir("version_pin");
+        init_project_at(&root, "pinapp", false, false, Some("claude"));
+        let settings = std::fs::read_to_string(root.join(".claude/settings.json")).unwrap();
+        let version = env!("CARGO_PKG_VERSION");
+        let expected = format!("synoema-mcp@{}", version);
+        assert!(settings.contains(&expected),
+            "MCP config should contain pinned version '{}', got: {}", expected, settings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn init_mcp_binary_mode() {
+        let root = tmp_dir("mcp_binary");
+        init_project_at_full(&root, "binapp", false, false, Some("claude"), true);
+        let settings = std::fs::read_to_string(root.join(".claude/settings.json")).unwrap();
+        assert!(settings.contains(".synoema/bin/synoema-mcp"),
+            "MCP binary config should contain binary path, got: {}", settings);
+        assert!(!settings.contains("npx"),
+            "MCP binary config should NOT contain npx, got: {}", settings);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+fn run_file(path: &str, format: ErrorFormat, script_args: Vec<String>) {
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
@@ -138,7 +917,7 @@ fn run_file(path: &str, format: ErrorFormat) {
     };
 
     let base_dir = std::path::Path::new(path).parent().unwrap_or(std::path::Path::new("."));
-    match synoema_eval::eval_main_with_base_dir(&source, Some(base_dir)) {
+    match synoema_eval::eval_main_with_args(&source, Some(base_dir), script_args) {
         Ok((val, output)) => {
             for line in &output {
                 println!("{}", line);
@@ -205,6 +984,95 @@ fn eval_one(expr: &str, format: ErrorFormat) {
     match synoema_eval::eval_expr(expr) {
         Ok(val) => println!("{}", val),
         Err(diag) => print_diag(&diag, Some(expr), format),
+    }
+}
+
+fn fmt_command(path: &str, check: bool, _format: ErrorFormat) {
+    let p = std::path::Path::new(path);
+    if p.is_dir() {
+        match fmt::format_directory(p, check) {
+            Ok((total, changed)) => {
+                if check {
+                    if changed > 0 {
+                        eprintln!("{}/{} file(s) need formatting", changed, total);
+                        std::process::exit(1);
+                    } else {
+                        println!("{} file(s) already formatted", total);
+                    }
+                } else {
+                    println!("Formatted {}/{} file(s)", total - changed, total);
+                }
+            }
+            Err(e) => {
+                eprintln!("{}", e);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        match fmt::format_file(p, check) {
+            Ok(true) => {
+                if check {
+                    println!("Already formatted: {}", path);
+                }
+            }
+            Ok(false) => {
+                eprintln!("Needs formatting: {}", path);
+                std::process::exit(1);
+            }
+            Err(e) => {
+                eprintln!("{}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
+fn build_file(path: &str, output: Option<&str>, check_only: bool, _verbose: bool, format: ErrorFormat) {
+    let source = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error reading '{}': {}", path, e);
+            std::process::exit(2);
+        }
+    };
+
+    let base_dir = std::path::Path::new(path).parent().unwrap_or(std::path::Path::new("."));
+
+    // Extract Core IR
+    match synoema_codegen::extract_core_ir(&source, Some(base_dir)) {
+        Ok(core_ir) => {
+            if check_only {
+                println!("Type check passed");
+                return;
+            }
+
+            // Determine output path
+            let default_output = format!("{}.bc", path);
+            let output_path = output.unwrap_or(&default_output);
+
+            // Write bytecode file with header
+            let bytecode = format!(
+                "SYNOEMA BYTECODE v1\nsource: {}\n\n[Core IR]\n{}\n",
+                path, core_ir
+            );
+
+            match std::fs::write(output_path, bytecode) {
+                Ok(_) => {
+                    let size = std::fs::metadata(output_path)
+                        .map(|m| m.len())
+                        .unwrap_or(0);
+                    println!("Built: {} ({} bytes)", output_path, size);
+                }
+                Err(e) => {
+                    eprintln!("Error writing '{}': {}", output_path, e);
+                    std::process::exit(2);
+                }
+            }
+        }
+        Err(diag) => {
+            print_diag(&diag, Some(&source), format);
+            std::process::exit(1);
+        }
     }
 }
 

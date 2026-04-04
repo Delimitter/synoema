@@ -99,6 +99,14 @@ pub fn type_err_to_diagnostic(e: synoema_types::TypeError) -> Diagnostic {
     type_err(e) // already enriched inside type_err
 }
 
+// ── Prelude ─────────────────────────────────────────────
+
+const PRELUDE: &str = include_str!("../../../prelude/prelude.sno");
+
+fn prepend_prelude(user_source: &str) -> String {
+    format!("{}\n{}", PRELUDE, user_source)
+}
+
 // ── Public API ──────────────────────────────────────────
 
 /// Parse, type-check, and evaluate a Synoema program.
@@ -109,7 +117,8 @@ pub fn run(source: &str) -> Result<Env, Diagnostic> {
 
 /// Parse, resolve imports, type-check, and evaluate a Synoema program.
 pub fn run_with_base_dir(source: &str, base_dir: Option<&Path>) -> Result<Env, Diagnostic> {
-    let program = synoema_parser::parse(source)
+    let full_source = prepend_prelude(source);
+    let program = synoema_parser::parse(&full_source)
         .map_err(|e| parse_err(&e))?;
     let program = if let Some(dir) = base_dir {
         synoema_parser::resolve_imports(program, dir).map_err(import_err)?
@@ -132,25 +141,31 @@ pub fn eval_main(source: &str) -> Result<(Value, Vec<String>), Diagnostic> {
 
 /// Like `eval_main` but with import resolution from `base_dir`.
 pub fn eval_main_with_base_dir(source: &str, base_dir: Option<&Path>) -> Result<(Value, Vec<String>), Diagnostic> {
+    eval_main_with_args(source, base_dir, Vec::new())
+}
+
+/// Like `eval_main_with_base_dir` but also injects CLI args as `args : [String]`.
+pub fn eval_main_with_args(source: &str, base_dir: Option<&Path>, script_args: Vec<String>) -> Result<(Value, Vec<String>), Diagnostic> {
     let source = source.to_string();
     let base_dir = base_dir.map(|p| p.to_path_buf());
     std::thread::Builder::new()
         .stack_size(64 * 1024 * 1024) // 64 MB — handles ~50 000 levels of recursion
-        .spawn(move || eval_main_inner(&source, base_dir.as_deref()))
+        .spawn(move || eval_main_inner(&source, base_dir.as_deref(), script_args))
         .expect("Failed to spawn eval thread")
         .join()
         .expect("Eval thread panicked")
 }
 
-fn eval_main_inner(source: &str, base_dir: Option<&Path>) -> Result<(Value, Vec<String>), Diagnostic> {
-    let program = synoema_parser::parse(source)
+fn eval_main_inner(source: &str, base_dir: Option<&Path>, script_args: Vec<String>) -> Result<(Value, Vec<String>), Diagnostic> {
+    let full_source = prepend_prelude(source);
+    let program = synoema_parser::parse(&full_source)
         .map_err(|e| parse_err(&e))?;
     let program = if let Some(dir) = base_dir {
         synoema_parser::resolve_imports(program, dir).map_err(import_err)?
     } else { program };
     let program = synoema_types::resolve_modules(program);
     synoema_types::typecheck_program(&program).map_err(type_err)?;
-    let mut evaluator = Evaluator::new();
+    let mut evaluator = Evaluator::with_args(script_args);
     let env = evaluator.eval_program(&program)
         .map_err(eval_err)?;
 
@@ -181,8 +196,8 @@ fn eval_main_inner(source: &str, base_dir: Option<&Path>) -> Result<(Value, Vec<
 
 /// Quick eval: parse + eval an expression (for REPL), skip typechecking
 pub fn eval_expr(source: &str) -> Result<Value, Diagnostic> {
-    // Wrap as function definition for the parser
-    let wrapped = format!("__expr = {}", source);
+    // Wrap as function definition for the parser, prepend prelude for Result/Ok/Err
+    let wrapped = prepend_prelude(&format!("__expr = {}", source));
     let program = synoema_parser::parse(&wrapped)
         .map_err(|e| parse_err(&e))?;
     let mut evaluator = Evaluator::new();

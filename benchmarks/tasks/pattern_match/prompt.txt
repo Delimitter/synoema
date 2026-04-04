@@ -1,0 +1,1 @@
+Write a function that describes a shape: Circle with radius, Rectangle with width and height, Triangle with base and height. Print area for each.

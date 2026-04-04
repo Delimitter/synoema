@@ -23,6 +23,9 @@ pub fn optimize_expr(expr: CoreExpr) -> CoreExpr {
 
 /// Optimize a complete Core IR program.
 pub fn optimize_program(program: CoreProgram) -> CoreProgram {
+    // Phase 1: linearize tree recursion (before folding, so new code gets folded)
+    let program = linearize_tree_recursion(program);
+    // Phase 2: constant folding + dead code elimination
     let defs = program.defs.into_iter().map(|def| CoreDef {
         name: def.name,
         body: fold_expr(def.body),
@@ -282,6 +285,10 @@ fn is_free(name: &str, expr: &CoreExpr) -> bool {
 
         CoreExpr::Record(fields) => fields.iter().any(|(_, e)| is_free(name, e)),
 
+        CoreExpr::RecordUpdate { base, updates } => {
+            is_free(name, base) || updates.iter().any(|(_, e)| is_free(name, e))
+        }
+
         CoreExpr::FieldAccess(expr, _) => is_free(name, expr),
 
         CoreExpr::Region(body) => is_free(name, body),
@@ -299,6 +306,231 @@ fn pat_binds(name: &str, pat: &CorePat) -> bool {
         CorePat::Con(_, sub_pats) => sub_pats.iter().any(|p| pat_binds(name, p)),
         CorePat::Record(fields) => fields.iter().any(|(_, p)| pat_binds(name, p)),
     }
+}
+
+// ── Tree Recursion Linearization ────────────────────────────
+//
+// Transforms binary tree-recursive functions into tail-recursive form:
+//   f 0 = v0; f 1 = v1; f n = f(n-1) OP f(n-2)
+// becomes:
+//   f n = f__worker (n - base0) v0 v1
+//   f__worker 0 a b = a
+//   f__worker n a b = f__worker (n-1) b (a OP b)
+
+/// Detected tree-recursion pattern components.
+struct TreeRecPattern {
+    base0: i64,
+    val0: CoreExpr,
+    val1: CoreExpr,
+    op: PrimOp,
+}
+
+/// Match `App(App(PrimOp(Sub), Var(var)), Lit(Int(k)))` → Some(k).
+fn match_sub_lit(expr: &CoreExpr, var: &str) -> Option<i64> {
+    if let CoreExpr::App(f, arg) = expr {
+        if let CoreExpr::App(ff, lhs) = f.as_ref() {
+            if let CoreExpr::PrimOp(PrimOp::Sub) = ff.as_ref() {
+                if let CoreExpr::Var(n) = lhs.as_ref() {
+                    if n == var {
+                        if let CoreExpr::Lit(Lit::Int(k)) = arg.as_ref() {
+                            return Some(*k);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Match `App(Var(fname), sub_expr)` where sub_expr = `var - k` → Some(k).
+fn match_self_call(expr: &CoreExpr, fname: &str, param: &str) -> Option<i64> {
+    if let CoreExpr::App(f, arg) = expr {
+        if let CoreExpr::Var(n) = f.as_ref() {
+            if n == fname {
+                return match_sub_lit(arg, param);
+            }
+        }
+    }
+    None
+}
+
+/// Detect tree-recursion pattern in a function definition.
+fn detect_tree_recursion(fname: &str, body: &CoreExpr) -> Option<TreeRecPattern> {
+    // Shape: Lam(x, Case(Var(x), alts))
+    let (param, case_body) = if let CoreExpr::Lam(p, inner) = body {
+        (p.as_str(), inner.as_ref())
+    } else {
+        return None;
+    };
+
+    let alts = if let CoreExpr::Case(scrut, alts) = case_body {
+        if let CoreExpr::Var(s) = scrut.as_ref() {
+            if s != param { return None; }
+        } else {
+            return None;
+        }
+        alts
+    } else {
+        return None;
+    };
+
+    // Need at least 3 alts: two literal base cases + one recursive
+    if alts.len() < 3 { return None; }
+
+    // First two alts should be literal base cases
+    let (base0, val0) = if let CorePat::Lit(Lit::Int(k)) = &alts[0].pat {
+        (*k, &alts[0].body)
+    } else {
+        return None;
+    };
+
+    let (base1, val1) = if let CorePat::Lit(Lit::Int(k)) = &alts[1].pat {
+        (*k, &alts[1].body)
+    } else {
+        return None;
+    };
+
+    if base1 != base0 + 1 { return None; } // must be consecutive
+
+    // Third alt should be Var(n) with recursive body
+    let (rec_var, rec_body) = match &alts[2].pat {
+        CorePat::Var(n) => (n.as_str(), &alts[2].body),
+        CorePat::Wildcard => ("_", &alts[2].body),
+        _ => return None,
+    };
+
+    // rec_body should be: App(App(PrimOp(OP), self_call_1), self_call_2)
+    let (op, call1, call2) = if let CoreExpr::App(outer_f, rhs_call) = rec_body {
+        if let CoreExpr::App(inner_f, lhs_call) = outer_f.as_ref() {
+            if let CoreExpr::PrimOp(op) = inner_f.as_ref() {
+                // Only allow Add or Mul (associative integer ops)
+                if matches!(op, PrimOp::Add | PrimOp::Mul) {
+                    (*op, lhs_call.as_ref(), rhs_call.as_ref())
+                } else {
+                    return None;
+                }
+            } else {
+                return None;
+            }
+        } else {
+            return None;
+        }
+    } else {
+        return None;
+    };
+
+    // Both sides must be self-calls with offsets from the param
+    let off1 = match_self_call(call1, fname, rec_var)?;
+    let off2 = match_self_call(call2, fname, rec_var)?;
+
+    // Offsets should be step1 and step2 where step1 < step2 (e.g., 1 and 2)
+    let (step1, step2) = if off1 < off2 { (off1, off2) } else { (off2, off1) };
+    if step1 != 1 || step2 != 2 { return None; } // only handle the standard case
+
+    let _ = rec_var; // used only for pattern matching
+    Some(TreeRecPattern {
+        base0,
+        val0: val0.clone(),
+        val1: val1.clone(),
+        op,
+    })
+}
+
+/// Linearize tree-recursive definitions in a program.
+fn linearize_tree_recursion(program: CoreProgram) -> CoreProgram {
+    let mut new_defs = Vec::new();
+
+    for def in program.defs {
+        if let Some(pat) = detect_tree_recursion(&def.name, &def.body) {
+            let worker_name = format!("{}__worker", def.name);
+
+            // Build worker: \x -> \a -> \b -> case x of { 0 -> a; n -> worker (x-1) b (a OP b) }
+            let worker_body = {
+                let x = "x__w".to_string();
+                let a = "a__w".to_string();
+                let b = "b__w".to_string();
+                let n = "n__w".to_string();
+
+                // a OP b
+                let op_ab = CoreExpr::App(
+                    Box::new(CoreExpr::App(
+                        Box::new(CoreExpr::PrimOp(pat.op)),
+                        Box::new(CoreExpr::Var(a.clone())),
+                    )),
+                    Box::new(CoreExpr::Var(b.clone())),
+                );
+
+                // worker (x-1) b (a OP b)
+                let recurse = CoreExpr::App(
+                    Box::new(CoreExpr::App(
+                        Box::new(CoreExpr::App(
+                            Box::new(CoreExpr::Var(worker_name.clone())),
+                            Box::new(CoreExpr::App(
+                                Box::new(CoreExpr::App(
+                                    Box::new(CoreExpr::PrimOp(PrimOp::Sub)),
+                                    Box::new(CoreExpr::Var(x.clone())),
+                                )),
+                                Box::new(CoreExpr::Lit(Lit::Int(1))),
+                            )),
+                        )),
+                        Box::new(CoreExpr::Var(b.clone())),
+                    )),
+                    Box::new(op_ab),
+                );
+
+                let alts = vec![
+                    Alt { pat: CorePat::Lit(Lit::Int(0)), body: CoreExpr::Var(a.clone()) },
+                    Alt { pat: CorePat::Var(n), body: recurse },
+                ];
+
+                CoreExpr::Lam(x.clone(), Box::new(
+                    CoreExpr::Lam(a, Box::new(
+                        CoreExpr::Lam(b, Box::new(
+                            CoreExpr::Case(Box::new(CoreExpr::Var(x)), alts)
+                        ))
+                    ))
+                ))
+            };
+
+            new_defs.push(CoreDef { name: worker_name.clone(), body: worker_body });
+
+            // Build wrapper: \x -> worker (x - base0) val0 val1
+            let wrapper_body = {
+                let x = "x__wr".to_string();
+                let adjusted = if pat.base0 == 0 {
+                    CoreExpr::Var(x.clone())
+                } else {
+                    CoreExpr::App(
+                        Box::new(CoreExpr::App(
+                            Box::new(CoreExpr::PrimOp(PrimOp::Sub)),
+                            Box::new(CoreExpr::Var(x.clone())),
+                        )),
+                        Box::new(CoreExpr::Lit(Lit::Int(pat.base0))),
+                    )
+                };
+
+                let call = CoreExpr::App(
+                    Box::new(CoreExpr::App(
+                        Box::new(CoreExpr::App(
+                            Box::new(CoreExpr::Var(worker_name)),
+                            Box::new(adjusted),
+                        )),
+                        Box::new(pat.val0),
+                    )),
+                    Box::new(pat.val1),
+                );
+
+                CoreExpr::Lam(x, Box::new(call))
+            };
+
+            new_defs.push(CoreDef { name: def.name, body: wrapper_body });
+        } else {
+            new_defs.push(def);
+        }
+    }
+
+    CoreProgram { defs: new_defs, ctor_tags: program.ctor_tags }
 }
 
 // ── Region Inference: Escape Analysis + Annotation ──────────
@@ -431,6 +663,10 @@ pub fn escapes(var: &str, body: &CoreExpr) -> bool {
                 // Conservative: any mention in an app → escapes
                 is_free(var, func) || is_free(var, arg)
             }
+        }
+
+        CoreExpr::RecordUpdate { base, updates } => {
+            escapes(var, base) || updates.iter().any(|(_, e)| escapes(var, e))
         }
 
         CoreExpr::FieldAccess(expr, _) => escapes(var, expr),

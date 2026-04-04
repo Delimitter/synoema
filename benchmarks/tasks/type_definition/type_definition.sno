@@ -1,0 +1,14 @@
+-- SPDX-License-Identifier: MIT-0
+
+List a = Nil | Cons a (List a)
+
+len Nil = 0
+len (Cons _ xs) = 1 + len xs
+
+append Nil x = Cons x Nil
+append (Cons h t) x = Cons h (append t x)
+
+main =
+  xs = Cons 1 (Cons 2 (Cons 3 Nil))
+  ys = append xs 4
+  len ys

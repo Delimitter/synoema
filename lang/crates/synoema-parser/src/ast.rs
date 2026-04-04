@@ -116,6 +116,12 @@ pub enum ExprKind {
     /// Record literal: `{x = 3, y = 4}`
     Record(Vec<(String, Expr)>),
 
+    /// Record update: `{...base, x = 10, y = 20}`
+    RecordUpdate {
+        base: Box<Expr>,
+        updates: Vec<(String, Expr)>,
+    },
+
     /// List literal: `[1 2 3]`
     List(Vec<Expr>),
 

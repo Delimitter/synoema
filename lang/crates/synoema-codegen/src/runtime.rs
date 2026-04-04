@@ -120,6 +120,17 @@ pub fn arena_reset() {
     ARENA.with(|a| a.borrow_mut().reset());
 }
 
+/// Check whether a raw pointer falls within the arena's backing store.
+/// Used by display/equality routines to distinguish tagged heap pointers from integers.
+#[inline]
+fn arena_contains_ptr(ptr: usize) -> bool {
+    ARENA.with(|a| {
+        let a = a.borrow();
+        let base = a.ptr as usize;
+        ptr >= base && ptr < base + ARENA_SIZE
+    })
+}
+
 /// Save current arena offset (for per-scope reset in server loops).
 pub extern "C" fn arena_save() -> i64 {
     ARENA.with(|a| a.borrow().offset as i64)
@@ -151,6 +162,22 @@ pub extern "C" fn synoema_region_exit() -> i64 {
     ARENA.with(|a| { a.borrow_mut().region_exit(); 0 })
 }
 
+/// Current arena bump offset (bytes used). Returns 0 after reset.
+pub fn arena_offset() -> usize {
+    ARENA.with(|a| a.borrow().offset)
+}
+
+/// Number of overflow allocations tracked (system malloc fallbacks).
+/// Returns 0 after reset.
+pub fn arena_overflow_count() -> usize {
+    ARENA.with(|a| a.borrow().overflow_allocs.len())
+}
+
+/// Current region nesting depth. Returns 0 after reset or when balanced.
+pub fn arena_region_depth() -> usize {
+    ARENA.with(|a| a.borrow().region_depth)
+}
+
 #[inline]
 fn arena_alloc(size: usize, align: usize) -> *mut u8 {
     ARENA.with(|a| a.borrow_mut().alloc(size, align))
@@ -160,8 +187,11 @@ fn arena_alloc(size: usize, align: usize) -> *mut u8 {
 
 const STR_TAG: i64 = 2; // bit 1
 
+// String pointers are 8-byte aligned with bit 1 set: v & 7 == 2.
+// Checking only bit 1 (v & 2 == 2) would misidentify integers like 317811
+// as strings. Check all 3 low bits to avoid false positives.
 #[inline]
-pub fn is_str(v: i64) -> bool { v & STR_TAG == STR_TAG }
+pub fn is_str(v: i64) -> bool { v & 7 == STR_TAG }
 
 // ── Float Tag ────────────────────────────────────────────
 //
@@ -177,9 +207,9 @@ const CON_TAG: i64 = 1;
 const RECORD_TAG: i64 = 5;
 
 #[inline]
-pub fn is_con(v: i64) -> bool { (v as u64) >= 0x10000 && v & 7 == CON_TAG }
+pub fn is_con(v: i64) -> bool { v & 7 == CON_TAG && arena_contains_ptr((v & !7) as usize) }
 #[inline]
-pub fn is_record(v: i64) -> bool { (v as u64) >= 0x10000 && v & 7 == RECORD_TAG }
+pub fn is_record(v: i64) -> bool { v & 7 == RECORD_TAG && arena_contains_ptr((v & !7) as usize) }
 
 #[repr(C)]
 struct FloatNode {
@@ -525,9 +555,7 @@ pub extern "C" fn synoema_print_int(val: i64) -> i64 {
 /// Print any tagged JIT value with newline. Returns 0 (unit).
 /// Uses address-validated tag checks to avoid interpreting small integers as pointers.
 pub extern "C" fn synoema_print_val(val: i64) -> i64 {
-    // Only treat as a pointer if the address is plausibly a heap address (> 64KB).
-    // Small integers (e.g. 42) can accidentally have tag bits set.
-    let is_heap = (val as u64) >= 0x10000;
+    let is_heap = arena_contains_ptr((val & !7) as usize);
     if is_str(val) && is_heap {
         let p = str_ptr(val);
         let len = unsafe { (*p).len } as usize;
@@ -553,10 +581,10 @@ pub extern "C" fn synoema_readline() -> i64 {
     stdin.lock().read_line(&mut line).unwrap_or(0);
     if line.ends_with('\n') { line.pop(); }
     if line.ends_with('\r') { line.pop(); }
-    let bytes = line.into_bytes().into_boxed_slice();
+    let bytes = line.as_bytes();
     let data_ptr = bytes.as_ptr() as i64;
     let len = bytes.len() as i64;
-    Box::leak(bytes);
+    // synoema_str_new copies bytes into the arena, so no leak needed
     synoema_str_new(data_ptr, len)
 }
 
@@ -590,7 +618,7 @@ fn print_list(list: i64) {
 /// Lists are raw 8-byte-aligned heap pointers with ALL low 3 bits clear.
 /// Strings set bit 1, floats set bit 2, cons set bit 0, records set bits 0+2.
 fn is_likely_list_ptr(val: i64) -> bool {
-    val > 100_000 && val & 7 == 0
+    val & 7 == 0 && arena_contains_ptr(val as usize)
 }
 
 // ── String Support ──────────────────────────────────────
@@ -748,14 +776,28 @@ pub extern "C" fn synoema_json_escape(s: i64) -> i64 {
     alloc_str(result)
 }
 
+/// Runtime panic with a user-provided error message (tagged string pointer).
+pub extern "C" fn synoema_error(msg: i64) -> i64 {
+    let is_heap = arena_contains_ptr((msg & !7) as usize);
+    let message = if is_str(msg) && is_heap {
+        let p = str_ptr(msg);
+        let len = unsafe { (*p).len } as usize;
+        let data = unsafe { std::slice::from_raw_parts(p.add(1) as *const u8, len) };
+        std::str::from_utf8(data).unwrap_or("<invalid utf8>").to_string()
+    } else {
+        format!("{}", msg)
+    };
+    panic!("error: {}", message);
+}
+
 /// Universal equality: dispatches on string/float tag at runtime.
 /// Returns 1 if equal, 0 otherwise. Works for ints, bools, strings, and floats.
 #[unsafe(no_mangle)]
 pub extern "C" fn synoema_val_eq(a: i64, b: i64) -> i64 {
     // Only treat as heap pointer types if the address is plausibly a real heap address.
     // Small integers (e.g. 2, 6) can accidentally have tag bits set.
-    let a_heap = (a as u64) >= 0x10000;
-    let b_heap = (b as u64) >= 0x10000;
+    let a_heap = arena_contains_ptr((a & !7) as usize);
+    let b_heap = arena_contains_ptr((b & !7) as usize);
     if (is_str(a) && a_heap) || (is_str(b) && b_heap) {
         if (is_str(a) && a_heap) && (is_str(b) && b_heap) {
             synoema_str_eq(a, b)
@@ -793,7 +835,11 @@ pub extern "C" fn synoema_val_eq(a: i64, b: i64) -> i64 {
 
 /// Format a single JIT value as a Rust String (for building show strings).
 fn format_val(val: i64) -> String {
-    let is_heap = (val as u64) >= 0x10000;
+    // Validate that the untagged pointer actually falls within the arena.
+    // This prevents large integers (e.g. fib(50) = 12586269025) from being
+    // misidentified as tagged heap pointers — their values may have matching
+    // tag bits and exceed any static threshold, but won't be in arena range.
+    let is_heap = arena_contains_ptr((val & !7) as usize);
     if is_str(val) && is_heap {
         let p = str_ptr(val);
         let len = unsafe { (*p).len } as usize;
@@ -868,7 +914,7 @@ fn alloc_str(s: &str) -> i64 {
 /// - Con → "Name field0 field1 ..."
 /// - Record → "{...}" (field names not stored at runtime)
 pub extern "C" fn synoema_show_any(val: i64) -> i64 {
-    let is_heap = (val as u64) >= 0x10000;
+    let is_heap = arena_contains_ptr((val & !7) as usize);
     if is_str(val) && is_heap {
         val // already a string, return as-is
     } else if is_float(val) && is_heap {
@@ -950,14 +996,9 @@ pub fn decode_str(v: i64) -> Option<String> {
 }
 
 /// Display a JIT result value as a human-readable string.
+/// Handles all tagged pointer types: strings, floats, lists, ADTs, records, and plain integers.
 pub fn display_value(v: i64) -> String {
-    if let Some(s) = decode_str(v) {
-        s
-    } else if let Some(f) = decode_float(v) {
-        format!("{}", f)
-    } else {
-        v.to_string()
-    }
+    format_val(v)
 }
 
 // ── Sum / Reduce helpers ────────────────────────────────
@@ -1040,6 +1081,40 @@ pub extern "C" fn synoema_record_get(rec: i64, hash: i64) -> i64 {
         }
     }
     panic!("synoema_record_get: field not found (hash={})", hash);
+}
+
+/// Clone a RecordNode: allocate a new record with the same fields.
+/// Used by record update (`{...base, field = val}`).
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_record_clone(rec: i64) -> i64 {
+    let base = (rec & !RECORD_TAG) as *const i64;
+    let len = unsafe { *base } as usize;
+    let total_words = 1 + len * 2;
+    let new_ptr = arena_alloc(
+        total_words * std::mem::size_of::<i64>(),
+        std::mem::align_of::<i64>(),
+    ) as *mut i64;
+    if new_ptr.is_null() { panic!("synoema_record_clone: allocation failed"); }
+    unsafe {
+        std::ptr::copy_nonoverlapping(base, new_ptr, total_words);
+    }
+    (new_ptr as i64) | RECORD_TAG
+}
+
+/// Update a field in a RecordNode by hash (linear scan, in-place mutation).
+/// Only safe to call on freshly cloned records that haven't been published.
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_record_set_field(rec: i64, hash: i64, val: i64) {
+    let base = (rec & !RECORD_TAG) as *mut i64;
+    let len = unsafe { *base } as usize;
+    for i in 0..len {
+        let slot = unsafe { *base.add(1 + i * 2) };
+        if slot == hash {
+            unsafe { *base.add(1 + i * 2 + 1) = val; }
+            return;
+        }
+    }
+    panic!("synoema_record_set_field: field not found (hash={})", hash);
 }
 
 // ── Algebraic Data Types ─────────────────────────────────
@@ -1186,6 +1261,83 @@ pub extern "C" fn synoema_foldl(f_closure: i64, init: i64, list: i64) -> i64 {
     acc
 }
 
+/// zip xs ys — zip two lists into a list of 2-element sub-lists.
+pub extern "C" fn synoema_zip(xs: i64, ys: i64) -> i64 {
+    let mut elems_x: Vec<i64> = Vec::new();
+    let mut cur = xs;
+    while cur != 0 {
+        elems_x.push(unsafe { (*(cur as *const ListNode)).head });
+        cur = unsafe { (*(cur as *const ListNode)).tail };
+    }
+    let mut elems_y: Vec<i64> = Vec::new();
+    cur = ys;
+    while cur != 0 {
+        elems_y.push(unsafe { (*(cur as *const ListNode)).head });
+        cur = unsafe { (*(cur as *const ListNode)).tail };
+    }
+    let len = elems_x.len().min(elems_y.len());
+    let mut result = 0i64;
+    for i in (0..len).rev() {
+        let pair = synoema_cons(elems_x[i], synoema_cons(elems_y[i], 0));
+        result = synoema_cons(pair, result);
+    }
+    result
+}
+
+/// index i xs — get element at index i from list xs.
+pub extern "C" fn synoema_index(i: i64, list: i64) -> i64 {
+    let mut idx = i;
+    let mut cur = list;
+    while cur != 0 && idx > 0 {
+        cur = unsafe { (*(cur as *const ListNode)).tail };
+        idx -= 1;
+    }
+    if cur == 0 {
+        panic!("synoema_index: index {} out of bounds", i);
+    }
+    unsafe { (*(cur as *const ListNode)).head }
+}
+
+/// take n xs — take the first n elements from list xs.
+pub extern "C" fn synoema_take(n: i64, list: i64) -> i64 {
+    let mut elems: Vec<i64> = Vec::new();
+    let mut cur = list;
+    let mut remaining = n.max(0);
+    while cur != 0 && remaining > 0 {
+        elems.push(unsafe { (*(cur as *const ListNode)).head });
+        cur = unsafe { (*(cur as *const ListNode)).tail };
+        remaining -= 1;
+    }
+    let mut result = 0i64;
+    for &elem in elems.iter().rev() {
+        result = synoema_cons(elem, result);
+    }
+    result
+}
+
+/// drop n xs — drop the first n elements from list xs.
+pub extern "C" fn synoema_drop(n: i64, list: i64) -> i64 {
+    let mut cur = list;
+    let mut remaining = n.max(0);
+    while cur != 0 && remaining > 0 {
+        cur = unsafe { (*(cur as *const ListNode)).tail };
+        remaining -= 1;
+    }
+    cur
+}
+
+/// reverse xs — reverse a list.
+pub extern "C" fn synoema_reverse(list: i64) -> i64 {
+    let mut result = 0i64;
+    let mut cur = list;
+    while cur != 0 {
+        let head = unsafe { (*(cur as *const ListNode)).head };
+        result = synoema_cons(head, result);
+        cur = unsafe { (*(cur as *const ListNode)).tail };
+    }
+    result
+}
+
 /// concatMap: apply a closure to each list element, concat resulting lists.
 /// closure_ptr: pointer to ClosureNode { fn_ptr: i64, env_ptr: i64 }
 /// list: linked list (nil = 0, otherwise ListNode { head, tail })
@@ -1259,6 +1411,189 @@ pub extern "C" fn synoema_chan_recv(chan: i64) -> i64 {
         Ok(guard) => guard.recv().unwrap_or(0),
         Err(_) => 0,
     }
+}
+
+// ── JSON Parser (recursive descent) ──────────────────
+
+/// Parse a JSON string into a JsonValue ADT wrapped in Result (Ok/Err).
+/// Input: tagged string pointer. Output: tagged ConNode (Ok jval | Err msg).
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_json_parse(s: i64) -> i64 {
+    let (data, len) = unsafe { str_data(s) };
+    let bytes = unsafe { std::slice::from_raw_parts(data, len) };
+    match jit_json_parse_value(bytes, 0) {
+        Ok((val, pos)) => {
+            let end = jit_skip_ws(bytes, pos);
+            if end != bytes.len() {
+                let msg = format!("trailing content at position {}", end);
+                jit_make_err(&msg)
+            } else {
+                jit_make_ok(val)
+            }
+        }
+        Err(msg) => jit_make_err(&msg),
+    }
+}
+
+fn jit_make_con(name: &str, tag: i64, fields: &[i64]) -> i64 {
+    let ptr = synoema_make_con(tag, fields.len() as i64, name.as_ptr() as i64, name.len() as i64);
+    for (i, &f) in fields.iter().enumerate() {
+        synoema_con_set(ptr, i as i64, f);
+    }
+    ptr
+}
+
+fn jit_make_ok(val: i64) -> i64 {
+    jit_make_con("Ok", 0, &[val])
+}
+
+fn jit_make_err(msg: &str) -> i64 {
+    let s = alloc_str(msg);
+    jit_make_con("Err", 1, &[s])
+}
+
+fn jit_skip_ws(b: &[u8], mut i: usize) -> usize {
+    while i < b.len() && matches!(b[i], b' ' | b'\t' | b'\n' | b'\r') { i += 1; }
+    i
+}
+
+fn jit_json_parse_value(b: &[u8], pos: usize) -> Result<(i64, usize), String> {
+    let i = jit_skip_ws(b, pos);
+    if i >= b.len() { return Err("unexpected end of input".into()); }
+    match b[i] {
+        b'n' => jit_json_parse_null(b, i),
+        b't' | b'f' => jit_json_parse_bool(b, i),
+        b'"' => jit_json_parse_string(b, i),
+        b'[' => jit_json_parse_array(b, i),
+        b'{' => jit_json_parse_object(b, i),
+        b'-' | b'0'..=b'9' => jit_json_parse_number(b, i),
+        c => Err(format!("unexpected character '{}' at position {}", c as char, i)),
+    }
+}
+
+fn jit_json_parse_null(b: &[u8], i: usize) -> Result<(i64, usize), String> {
+    if b[i..].starts_with(b"null") {
+        Ok((jit_make_con("JNull", 0, &[]), i + 4))
+    } else {
+        Err(format!("expected 'null' at position {}", i))
+    }
+}
+
+fn jit_json_parse_bool(b: &[u8], i: usize) -> Result<(i64, usize), String> {
+    if b[i..].starts_with(b"true") {
+        Ok((jit_make_con("JBool", 1, &[1]), i + 4)) // 1 = true
+    } else if b[i..].starts_with(b"false") {
+        Ok((jit_make_con("JBool", 1, &[0]), i + 5)) // 0 = false
+    } else {
+        Err(format!("expected 'true' or 'false' at position {}", i))
+    }
+}
+
+fn jit_json_parse_number(b: &[u8], i: usize) -> Result<(i64, usize), String> {
+    let mut j = i;
+    if j < b.len() && b[j] == b'-' { j += 1; }
+    if j >= b.len() || !b[j].is_ascii_digit() {
+        return Err(format!("expected digit at position {}", j));
+    }
+    while j < b.len() && b[j].is_ascii_digit() { j += 1; }
+    let s = std::str::from_utf8(&b[i..j]).unwrap();
+    let n: i64 = s.parse().map_err(|_| format!("invalid number at position {}", i))?;
+    Ok((jit_make_con("JNum", 2, &[n]), j))
+}
+
+fn jit_json_parse_string(b: &[u8], i: usize) -> Result<(i64, usize), String> {
+    let (s, end) = jit_json_parse_raw_string(b, i)?;
+    let tagged = alloc_str(&s);
+    Ok((jit_make_con("JStr", 3, &[tagged]), end))
+}
+
+fn jit_json_parse_raw_string(b: &[u8], i: usize) -> Result<(String, usize), String> {
+    if b[i] != b'"' { return Err(format!("expected '\"' at position {}", i)); }
+    let mut j = i + 1;
+    let mut s = String::new();
+    while j < b.len() {
+        match b[j] {
+            b'"' => return Ok((s, j + 1)),
+            b'\\' => {
+                j += 1;
+                if j >= b.len() { return Err("unexpected end in string escape".into()); }
+                match b[j] {
+                    b'"'  => s.push('"'),
+                    b'\\' => s.push('\\'),
+                    b'/'  => s.push('/'),
+                    b'n'  => s.push('\n'),
+                    b'r'  => s.push('\r'),
+                    b't'  => s.push('\t'),
+                    b'b'  => s.push('\u{0008}'),
+                    b'f'  => s.push('\u{000C}'),
+                    c => { s.push('\\'); s.push(c as char); }
+                }
+                j += 1;
+            }
+            c => { s.push(c as char); j += 1; }
+        }
+    }
+    Err("unterminated string".into())
+}
+
+fn jit_json_parse_array(b: &[u8], i: usize) -> Result<(i64, usize), String> {
+    let mut j = i + 1; // skip '['
+    let mut elems = Vec::new();
+    j = jit_skip_ws(b, j);
+    if j < b.len() && b[j] == b']' {
+        return Ok((jit_make_con("JArr", 4, &[0]), j + 1)); // 0 = nil
+    }
+    loop {
+        let (val, next) = jit_json_parse_value(b, j)?;
+        elems.push(val);
+        j = jit_skip_ws(b, next);
+        if j >= b.len() { return Err("unterminated array".into()); }
+        if b[j] == b']' { break; }
+        if b[j] != b',' { return Err(format!("expected ',' or ']' at position {}", j)); }
+        j += 1;
+    }
+    // Build linked list from elems (right to left)
+    let mut list = 0i64; // nil
+    for val in elems.into_iter().rev() {
+        list = synoema_cons(val, list);
+    }
+    Ok((jit_make_con("JArr", 4, &[list]), j + 1))
+}
+
+fn jit_json_parse_object(b: &[u8], i: usize) -> Result<(i64, usize), String> {
+    let mut j = i + 1; // skip '{'
+    let mut pairs = Vec::new();
+    j = jit_skip_ws(b, j);
+    if j < b.len() && b[j] == b'}' {
+        return Ok((jit_make_con("JObj", 5, &[0]), j + 1)); // 0 = nil
+    }
+    loop {
+        j = jit_skip_ws(b, j);
+        if j >= b.len() || b[j] != b'"' {
+            return Err(format!("expected string key at position {}", j));
+        }
+        let (key, next) = jit_json_parse_raw_string(b, j)?;
+        j = jit_skip_ws(b, next);
+        if j >= b.len() || b[j] != b':' {
+            return Err(format!("expected ':' at position {}", j));
+        }
+        j += 1;
+        let (val, next) = jit_json_parse_value(b, j)?;
+        let key_tagged = alloc_str(&key);
+        let pair = jit_make_con("MkPair", 0, &[key_tagged, val]);
+        pairs.push(pair);
+        j = jit_skip_ws(b, next);
+        if j >= b.len() { return Err("unterminated object".into()); }
+        if b[j] == b'}' { break; }
+        if b[j] != b',' { return Err(format!("expected ',' or '}}' at position {}", j)); }
+        j += 1;
+    }
+    // Build linked list from pairs (right to left)
+    let mut list = 0i64; // nil
+    for pair in pairs.into_iter().rev() {
+        list = synoema_cons(pair, list);
+    }
+    Ok((jit_make_con("JObj", 5, &[list]), j + 1))
 }
 
 /// Runtime error handler for non-exhaustive patterns and similar failures.

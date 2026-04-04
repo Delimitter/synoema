@@ -95,6 +95,7 @@ fn two_char_ops() {
     assert_eq!(raw("||"), vec![Token::Or, Token::Eof]);
     assert_eq!(raw("++"), vec![Token::Concat, Token::Eof]);
     assert_eq!(raw(".."), vec![Token::DotDot, Token::Eof]);
+    assert_eq!(raw("..."), vec![Token::DotDotDot, Token::Eof]);
 }
 
 // ── Single-char Operators ─────────────────────────────────

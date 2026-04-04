@@ -481,6 +481,16 @@ fn desugar_expr(fresh: &mut Fresh, expr: &Expr) -> CoreExpr {
             )
         }
 
+        // ── Record update ─────────────────────────────
+        ExprKind::RecordUpdate { base, updates } => {
+            CoreExpr::RecordUpdate {
+                base: Box::new(desugar_expr(fresh, base)),
+                updates: updates.iter()
+                    .map(|(name, expr)| (name.clone(), desugar_expr(fresh, expr)))
+                    .collect(),
+            }
+        }
+
         // ── Field access ─────────────────────────────
         ExprKind::Field(obj, field) => {
             CoreExpr::FieldAccess(Box::new(desugar_expr(fresh, obj)), field.clone())

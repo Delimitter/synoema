@@ -1,0 +1,18 @@
+-- SPDX-License-Identifier: MIT-0
+
+nth xs n =
+  ? xs == [] -> -1
+  : ? n == 0 -> head xs
+  : nth (tail xs) (n - 1)
+
+bsearch xs target lo hi =
+  mid = (lo + hi) / 2
+  val = nth xs mid
+  ? lo > hi -> -1
+  : ? val == target -> mid
+  : ? val < target -> bsearch xs target (mid + 1) hi
+  : bsearch xs target lo (mid - 1)
+
+binary_search xs target = bsearch xs target 0 (length xs - 1)
+
+main = binary_search [1 2 3 4 5 6 7 8 9 10] 7

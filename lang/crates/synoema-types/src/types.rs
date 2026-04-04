@@ -302,12 +302,14 @@ impl TyVarGen {
 #[derive(Debug, Clone, Default)]
 pub struct TypeEnv {
     bindings: HashMap<String, Scheme>,
+    cached_ftv: Option<HashSet<TyVarId>>,
 }
 
 impl TypeEnv {
-    pub fn new() -> Self { TypeEnv { bindings: HashMap::new() } }
+    pub fn new() -> Self { TypeEnv { bindings: HashMap::new(), cached_ftv: None } }
 
     pub fn insert(&mut self, name: String, scheme: Scheme) {
+        self.cached_ftv = None; // invalidate
         self.bindings.insert(name, scheme);
     }
 
@@ -316,14 +318,20 @@ impl TypeEnv {
     }
 
     pub fn remove(&mut self, name: &str) {
+        self.cached_ftv = None; // invalidate
         self.bindings.remove(name);
     }
 
-    /// Free type variables of the entire environment
-    pub fn ftv(&self) -> HashSet<TyVarId> {
-        self.bindings.values()
+    /// Free type variables of the entire environment (cached)
+    pub fn ftv(&mut self) -> HashSet<TyVarId> {
+        if let Some(ref cached) = self.cached_ftv {
+            return cached.clone();
+        }
+        let result: HashSet<TyVarId> = self.bindings.values()
             .flat_map(|s| s.ftv())
-            .collect()
+            .collect();
+        self.cached_ftv = Some(result.clone());
+        result
     }
 
     /// Apply substitution to all schemes in the environment
@@ -332,12 +340,13 @@ impl TypeEnv {
             bindings: self.bindings.iter()
                 .map(|(k, v)| (k.clone(), v.apply(subst)))
                 .collect(),
+            cached_ftv: None,
         }
     }
 
     /// Generalize a type into a scheme by quantifying over
     /// variables that are free in the type but not in the environment
-    pub fn generalize(&self, ty: &Type) -> Scheme {
+    pub fn generalize(&mut self, ty: &Type) -> Scheme {
         let env_ftv = self.ftv();
         let ty_ftv = ty.ftv();
         let vars: Vec<TyVarId> = ty_ftv.difference(&env_ftv).copied().collect();

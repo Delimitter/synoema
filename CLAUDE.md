@@ -1,6 +1,6 @@
 # Synoema
 
-Язык программирования для LLM code generation. ~12000 LOC Rust, 864 tests, 8 crates, Cranelift JIT.
+Язык программирования для LLM code generation. ~12000 LOC Rust, 993 tests, 8 crates, Cranelift JIT.
 
 ## Команды
 
@@ -8,9 +8,11 @@
 # Из директории lang/ (workspace root)
 cargo build                     # Сборка
 cargo test                      # Все тесты
+cargo run -p synoema-repl -- init myapp              # Scaffold проекта
 cargo run -p synoema-repl -- run examples/quicksort.sno  # Interpreter
 cargo run -p synoema-repl -- jit examples/factorial.sno   # JIT
 cargo run -p synoema-repl -- eval "6 * 7"                 # Eval выражения
+cargo run -p synoema-repl -- build examples/quicksort.sno  # Build to bytecode
 cargo run -p synoema-repl -- --errors json run file.sno   # JSON ошибки
 cargo run -p synoema-repl -- test examples/               # Doctests
 cargo run -p synoema-repl -- doc examples/quicksort.sno   # Генерация docs
@@ -28,9 +30,10 @@ cargo run -p synoema-repl -- doc examples/quicksort.sno   # Генерация d
 
 ## Документация: три аудитории
 
-| Аудитория | Директория | Назначение |
-|-----------|-----------|-----------|
-| **Человек-пользователь** | `docs/user/` | Туториалы, синтаксис, примеры |
+| Аудитория | Документ | Назначение |
+|-----------|---------|-----------|
+| **Человек-пользователь** | `README.md` + `docs/LANGUAGE.md` | Quick Wins, справочник языка |
+| **Контрибьютор** | `CONTRIBUTING.md` | Build, architecture, how to contribute |
 | **LLM-пользователь** | `docs/llm/` | Quick reference ≤1800 токенов, таблицы, аксиомы |
 | **LLM-разработчик** (Claude agent) | `context/` | Rules, Architecture, Project State, Dev Guide |
 
@@ -42,18 +45,21 @@ cargo run -p synoema-repl -- doc examples/quicksort.sno   # Генерация d
 |------|-----------|
 | `context/RULES.md` | Правила проекта (BPE, тесты, зависимости, ABI, документация) |
 | `context/ARCHITECTURE.md` | Pipeline, crates, tagged pointer ABI, FFI-паттерн |
-| `context/PHASES.md` | Все завершённые фазы (9.2–18) |
+| `context/PHASES.md` | Все завершённые фазы (9.2–23) |
 | `context/PROJECT_STATE.md` | Полное состояние проекта (RU) |
 | `context/DEVELOPMENT_GUIDE.md` | Как добавлять фичи, roadmap, паттерны кодирования |
-| `docs/user/README.md` | Точка входа для человека-пользователя |
+| `docs/LANGUAGE.md` | Справочник языка для пользователя |
+| `CONTRIBUTING.md` | Dev guide: architecture, build, tests, how to contribute |
 | `docs/llm/synoema.md` | Quick reference для LLM-генерации кода |
 | `docs/specs/language_reference.md` | Формальная спецификация языка |
 | `docs/specs/compiler_roadmap.md` | Roadmap компилятора (фазы, архитектура) |
 | `docs/research/scientific_foundations.md` | 23 научных факта |
 | `docs/mcp.md` | MCP-сервер (интеграция в LLM-тулчейн) |
 | `docs/articles/` | Образовательная серия (7 статей, EN+RU) |
+| `docs/benchmarks.md` | Сравнительные бенчмарки: токены, runtime, LLM generation |
 | `docs/testing.md` | Тестирование: 702 теста, как запускать |
 | `docs/stress-server.md` | HTTP-дэшборд стресс-тестов |
+| `benchmarks/` | Benchmark suite: Rust runner + Python scripts + 16 задач × 5 языков |
 | `lang/crates/` | Исходный код компилятора |
 
 ## Правила (кратко)
@@ -66,5 +72,7 @@ cargo run -p synoema-repl -- doc examples/quicksort.sno   # Генерация d
 
 ## Статус
 
-- 0 warnings, 0 known bugs, 864/864 tests
-- Завершено: Phases 9.2–21 + TCO в JIT + String stdlib в JIT + Doc-as-Code + LLM Cost Reduction v1 + Region Inference
+- 0 warnings, 0 known bugs, 993 tests
+- Prelude: `lang/prelude/prelude.sno` — Result type + комбинаторы (map_ok, unwrap, is_ok, and_then и др.)
+- `error : String -> a` builtin (interpreter + JIT)
+- Завершено: Phases 9.2–23 + TCO в JIT + String stdlib в JIT + Doc-as-Code + LLM Cost Reduction v1 + Region Inference

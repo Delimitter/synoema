@@ -10,7 +10,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-synoema-lexer = { path = "../synoema-lexer", version = "0.1.0" }
+synoema-lexer = { path = "../synoema-lexer", version = "0.1.0-alpha.1" }
 
 [dev-dependencies]
 pretty_assertions = "1"

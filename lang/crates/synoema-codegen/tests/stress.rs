@@ -68,10 +68,10 @@ main = addf 100000 0.0";
     assert!(result.is_ok(), "Float arena 100K failed: {:?}", result.err());
 }
 
-// ── J-3: String literals — Box::leak documentation ───────────────────────────
+// ── J-3: String literals — arena allocation ──────────────────────────────────
 
-/// J-3: 100 string literals compiled — each Box::leaked (known issue).
-/// Run with valgrind --leak-check=full to see actual leak volume.
+/// J-3: 100 string literals compiled — data uses AST pointer, StrNode in arena.
+/// No leak: Box::leak replaced with direct AST pointer + arena copy.
 #[test]
 fn j3_string_literals_100() {
     let defs: Vec<String> = (0..100)
@@ -80,7 +80,7 @@ fn j3_string_literals_100() {
     let src = format!("{}\nmain = 0", defs.join("\n"));
     let result = synoema_codegen::compile_and_run(&src);
     assert!(result.is_ok(), "100 string literals failed: {:?}", result.err());
-    println!("J-3: 100 string literals compiled (Box::leak — known permanent leak)");
+    println!("J-3: 100 string literals compiled (arena allocation, no leak)");
 }
 
 // ── J-4: Arena overflow — graceful fallback ───────────────────────────────────
@@ -563,9 +563,9 @@ fn arena_save_restore_basic() {
 
 #[test]
 fn arena_save_restore_preserves_offset() {
-    use synoema_codegen::runtime::{arena_save, arena_restore, arena_reset};
+    use synoema_codegen::runtime::{arena_save, arena_reset};
     arena_reset();
-    let before = arena_save();
+    let _before = arena_save();
     // Allocate something to advance offset
     let src = "main = length [1..100]";
     let _ = synoema_codegen::compile_and_run(src);
@@ -620,4 +620,245 @@ fn jit_wildcard_import_constant() {
     let src = "mod Consts\n  pi = 314\n  e = 271\nuse Consts (*)\nmain = pi + e";
     let result = synoema_codegen::compile_and_run(src);
     assert_eq!(result.unwrap(), 585);
+}
+
+// ── Record Update in JIT ───────────────────────────────────────────────────
+
+#[test]
+fn jit_record_update_basic() {
+    let src = "main =\n  r = {x = 1, y = 2}\n  r2 = {...r, x = 10}\n  r2.x";
+    let result = synoema_codegen::compile_and_run(src);
+    assert_eq!(result.unwrap(), 10);
+}
+
+#[test]
+fn jit_record_update_preserves_other_fields() {
+    let src = "main =\n  r = {x = 1, y = 2}\n  r2 = {...r, x = 10}\n  r2.y";
+    let result = synoema_codegen::compile_and_run(src);
+    assert_eq!(result.unwrap(), 2);
+}
+
+#[test]
+fn jit_record_update_multiple_fields() {
+    let src = "main =\n  r = {x = 1, y = 2, z = 3}\n  r2 = {...r, x = 10, y = 20}\n  r2.z";
+    let result = synoema_codegen::compile_and_run(src);
+    assert_eq!(result.unwrap(), 3);
+}
+
+// ── M-1: Arena Leak Detection ───────────────────────────────────────────────
+
+/// M-1a: arena_reset sets offset to 0.
+#[test]
+fn m1a_arena_reset_offset_zero() {
+    use synoema_codegen::runtime::{arena_reset, arena_save};
+    // Allocate something via JIT
+    let _ = synoema_codegen::compile_and_run("main = length [1..100]");
+    // compile_and_run calls arena_reset internally
+    let offset = arena_save();
+    assert_eq!(offset, 0, "arena offset should be 0 after compile_and_run");
+    arena_reset();
+}
+
+/// M-1b: arena_reset clears overflow allocations.
+#[test]
+fn m1b_arena_reset_clears_overflow() {
+    use synoema_codegen::{arena_overflow_count, arena_reset};
+    // Trigger overflow: 600K ListNodes = 9.6 MB > 8 MB arena
+    let _ = synoema_codegen::compile_and_run("main = length [1..600000]");
+    // compile_and_run calls arena_reset — overflow allocs should be freed
+    let count = arena_overflow_count();
+    assert_eq!(count, 0, "overflow allocs should be 0 after arena_reset, got {}", count);
+    arena_reset();
+}
+
+/// M-1c: arena_reset resets region_depth to 0.
+#[test]
+fn m1c_arena_reset_region_depth_zero() {
+    use synoema_codegen::{arena_region_depth, arena_reset};
+    // Run a program that uses regions (list comprehension triggers region inference)
+    let _ = synoema_codegen::compile_and_run("main = sum [x * 2 | x <- [1..100]]");
+    let depth = arena_region_depth();
+    assert_eq!(depth, 0, "region_depth should be 0 after compile_and_run, got {}", depth);
+    arena_reset();
+}
+
+/// M-1d: compile_and_run leaves arena completely clean.
+#[test]
+fn m1d_compile_and_run_leaves_arena_clean() {
+    use synoema_codegen::{arena_offset, arena_overflow_count, arena_region_depth};
+    let programs = &[
+        "main = 42",
+        "main = length [1..1000]",
+        "main = sum [x * x | x <- [1..100]]",
+        "fac 0 = 1\nfac n = n * fac (n - 1)\nmain = fac 10",
+        "main = head [1..100]",
+    ];
+    for src in programs {
+        let _ = synoema_codegen::compile_and_run(src);
+        assert_eq!(arena_offset(), 0, "offset leak after: {}", src);
+        assert_eq!(arena_overflow_count(), 0, "overflow leak after: {}", src);
+        assert_eq!(arena_region_depth(), 0, "region depth leak after: {}", src);
+    }
+}
+
+// ── M-2: Region Balance Tests ───────────────────────────────────────────────
+
+/// M-2a: region_enter/region_exit pair restores offset.
+#[test]
+fn m2a_region_enter_exit_restores_offset() {
+    use synoema_codegen::runtime::{synoema_region_enter, synoema_region_exit, arena_save, arena_reset};
+    arena_reset();
+    let before = arena_save();
+    synoema_region_enter();
+    // Simulate some allocation by running a small program fragment
+    // (we can't directly allocate, but region_enter/exit should balance)
+    synoema_region_exit();
+    let after = arena_save();
+    assert_eq!(before, after, "offset should be restored after region_enter/exit pair");
+    arena_reset();
+}
+
+/// M-2b: nested regions (depth 3) — correct enter/exit balance.
+#[test]
+fn m2b_nested_regions_balanced() {
+    use synoema_codegen::runtime::{synoema_region_enter, synoema_region_exit, arena_reset};
+    use synoema_codegen::arena_region_depth;
+    arena_reset();
+    assert_eq!(arena_region_depth(), 0, "start at depth 0");
+
+    synoema_region_enter();
+    assert_eq!(arena_region_depth(), 1, "depth 1 after first enter");
+
+    synoema_region_enter();
+    assert_eq!(arena_region_depth(), 2, "depth 2 after second enter");
+
+    synoema_region_enter();
+    assert_eq!(arena_region_depth(), 3, "depth 3 after third enter");
+
+    synoema_region_exit();
+    assert_eq!(arena_region_depth(), 2, "depth 2 after first exit");
+
+    synoema_region_exit();
+    assert_eq!(arena_region_depth(), 1, "depth 1 after second exit");
+
+    synoema_region_exit();
+    assert_eq!(arena_region_depth(), 0, "depth 0 after third exit");
+
+    arena_reset();
+}
+
+/// M-2c: region_exit at depth 0 is no-op (no underflow).
+#[test]
+fn m2c_region_exit_at_zero_no_underflow() {
+    use synoema_codegen::runtime::{synoema_region_exit, arena_reset};
+    use synoema_codegen::arena_region_depth;
+    arena_reset();
+    assert_eq!(arena_region_depth(), 0);
+    // Calling exit at depth 0 should be a no-op
+    synoema_region_exit();
+    assert_eq!(arena_region_depth(), 0, "region_exit at 0 should not underflow");
+    // Multiple exits at 0 — still safe
+    synoema_region_exit();
+    synoema_region_exit();
+    assert_eq!(arena_region_depth(), 0, "multiple region_exit at 0 should be safe");
+    arena_reset();
+}
+
+/// M-2d: JIT program with region inference — region_depth == 0 after run.
+#[test]
+fn m2d_jit_regions_balanced_after_run() {
+    use synoema_codegen::arena_region_depth;
+    // Programs that trigger region inference (let + list allocation)
+    let programs = &[
+        "main = sum [x | x <- [1..100], x % 2 == 0]",
+        "main = length [x * x | x <- [1..50]]",
+        "go acc n = ? n == 0 -> acc : go (acc + n) (n - 1)\nmain = go 0 100",
+    ];
+    for src in programs {
+        let _ = synoema_codegen::compile_and_run(src);
+        assert_eq!(arena_region_depth(), 0, "region imbalance after: {}", src);
+    }
+}
+
+// ── M-3: Leak Audit — Existing JIT Tests ────────────────────────────────────
+
+/// M-3: Run all core JIT programs and verify arena is clean after each.
+#[test]
+fn m3_leak_audit_all_jit_programs() {
+    use synoema_codegen::{arena_offset, arena_overflow_count, arena_region_depth};
+    let programs: &[(&str, &str)] = &[
+        ("fac 0 = 1\nfac n = n * fac (n - 1)\nmain = fac 10", "factorial"),
+        ("fib 0 = 0\nfib 1 = 1\nfib n = fib (n-1) + fib (n-2)\nmain = fib 10", "fibonacci"),
+        ("ack 0 n = n + 1\nack m 0 = ack (m-1) 1\nack m n = ack (m-1) (ack m (n-1))\nmain = ack 3 2", "ackermann"),
+        ("main = sum [1..100]", "sum_range"),
+        ("main = length [1..42]", "length_range"),
+        ("main = ? 2 ** 10 == 1024 -> 42 : 0", "ternary_power"),
+        ("main = sum [x * 2 | x <- [1..1000]]", "comprehension_map"),
+        ("main = length [x | x <- [1..1000], x % 2 == 0]", "comprehension_filter"),
+        ("main = length ([1..1000] ++ [1001..2000])", "list_concat"),
+        ("main = 2 ** 62", "power_large"),
+        ("main = head [1..100000]", "head_large_list"),
+        ("main = length (tail [1..100000])", "tail_large_list"),
+        ("main = sum [1..100000]", "sum_100k"),
+        ("main = length [1..100000]", "length_100k"),
+        ("go acc n = ? n == 0 -> acc : go (acc + n) (n - 1)\nmain = go 0 1000", "tail_recursion"),
+        ("main = sum [x * x | x <- [1..100]]", "comprehension_squares"),
+        ("name = \"World\"\nmain = \"Hello ${name}\"", "string_interp"),
+        ("x = 42\nmain = \"x=${x}\"", "string_interp_int"),
+        ("main = \"sum=${2 + 3}\"", "string_interp_expr"),
+        ("a = 1\nb = 2\nmain = \"${a}+${b}=${a + b}\"", "string_interp_multi"),
+        ("main =\n  x = 3\n  y = 4\n  r = {x, y}\n  r.x + r.y", "record_punning"),
+        ("main =\n  r = {x = 1, y = 2}\n  r2 = {...r, x = 10}\n  r2.x", "record_update"),
+        ("mod Math\n  square x = x * x\n  cube x = x * x * x\nuse Math (*)\nmain = square 5 + cube 2", "wildcard_import"),
+    ];
+
+    let mut leaks_found = Vec::new();
+    for (src, name) in programs {
+        let _ = synoema_codegen::compile_and_run(src);
+        let offset = arena_offset();
+        let overflow = arena_overflow_count();
+        let depth = arena_region_depth();
+        if offset != 0 || overflow != 0 || depth != 0 {
+            leaks_found.push(format!(
+                "{}: offset={}, overflow={}, depth={}",
+                name, offset, overflow, depth
+            ));
+        }
+    }
+    assert!(
+        leaks_found.is_empty(),
+        "Memory leaks detected in {} programs:\n{}",
+        leaks_found.len(),
+        leaks_found.join("\n")
+    );
+    println!("M-3: {} JIT programs audited — all clean", programs.len());
+}
+
+// ── M-4: Stress — Repeated Alloc-Reset Cycles ──────────────────────────────
+
+/// M-4a: 1000 alloc-reset cycles — offset stable at 0.
+#[test]
+fn m4a_1000_alloc_reset_cycles_stable() {
+    use synoema_codegen::arena_offset;
+    let src = "main = sum [1..1000]";
+    for i in 0..1000 {
+        let result = synoema_codegen::compile_and_run(src);
+        assert_eq!(result.unwrap(), 500_500, "wrong result at cycle {}", i);
+        assert_eq!(arena_offset(), 0, "offset leak at cycle {}", i);
+    }
+    println!("M-4a: 1000 alloc-reset cycles — offset stable at 0");
+}
+
+/// M-4b: repeated overflow-reset cycles — overflow_count stable at 0.
+#[test]
+fn m4b_overflow_reset_cycles_stable() {
+    use synoema_codegen::{arena_offset, arena_overflow_count};
+    let src = "main = length [1..600000]"; // 9.6 MB > 8 MB arena
+    for i in 0..5 {
+        let result = synoema_codegen::compile_and_run(src);
+        assert_eq!(result.unwrap(), 600_000, "wrong result at overflow cycle {}", i);
+        assert_eq!(arena_offset(), 0, "offset leak at overflow cycle {}", i);
+        assert_eq!(arena_overflow_count(), 0, "overflow leak at overflow cycle {}", i);
+    }
+    println!("M-4b: 5 overflow-reset cycles — all clean");
 }

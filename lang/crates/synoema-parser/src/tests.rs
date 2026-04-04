@@ -338,6 +338,49 @@ fn pattern_empty_list() {
     }
 }
 
+#[test]
+fn pattern_singleton_list() {
+    let p = parse_ok("f [x] = x");
+    match first_func(&p) {
+        Decl::Func { equations, .. } => {
+            // [x] desugars to Cons(Var("x"), Con("Nil", []))
+            assert!(matches!(&equations[0].pats[0], Pat::Cons(_, _)));
+            if let Pat::Cons(head, tail) = &equations[0].pats[0] {
+                assert!(matches!(head.as_ref(), Pat::Var(n) if n == "x"));
+                assert!(matches!(tail.as_ref(), Pat::Con(n, args) if n == "Nil" && args.is_empty()));
+            }
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn pattern_multi_elem_list() {
+    let p = parse_ok("f [x y z] = x");
+    match first_func(&p) {
+        Decl::Func { equations, .. } => {
+            // [x y z] desugars to Cons(x, Cons(y, Cons(z, Nil)))
+            if let Pat::Cons(head, tail) = &equations[0].pats[0] {
+                assert!(matches!(head.as_ref(), Pat::Var(n) if n == "x"));
+                if let Pat::Cons(head2, tail2) = tail.as_ref() {
+                    assert!(matches!(head2.as_ref(), Pat::Var(n) if n == "y"));
+                    if let Pat::Cons(head3, tail3) = tail2.as_ref() {
+                        assert!(matches!(head3.as_ref(), Pat::Var(n) if n == "z"));
+                        assert!(matches!(tail3.as_ref(), Pat::Con(n, args) if n == "Nil" && args.is_empty()));
+                    } else {
+                        panic!("expected Cons for z");
+                    }
+                } else {
+                    panic!("expected Cons for y");
+                }
+            } else {
+                panic!("expected Cons for [x y z]");
+            }
+        }
+        _ => unreachable!(),
+    }
+}
+
 // ── Full Programs ─────────────────────────────────────────
 
 #[test]

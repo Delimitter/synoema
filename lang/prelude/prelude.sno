@@ -1,0 +1,118 @@
+--- Synoema Prelude — standard types and combinators
+
+Result a e = Ok a | Err e
+
+map_ok f (Ok x) = Ok (f x)
+map_ok f (Err e) = Err e
+
+map_err f (Ok x) = Ok x
+map_err f (Err e) = Err (f e)
+
+unwrap (Ok x) = x
+unwrap (Err e) = error ("unwrap called on Err: " ++ show e)
+
+unwrap_or def (Ok x) = x
+unwrap_or def (Err _) = def
+
+is_ok (Ok _) = true
+is_ok (Err _) = false
+
+is_err (Ok _) = false
+is_err (Err _) = true
+
+and_then f (Ok x) = f x
+and_then f (Err e) = Err e
+
+fold_result f def (Ok x) = f x
+fold_result f def (Err _) = def
+
+sequence_results [] = Ok []
+sequence_results ((Err e):_) = Err e
+sequence_results ((Ok x):rest) =
+  sequence_results rest |> map_ok (\xs -> x : xs)
+
+--- Pair type for key-value associations.
+Pair a b = MkPair a b
+
+fst (MkPair a _) = a
+snd (MkPair _ b) = b
+
+--- Map: sorted association list.
+Map k v = MkMap (List (Pair k v))
+
+map_empty = MkMap []
+
+map_singleton k v = MkMap [(MkPair k v)]
+
+--- Internal list helpers (defined before wrappers).
+
+map_lookup_list k [] = Err "key not found"
+map_lookup_list k ((MkPair k2 v):rest) =
+  ? k == k2 -> Ok v
+  : ? k < k2 -> Err "key not found"
+  : map_lookup_list k rest
+
+map_insert_list k v [] = [(MkPair k v)]
+map_insert_list k v ((MkPair k2 v2):rest) =
+  ? k == k2 -> (MkPair k v : rest)
+  : ? k < k2 -> (MkPair k v : MkPair k2 v2 : rest)
+  : (MkPair k2 v2 : map_insert_list k v rest)
+
+map_delete_list k [] = []
+map_delete_list k ((MkPair k2 v2):rest) =
+  ? k == k2 -> rest
+  : ? k < k2 -> (MkPair k2 v2 : rest)
+  : (MkPair k2 v2 : map_delete_list k rest)
+
+map_update_list k f [] = []
+map_update_list k f ((MkPair k2 v2):rest) =
+  ? k == k2 -> (MkPair k2 (f v2) : rest)
+  : (MkPair k2 v2 : map_update_list k f rest)
+
+map_keys_list [] = []
+map_keys_list ((MkPair k _):rest) = (k : map_keys_list rest)
+
+map_values_list [] = []
+map_values_list ((MkPair _ v):rest) = (v : map_values_list rest)
+
+map_mv f [] = []
+map_mv f ((MkPair k v):rest) = (MkPair k (f v) : map_mv f rest)
+
+--- Map API (wrappers).
+
+map_lookup k (MkMap xs) = map_lookup_list k xs
+
+map_get k def m = unwrap_or def (map_lookup k m)
+
+has_key k m = is_ok (map_lookup k m)
+
+map_insert k v (MkMap xs) = MkMap (map_insert_list k v xs)
+
+from_pairs [] = map_empty
+from_pairs ((MkPair k v):rest) = map_insert k v (from_pairs rest)
+
+map_delete k (MkMap xs) = MkMap (map_delete_list k xs)
+
+map_update k f (MkMap xs) = MkMap (map_update_list k f xs)
+
+map_keys (MkMap xs) = map_keys_list xs
+
+map_values (MkMap xs) = map_values_list xs
+
+entries (MkMap ps) = ps
+
+map_size (MkMap ps) = length ps
+
+map_map_values f (MkMap xs) = MkMap (map_mv f xs)
+
+map_merge_list m1 [] = m1
+map_merge_list m1 ((MkPair k v):rest) = map_merge_list (map_insert k v m1) rest
+
+map_merge m1 (MkMap xs) = map_merge_list m1 xs
+
+--- JSON value type for structured data interchange.
+JsonValue = JNull | JBool Bool | JNum Int | JStr String | JArr (List JsonValue) | JObj (List (Pair String JsonValue))
+
+--- Access a field in a JSON object by key.
+json_get k (JObj pairs) = map_lookup_list k pairs
+json_get k _ = Err "json_get: not an object"

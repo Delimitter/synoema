@@ -89,9 +89,10 @@ impl Infer {
                     let (subst, ty) = self.infer_func(&env, equations)?;
                     let su = unify(&self_tv.apply(&subst), &ty, &mut self.gen)?;
                     let final_ty = ty.apply(&su);
-                    let final_subst = subst.compose(&su);
 
-                    env = env.apply(&final_subst);
+                    // Skip env.apply for the entire env — earlier generalized schemes
+                    // have no free vars affected by this substitution. Only the current
+                    // method's mono entry needs updating, and we're about to remove it.
                     env.remove(method_name);
                     let scheme = env.generalize(&final_ty);
                     env.insert(method_name.clone(), scheme);
@@ -109,10 +110,11 @@ impl Infer {
                 let (subst, ty) = self.infer_func(&env, equations)?;
                 // Unify the pre-registered variable with the inferred type
                 let su = unify(&self_tv.apply(&subst), &ty, &mut self.gen)?;
-                let final_subst = subst.compose(&su);
                 let final_ty = ty.apply(&su);
 
-                env = env.apply(&final_subst);
+                // Skip env.apply for the entire env — earlier generalized schemes
+                // have no free vars affected by this substitution. Only the current
+                // function's mono entry needs updating, and we're about to remove it.
 
                 // Remove function's own mono entry before generalization
                 // so its type variables are free to be quantified (let-polymorphism)
@@ -380,6 +382,55 @@ impl Infer {
             ),
         });
 
+        // foldl: ∀a b. (a -> b -> a) -> a -> List b -> a
+        let fla = self.gen.fresh();
+        let flb = self.gen.fresh();
+        env.insert("foldl".into(), Scheme {
+            vars: vec![fla, flb],
+            ty: Type::arrow(
+                Type::arrow(Type::Var(fla), Type::arrow(Type::Var(flb), Type::Var(fla))),
+                Type::arrow(Type::Var(fla), Type::arrow(Type::list(Type::Var(flb)), Type::Var(fla))),
+            ),
+        });
+
+        // zip: ∀a. List a -> List a -> List (List a)
+        let za = self.gen.fresh();
+        env.insert("zip".into(), Scheme {
+            vars: vec![za],
+            ty: Type::arrow(
+                Type::list(Type::Var(za)),
+                Type::arrow(Type::list(Type::Var(za)), Type::list(Type::list(Type::Var(za)))),
+            ),
+        });
+
+        // index: ∀a. Int -> List a -> a
+        let ia = self.gen.fresh();
+        env.insert("index".into(), Scheme {
+            vars: vec![ia],
+            ty: Type::arrow(Type::int(), Type::arrow(Type::list(Type::Var(ia)), Type::Var(ia))),
+        });
+
+        // take: ∀a. Int -> List a -> List a
+        let ta = self.gen.fresh();
+        env.insert("take".into(), Scheme {
+            vars: vec![ta],
+            ty: Type::arrow(Type::int(), Type::arrow(Type::list(Type::Var(ta)), Type::list(Type::Var(ta)))),
+        });
+
+        // drop: ∀a. Int -> List a -> List a
+        let da = self.gen.fresh();
+        env.insert("drop".into(), Scheme {
+            vars: vec![da],
+            ty: Type::arrow(Type::int(), Type::arrow(Type::list(Type::Var(da)), Type::list(Type::Var(da)))),
+        });
+
+        // reverse: ∀a. List a -> List a
+        let rva = self.gen.fresh();
+        env.insert("reverse".into(), Scheme {
+            vars: vec![rva],
+            ty: Type::arrow(Type::list(Type::Var(rva)), Type::list(Type::Var(rva))),
+        });
+
         // sum: List Int -> Int
         env.insert("sum".into(), Scheme::mono(
             Type::arrow(Type::list(Type::int()), Type::int()),
@@ -427,6 +478,15 @@ impl Infer {
         env.insert("str_len".into(), Scheme::mono(Type::arrow(Type::string(), Type::int())));
         // json_escape: String -> String
         env.insert("json_escape".into(), Scheme::mono(Type::arrow(Type::string(), Type::string())));
+        // json_parse: String -> Result JsonValue String
+        let json_result = Type::App(
+            Box::new(Type::App(
+                Box::new(Type::Con("Result".into())),
+                Box::new(Type::Con("JsonValue".into())),
+            )),
+            Box::new(Type::string()),
+        );
+        env.insert("json_parse".into(), Scheme::mono(Type::arrow(Type::string(), json_result)));
         // file_read: String -> String
         env.insert("file_read".into(), Scheme::mono(Type::arrow(Type::string(), Type::string())));
 
@@ -465,6 +525,23 @@ impl Infer {
         env.insert("recv".into(), Scheme {
             vars: vec![ra],
             ty: Type::arrow(Type::chan(Type::Var(ra)), Type::Var(ra)),
+        });
+
+        // Environment variables
+        // env: String -> String
+        env.insert("env".into(), Scheme::mono(Type::arrow(Type::string(), Type::string())));
+        // env_or: String -> String -> String
+        env.insert("env_or".into(), Scheme::mono(
+            Type::arrow(Type::string(), Type::arrow(Type::string(), Type::string()))
+        ));
+        // args: [String]
+        env.insert("args".into(), Scheme::mono(Type::list(Type::string())));
+
+        // error: ∀a. String -> a (runtime panic with message)
+        let err_a = self.gen.fresh();
+        env.insert("error".into(), Scheme {
+            vars: vec![err_a],
+            ty: Type::arrow(Type::string(), Type::Var(err_a)),
         });
 
         env
@@ -739,6 +816,35 @@ impl Infer {
 
                 let final_subst = s_obj.compose(&s_unify);
                 let result_ty = field_tv.apply(&s_unify);
+                Ok((final_subst, result_ty))
+            }
+
+            // RECORD UPDATE: {...base, f1 = v1, ...}
+            // Strategy: infer base type, then unify with open record from updates.
+            // Result type = base type (same shape).
+            ExprKind::RecordUpdate { base, updates } => {
+                let (s_base, base_ty) = self.infer(env, base)?;
+                let base_ty = base_ty.apply(&s_base);
+
+                // Infer each update value and collect update field types
+                let mut subst = s_base;
+                let mut update_types: Vec<(String, Type)> = Vec::new();
+                for (name, expr) in updates {
+                    let (s, ty) = self.infer(&env.apply(&subst), expr)?;
+                    subst = s.compose(&subst);
+                    update_types.push((name.clone(), ty));
+                }
+
+                // Create open record from update fields — allows "other fields" via row var
+                let row_var = self.gen.fresh();
+                let open_record = Type::Record(update_types, Some(row_var));
+
+                // Unify: base must contain all updated fields with compatible types
+                let s_unify = unify(&base_ty.apply(&subst), &open_record, &mut self.gen)?;
+                let final_subst = subst.compose(&s_unify);
+
+                // Result type = base type (record shape preserved)
+                let result_ty = base_ty.apply(&final_subst);
                 Ok((final_subst, result_ty))
             }
 
@@ -1216,6 +1322,15 @@ fn check_linear_in_expr(expr: &Expr, linear_vars: &HashSet<String>) -> TResult<U
         ExprKind::Record(fields) => {
             let mut acc: UsageMap = HashMap::new();
             for (_, e) in fields {
+                let m = check_linear_in_expr(e, linear_vars)?;
+                acc = seq_usages(acc, m, e.span)?;
+            }
+            Ok(acc)
+        }
+
+        ExprKind::RecordUpdate { base, updates } => {
+            let mut acc = check_linear_in_expr(base, linear_vars)?;
+            for (_, e) in updates {
                 let m = check_linear_in_expr(e, linear_vars)?;
                 acc = seq_usages(acc, m, e.span)?;
             }

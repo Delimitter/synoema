@@ -10,6 +10,11 @@ map       : (a -> b) -> [a] -> [b]
 filter    : (a -> Bool) -> [a] -> [a]
 foldl     : (b -> a -> b) -> b -> [a] -> b
 concatMap : (a -> [b]) -> [a] -> [b]
+zip       : [a] -> [b] -> [(a, b)]  -- pair elements, stop at shorter
+index     : [a] -> Int -> a          -- 0-based, error on out-of-bounds
+take      : Int -> [a] -> [a]        -- first n elements
+drop      : Int -> [a] -> [a]        -- skip first n elements
+reverse   : [a] -> [a]              -- reverse list
 ```
 
 ## String
@@ -38,6 +43,20 @@ odd   : Int -> Bool
 not : Bool -> Bool
 ```
 
+## Result (prelude — always available)
+```
+Result a e = Ok a | Err e
+
+map_ok     : (a -> b) -> Result a e -> Result b e
+map_err    : (e -> f) -> Result a e -> Result a f
+unwrap     : Result a e -> a            -- error on Err
+unwrap_or  : a -> Result a e -> a
+is_ok      : Result a e -> Bool
+is_err     : Result a e -> Bool
+and_then   : (a -> Result b e) -> Result a e -> Result b e
+error      : String -> a                -- runtime panic
+```
+
 ## IO
 ```
 print    : a -> ()             -- print + newline
@@ -56,6 +75,48 @@ fd_readline    : Fd -> String
 fd_write       : Fd -> String -> ()
 fd_close       : Fd -> ()
 fd_popen       : String -> Fd
+```
+
+## Environment
+```
+env    : String -> String              -- env var (empty if missing)
+env_or : String -> String -> String    -- env var with default
+args   : [String]                      -- CLI args after --
+```
+
+## Map (prelude — sorted assoc list)
+```
+Pair a b = MkPair a b
+Map k v  = MkMap (List (Pair k v))
+
+map_empty      : Map k v
+map_singleton  : k -> v -> Map k v
+map_insert     : k -> v -> Map k v -> Map k v
+map_lookup     : k -> Map k v -> Result v String
+map_get        : k -> v -> Map k v -> v         -- with default
+has_key        : k -> Map k v -> Bool
+map_delete     : k -> Map k v -> Map k v
+map_update     : k -> (v -> v) -> Map k v -> Map k v
+from_pairs     : [Pair k v] -> Map k v
+map_keys       : Map k v -> [k]                 -- sorted
+map_values     : Map k v -> [v]
+entries        : Map k v -> [Pair k v]
+map_size       : Map k v -> Int
+map_map_values : (v -> w) -> Map k v -> Map k w
+map_merge      : Map k v -> Map k v -> Map k v
+fst            : Pair a b -> a
+snd            : Pair a b -> b
+```
+
+## JSON
+```
+JsonValue = JNull | JBool Bool | JNum Int | JStr String
+          | JArr [JsonValue] | JObj [Pair String JsonValue]
+
+json_parse  : String -> Result JsonValue String
+json_encode : JsonValue -> String              -- JIT only
+json_get    : String -> JsonValue -> Result JsonValue String
+json_escape : String -> String
 ```
 
 ## Concurrency (interpreter only)

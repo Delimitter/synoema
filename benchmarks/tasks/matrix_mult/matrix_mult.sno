@@ -1,0 +1,35 @@
+-- SPDX-License-Identifier: MIT-0
+
+get xs n =
+  ? n == 0 -> head xs
+  : get (tail xs) (n - 1)
+
+dot a b = get a 0 * get b 0 + get a 1 * get b 1 + get a 2 * get b 2
+
+col m j =
+  c0 = get (get m 0) j
+  c1 = get (get m 1) j
+  c2 = get (get m 2) j
+  [c0 c1 c2]
+
+row_mul r b =
+  v0 = dot r (col b 0)
+  v1 = dot r (col b 1)
+  v2 = dot r (col b 2)
+  [v0 v1 v2]
+
+mat_mul a b =
+  x = row_mul (get a 0) b
+  y = row_mul (get a 1) b
+  z = row_mul (get a 2) b
+  x ++ y ++ z
+
+join_sp xs =
+  ? xs == [] -> ""
+  : ? length xs == 1 -> show (head xs)
+  : show (head xs) ++ " " ++ join_sp (tail xs)
+
+a = [[1 2 3] [4 5 6] [7 8 9]]
+b = [[1 2 3] [4 5 6] [7 8 9]]
+
+main = join_sp (mat_mul a b)

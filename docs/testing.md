@@ -1,59 +1,70 @@
-# Тестирование
+# Testing
 
-Synoema покрыт 771 тестом в 7 крейтах. Все тесты проходят с `0 failures, 0 warnings`.
+Synoema is covered by 771 tests across 7 crates. All tests pass with `0 failures, 0 warnings`.
 
-## Быстрый старт
+## Quick Start
 
 ```bash
 cd lang/
-cargo test        # все тесты — 771/771 зелёных
+cargo test        # all tests — 771/771 green
 ```
 
-## Структура тестов
+## Test Structure
 
-### Unit-тесты
+### Unit tests
 
-Каждый крейт содержит интеграционные тесты в `src/tests.rs`:
+Each crate contains integration tests in `src/tests.rs`:
 
-| Крейт | Тестов | Что тестируется |
-|-------|-------:|-----------------|
-| `synoema-lexer` | 97 | Токенизация, offside rule, escape-последовательности, string interpolation |
-| `synoema-parser` | 72 | Pratt-парсер, type aliases, imports, error recovery, string interp |
+| Crate | Tests | What is tested |
+|-------|------:|----------------|
+| `synoema-lexer` | 97 | Tokenization, offside rule, escape sequences, string interpolation |
+| `synoema-parser` | 72 | Pratt parser, type aliases, imports, error recovery, string interp |
 | `synoema-types` | 90 | Hindley-Milner, row polymorphism, type classes, alias expansion |
-| `synoema-core` | 50 | Core IR, десахаризация, оптимизации |
-| `synoema-eval` | 183 | Tree-walking интерпретатор, все фичи языка |
-| `synoema-codegen` | 209 | Cranelift JIT — арифметика, строки, ADT, замыкания |
-| `synoema-diagnostic` | — | Нет отдельных тестов (покрыто через eval/codegen) |
-| **Итого** | **771** | |
+| `synoema-core` | 50 | Core IR, desugaring, optimizations |
+| `synoema-eval` | 183 | Tree-walking interpreter, all language features |
+| `synoema-codegen` | 209 | Cranelift JIT — arithmetic, strings, ADTs, closures |
+| `synoema-diagnostic` | — | No separate tests (covered through eval/codegen) |
+| **Total** | **771** | |
 
-### Стресс-тесты
+### Stress tests
 
-Стресс-тесты находятся в `tests/stress.rs` каждого крейта и проверяют производительность и стабильность при больших нагрузках:
+Stress tests live in `tests/stress.rs` of each crate and verify performance and stability under heavy load:
 
 ```bash
-# Запустить стресс-тесты конкретного крейта
+# Run stress tests for a specific crate
 cargo test --test stress -p synoema-lexer   -- --nocapture
 cargo test --test stress -p synoema-types   -- --nocapture
 cargo test --test stress -p synoema-eval    -- --nocapture
 cargo test --test stress -p synoema-codegen -- --nocapture
 ```
 
-| Крейт | Стресс-тестов | Примеры |
-|-------|--------------|---------|
-| `synoema-lexer` | 10 (+ 3 игнор.) | 100K токенов, глубокая вложенность |
-| `synoema-types` | 9 (+ 2 игнор.) | 500 функций, 100 ADT-вариантов |
-| `synoema-eval` | 17 (+ 6 игнор.) | fib(25), сортировка 10K, typeclass dispatch |
-| `synoema-codegen` | 23 (+ 9 игнор.) | fib(35) via JIT, 1K итераций map/filter |
+| Crate | Stress tests | Examples |
+|-------|-------------|----------|
+| `synoema-lexer` | 10 (+ 3 ignored) | 100K tokens, deep nesting |
+| `synoema-types` | 9 (+ 2 ignored) | 500 functions, 100 ADT variants |
+| `synoema-eval` | 17 (+ 6 ignored) | fib(25), sorting 10K, typeclass dispatch |
+| `synoema-codegen` | 23 (+ 9 ignored) | fib(35) via JIT, 1K iterations map/filter |
 
-Тесты с `#[ignore]` требуют флага `--ignored` и могут занимать длительное время:
+Tests marked with `#[ignore]` require the `--ignored` flag and may take a long time:
 
 ```bash
 cargo test --test stress -p synoema-eval -- --ignored --nocapture
 ```
 
-## Встроенные тесты языка
+### Ollama-gated tests
 
-Synoema поддерживает три вида тестов в `.sno` файлах:
+The benchmark runner includes tests that require a local ollama installation. These are `#[ignore]`d by default:
+
+```bash
+cd benchmarks/runner
+cargo test -- --ignored --nocapture    # runs ollama detection + model pull + single task
+```
+
+These tests check ollama availability, auto-pull `qwen3:8b`, and run a single LLM generation task locally. Requires ollama installed and running (`ollama serve`).
+
+## Built-in Language Tests
+
+Synoema supports three kinds of tests in `.sno` files:
 
 ### Doctests
 ```
@@ -73,21 +84,21 @@ test "reverse involution" = prop xs -> reverse (reverse xs) == xs
 test "fact positive" = prop n -> fact n > 0 when n >= 0 && n <= 10
 ```
 
-### Запуск
+### Running
 
 ```bash
-cargo run -p synoema-repl -- test examples/testing.sno          # один файл
-cargo run -p synoema-repl -- test examples/                     # директория
-cargo run -p synoema-repl -- test examples/ --filter "sort"     # фильтр по имени
+cargo run -p synoema-repl -- test examples/testing.sno          # single file
+cargo run -p synoema-repl -- test examples/                     # directory
+cargo run -p synoema-repl -- test examples/ --filter "sort"     # filter by name
 ```
 
-Keywords: `test` (декларация), `prop` (property-генератор), `when` (условный property).
-Все три — 1 BPE-токен в cl100k_base.
+Keywords: `test` (declaration), `prop` (property generator), `when` (conditional property).
+All three are exactly 1 BPE token in cl100k_base.
 
-## Запуск по крейтам
+## Running by Crate
 
 ```bash
-# Только один крейт
+# Single crate
 cargo test -p synoema-lexer
 cargo test -p synoema-parser
 cargo test -p synoema-types
@@ -95,54 +106,54 @@ cargo test -p synoema-core
 cargo test -p synoema-eval
 cargo test -p synoema-codegen
 
-# С выводом (не глотать println!)
+# With output (don't swallow println!)
 cargo test -p synoema-eval -- --nocapture
 
-# Конкретный тест
+# Specific test
 cargo test -p synoema-eval -- test_factorial
 
-# Параллельно в один поток (для детерминированного вывода)
+# Single-threaded (for deterministic output)
 cargo test -p synoema-eval -- --test-threads=1
 ```
 
-## Интерактивный дашборд
+## Interactive Dashboard
 
-Для визуального запуска тестов в браузере используйте сервер на Synoema:
+For a visual test runner in the browser, use the Synoema-powered server:
 
 ```bash
 cd lang/
 cargo run -p synoema-repl -- run examples/stress_server.sno
-# Откройте: http://localhost:8765/stress_tests.html
+# Open: http://localhost:8765/stress_tests.html
 ```
 
-Дашборд показывает результаты в реальном времени через SSE-стриминг. Подробнее: [docs/stress-server.md](stress-server.md).
+The dashboard shows results in real time via SSE streaming. Details: [docs/stress-server.md](stress-server.md).
 
-## Производительность (release vs debug)
+## Performance (release vs debug)
 
-Тесты по умолчанию запускаются в debug-режиме, который ~10× медленнее release:
+Tests run in debug mode by default, which is ~10x slower than release:
 
 ```bash
-# Debug (по умолчанию)
+# Debug (default)
 cargo test
 
 # Release
 cargo test --release
 ```
 
-Стресс-тесты с жёсткими временными ограничениями помечены `#[cfg(not(debug_assertions))]` и пропускаются в debug-сборке.
+Stress tests with strict time constraints are marked `#[cfg(not(debug_assertions))]` and are skipped in debug builds.
 
-## Правила для новых тестов
+## Rules for New Tests
 
-- `cargo test` должен быть чистым (0 failures, 0 warnings) перед каждым коммитом
-- Новые фичи: сначала тест в interpreter, потом в JIT
-- Стресс-тесты, которые переполняют стек в debug (> ~1500 уровней рекурсии), помечаются `#[ignore]`
-- Тесты с допущениями о производительности оборачиваются в `#[cfg(not(debug_assertions))]`
+- `cargo test` must be clean (0 failures, 0 warnings) before every commit
+- New features: test in interpreter first, then in JIT
+- Stress tests that overflow the stack in debug (> ~1500 levels of recursion) are marked `#[ignore]`
+- Tests with performance assumptions are wrapped in `#[cfg(not(debug_assertions))]`
 
 ## CI
 
 ```bash
-# Команда для CI (эквивалентна cargo test)
+# CI command (equivalent to cargo test)
 cargo test 2>&1 | grep -E "test result|FAILED"
 ```
 
-Ожидаемый вывод — строки вида `test result: ok. N passed; 0 failed`.
+Expected output: lines like `test result: ok. N passed; 0 failed`.

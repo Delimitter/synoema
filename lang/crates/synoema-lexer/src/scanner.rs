@@ -249,7 +249,9 @@ impl<'src> Scanner<'src> {
                     else { return Err(self.error("unexpected '!', did you mean '!='?")); },
             b'&' => if self.match_char(b'&') { Token::And }
                     else { return Err(self.error("unexpected '&', did you mean '&&'?")); },
-            b'.' => if self.match_char(b'.') { Token::DotDot } else { Token::Dot },
+            b'.' => if self.match_char(b'.') {
+                        if self.match_char(b'.') { Token::DotDotDot } else { Token::DotDot }
+                    } else { Token::Dot },
             b'*' => if self.match_char(b'*') { Token::StarStar } else { Token::Star },
             b'/' => Token::Slash, b'%' => Token::Percent,
             b'?' => Token::Question, b':' => Token::Colon, b'@' => Token::At,

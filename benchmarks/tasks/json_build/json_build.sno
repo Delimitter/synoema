@@ -1,0 +1,5 @@
+-- SPDX-License-Identifier: MIT-0
+
+main =
+  person = {name: "Alice", age: 30, hobbies: ["reading" "coding" "hiking"]}
+  show person
