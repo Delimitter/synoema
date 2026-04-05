@@ -4,7 +4,7 @@ Pre-built binaries and build scripts for the Synoema compiler and MCP server.
 
 ## Latest Release
 
-**[v0.1.0-alpha.1](v0.1.0-alpha.1/)** — April 2026
+**[v0.1.0-alpha.2](v0.1.0-alpha.2/)** — April 2026
 
 ## How to build
 
@@ -14,10 +14,10 @@ git clone https://github.com/Delimitter/synoema
 cd synoema
 
 # 2. Go to your platform's release directory
-cd releases/v0.1.0-alpha.1/darwin-arm64   # macOS Apple Silicon
-# cd releases/v0.1.0-alpha.1/darwin-x64   # macOS Intel
-# cd releases/v0.1.0-alpha.1/linux-x64    # Linux x86_64
-# cd releases/v0.1.0-alpha.1/win32-x64    # Windows (use .\build.ps1)
+cd releases/v0.1.0-alpha.2/darwin-arm64   # macOS Apple Silicon
+# cd releases/v0.1.0-alpha.2/darwin-x64   # macOS Intel
+# cd releases/v0.1.0-alpha.2/linux-x64    # Linux x86_64
+# cd releases/v0.1.0-alpha.2/win32-x64    # Windows (use .\build.ps1)
 
 # 3. Build
 make

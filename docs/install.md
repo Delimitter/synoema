@@ -2,7 +2,7 @@
 
 This guide covers all installation methods for the Synoema compiler (`synoema`) and MCP server (`synoema-mcp`).
 
-> **Version:** 0.1.0-alpha.1 — see [versioning policy](versioning.md)
+> **Version:** 0.1.0-alpha.2 — see [versioning policy](versioning.md)
 
 ## Option 0: npx (MCP server only, easiest)
 
@@ -51,10 +51,10 @@ No Rust toolchain required. Download the binary for your platform.
 
 Download from [GitHub Releases](https://github.com/Delimitter/synoema/releases/latest) or see the platform-specific README:
 
-- [macOS Apple Silicon](../releases/v0.1.0-alpha.1/darwin-arm64/)
-- [macOS Intel](../releases/v0.1.0-alpha.1/darwin-x64/)
-- [Linux x86_64](../releases/v0.1.0-alpha.1/linux-x64/)
-- [Windows x64](../releases/v0.1.0-alpha.1/win32-x64/)
+- [macOS Apple Silicon](../releases/v0.1.0-alpha.2/darwin-arm64/)
+- [macOS Intel](../releases/v0.1.0-alpha.2/darwin-x64/)
+- [Linux x86_64](../releases/v0.1.0-alpha.2/linux-x64/)
+- [Windows x64](../releases/v0.1.0-alpha.2/win32-x64/)
 
 ### Step 3 — Install
 

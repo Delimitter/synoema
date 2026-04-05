@@ -1,14 +1,14 @@
 {
   "name": "synoema-mcp",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "description": "MCP server for the Synoema programming language — eval, typecheck, run",
   "bin": { "synoema-mcp": "./bin/run.js" },
   "files": ["bin/"],
   "optionalDependencies": {
-    "@delimitter/mcp-darwin-arm64": "0.1.0-alpha.1",
-    "@delimitter/mcp-darwin-x64":   "0.1.0-alpha.1",
-    "@delimitter/mcp-linux-x64":    "0.1.0-alpha.1",
-    "@delimitter/mcp-win32-x64":    "0.1.0-alpha.1"
+    "@delimitter/mcp-darwin-arm64": "0.1.0-alpha.2",
+    "@delimitter/mcp-darwin-x64":   "0.1.0-alpha.2",
+    "@delimitter/mcp-linux-x64":    "0.1.0-alpha.2",
+    "@delimitter/mcp-win32-x64":    "0.1.0-alpha.2"
   },
   "engines": { "node": ">=16" },
   "license": "Apache-2.0",

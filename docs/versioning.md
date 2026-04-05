@@ -2,7 +2,7 @@
 
 ## Current Version
 
-**0.1.0-alpha.1**
+**0.1.0-alpha.2**
 
 ## Version Scheme
 
@@ -170,3 +170,4 @@ synoema-mcp
 | Version | Stage | Date | Notes |
 |---------|-------|------|-------|
 | 0.1.0-alpha.1 | alpha | 2026-04 | Initial release: full JIT, MCP server, structured diagnostics |
+| 0.1.0-alpha.2 | alpha | 2026-04 | JSON stdlib, compiler bugfixes, init improvements |

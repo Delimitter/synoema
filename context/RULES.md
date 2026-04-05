@@ -204,7 +204,7 @@ docs/llm/
 
 **Правила:**
 - Хардкод версий запрещён — в Rust использовать `env!("CARGO_PKG_VERSION")`
-- Inter-crate зависимости в `lang/crates/*/Cargo.toml` ОБЯЗАНЫ указывать полную pre-release версию (например `version = "0.1.0-alpha.1"`) — Cargo semver требует явного указания pre-release
+- Inter-crate зависимости в `lang/crates/*/Cargo.toml` ОБЯЗАНЫ указывать полную pre-release версию (например `version = "0.1.0-alpha.2"`) — Cargo semver требует явного указания pre-release
 - Pre-release теги (`-alpha.N`, `-beta.N`) обязательны до стабильного 1.0
 - Внутренние инструменты (benchmarks) исключены из политики
 - Полная документация: `docs/versioning.md`

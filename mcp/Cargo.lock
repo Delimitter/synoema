@@ -88,14 +88,14 @@ dependencies = [
 
 [[package]]
 name = "synoema-diagnostic"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "synoema-lexer",
 ]
 
 [[package]]
 name = "synoema-eval"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "synoema-diagnostic",
  "synoema-lexer",
@@ -105,11 +105,11 @@ dependencies = [
 
 [[package]]
 name = "synoema-lexer"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 
 [[package]]
 name = "synoema-mcp"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -125,14 +125,14 @@ dependencies = [
 
 [[package]]
 name = "synoema-parser"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "synoema-lexer",
 ]
 
 [[package]]
 name = "synoema-types"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "synoema-lexer",
  "synoema-parser",

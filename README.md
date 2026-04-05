@@ -2,7 +2,7 @@
 
 ***The language of shared understanding***
 
-**Version: 0.1.0-alpha.1** — alpha stage, syntax and APIs may change. See [versioning policy](docs/versioning.md).
+**Version: 0.1.0-alpha.2** — alpha stage, syntax and APIs may change. See [versioning policy](docs/versioning.md).
 
 **Synoema** [sy-NO-e-ma] — a BPE-aligned programming language for LLM code generation. Saves **15% tokens** vs Python on average (up to 52% on algorithmic tasks), compiles to native code via Cranelift JIT (**3x median speedup** over Python).
 

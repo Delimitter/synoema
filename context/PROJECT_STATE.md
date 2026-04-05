@@ -7,7 +7,7 @@
 
 ## 0. Быстрый статус (апрель 2026)
 
-**Версия: 0.1.0-alpha.1** — alpha-стадия, синтаксис и API могут меняться. Политика версий: [docs/versioning.md](../docs/versioning.md)
+**Версия: 0.1.0-alpha.2** — alpha-стадия, синтаксис и API могут меняться. Политика версий: [docs/versioning.md](../docs/versioning.md)
 
 - **937 тестов**, все зелёные, 0 warnings
 - **Prelude:** `lang/prelude/prelude.sno` — Result type + combinators (map_ok, map_err, unwrap, unwrap_or, is_ok, is_err, and_then)

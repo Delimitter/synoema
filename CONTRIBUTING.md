@@ -203,7 +203,7 @@ See [vscode-extension/DEVELOPMENT.md](vscode-extension/DEVELOPMENT.md) for devel
 ## Building Releases
 
 ```bash
-cd releases/v0.1.0-alpha.1
+cd releases/v0.1.0-alpha.2
 
 # macOS Apple Silicon
 cd darwin-arm64 && make

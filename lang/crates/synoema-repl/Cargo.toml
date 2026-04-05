@@ -14,12 +14,12 @@ name = "synoema"
 path = "src/main.rs"
 
 [dependencies]
-synoema-lexer = { path = "../synoema-lexer", version = "0.1.0-alpha.1" }
-synoema-parser = { path = "../synoema-parser", version = "0.1.0-alpha.1" }
-synoema-types = { path = "../synoema-types", version = "0.1.0-alpha.1" }
-synoema-eval = { path = "../synoema-eval", version = "0.1.0-alpha.1" }
-synoema-codegen = { path = "../synoema-codegen", version = "0.1.0-alpha.1" }
-synoema-diagnostic = { path = "../synoema-diagnostic", version = "0.1.0-alpha.1" }
+synoema-lexer = { path = "../synoema-lexer", version = "0.1.0-alpha.2" }
+synoema-parser = { path = "../synoema-parser", version = "0.1.0-alpha.2" }
+synoema-types = { path = "../synoema-types", version = "0.1.0-alpha.2" }
+synoema-eval = { path = "../synoema-eval", version = "0.1.0-alpha.2" }
+synoema-codegen = { path = "../synoema-codegen", version = "0.1.0-alpha.2" }
+synoema-diagnostic = { path = "../synoema-diagnostic", version = "0.1.0-alpha.2" }
 
 [dev-dependencies]
 pretty_assertions = "1"

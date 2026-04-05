@@ -2,7 +2,7 @@
 
 The Synoema MCP server integrates the Synoema compiler and evaluator into any MCP-compatible LLM toolchain — Claude Desktop, Cursor, Zed, and any client implementing the [Model Context Protocol](https://modelcontextprotocol.io).
 
-> **Version:** 0.1.0-alpha.1 — see [versioning policy](versioning.md)
+> **Version:** 0.1.0-alpha.2 — see [versioning policy](versioning.md)
 
 ## What It Provides
 
@@ -88,15 +88,15 @@ Download directly without npm. Available from the [releases directory](../releas
 
 ```bash
 # macOS (Apple Silicon)
-curl -L https://github.com/Delimitter/synoema/releases/download/v0.1.0-alpha.1/synoema-mcp-0.1.0-alpha.1-darwin-arm64 \
+curl -L https://github.com/Delimitter/synoema/releases/download/v0.1.0-alpha.2/synoema-mcp-0.1.0-alpha.2-darwin-arm64 \
   -o synoema-mcp && chmod +x synoema-mcp
 
 # macOS (Intel)
-curl -L https://github.com/Delimitter/synoema/releases/download/v0.1.0-alpha.1/synoema-mcp-0.1.0-alpha.1-darwin-x64 \
+curl -L https://github.com/Delimitter/synoema/releases/download/v0.1.0-alpha.2/synoema-mcp-0.1.0-alpha.2-darwin-x64 \
   -o synoema-mcp && chmod +x synoema-mcp
 
 # Linux (x86_64)
-curl -L https://github.com/Delimitter/synoema/releases/download/v0.1.0-alpha.1/synoema-mcp-0.1.0-alpha.1-linux-x64 \
+curl -L https://github.com/Delimitter/synoema/releases/download/v0.1.0-alpha.2/synoema-mcp-0.1.0-alpha.2-linux-x64 \
   -o synoema-mcp && chmod +x synoema-mcp
 ```
 
