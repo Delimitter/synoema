@@ -15,6 +15,7 @@ index     : Int -> [a] -> a          -- 0-based, error on out-of-bounds
 take      : Int -> [a] -> [a]        -- first n elements
 drop      : Int -> [a] -> [a]        -- skip first n elements
 reverse   : [a] -> [a]              -- reverse list
+for_each  : (a -> b) -> [a] -> ()   -- apply f to each element (side effects)
 ```
 
 ## String
@@ -24,6 +25,7 @@ str_slice       : String -> Int -> Int -> String    -- str from to
 str_find        : String -> String -> Int -> Int    -- str sub start (-1 = not found)
 str_starts_with : String -> String -> Bool
 str_trim        : String -> String
+str_join        : String -> [String] -> String  -- join with separator: str_join ", " ["a" "b"] = "a, b"
 json_escape     : String -> String
 ```
 
@@ -116,6 +118,10 @@ JsonValue = JNull | JBool Bool | JNum Int | JStr String
 json_parse  : String -> Result JsonValue String
 json_encode : JsonValue -> String              -- JIT only
 json_get    : String -> JsonValue -> Result JsonValue String  -- single flat key, NOT dot-path
+json_str    : JsonValue -> String              -- extract String, error on mismatch
+json_num    : JsonValue -> Int                 -- extract number, error on mismatch
+json_arr    : JsonValue -> [JsonValue]         -- extract array, error on mismatch
+json_obj    : JsonValue -> [Pair String JsonValue]  -- extract object pairs
 json_escape : String -> String
 ```
 

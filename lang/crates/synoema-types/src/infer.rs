@@ -480,6 +480,8 @@ impl Infer {
         env.insert("str_trim".into(), Scheme::mono(Type::arrow(Type::string(), Type::string())));
         // str_len: String -> Int
         env.insert("str_len".into(), Scheme::mono(Type::arrow(Type::string(), Type::int())));
+        // str_join: String -> [String] -> String
+        env.insert("str_join".into(), Scheme::mono(Type::arrow(Type::string(), Type::arrow(Type::list(Type::string()), Type::string()))));
         // json_escape: String -> String
         env.insert("json_escape".into(), Scheme::mono(Type::arrow(Type::string(), Type::string())));
         // json_parse: String -> Result JsonValue String

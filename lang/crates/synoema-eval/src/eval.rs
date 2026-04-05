@@ -839,7 +839,7 @@ impl Evaluator {
             ("sqrt", 1), ("floor", 1), ("ceil", 1), ("round", 1), ("abs", 1),
             // String builtins
             ("str_slice", 3), ("str_find", 3), ("str_starts_with", 2),
-            ("str_trim", 1), ("str_len", 1), ("json_escape", 1), ("json_parse", 1), ("file_read", 1),
+            ("str_trim", 1), ("str_len", 1), ("str_join", 2), ("json_escape", 1), ("json_parse", 1), ("file_read", 1),
             // I/O builtins (for stress_server.sno)
             ("tcp_listen", 1), ("tcp_accept", 1),
             ("fd_readline", 1), ("fd_write", 2), ("fd_close", 1), ("fd_popen", 1),
@@ -1086,6 +1086,17 @@ impl Evaluator {
             }
             "str_len" => {
                 Ok(Value::Int(sval(&args[0])?.len() as i64))
+            }
+            "str_join" => {
+                let sep = sval(&args[0])?;
+                let items = match &args[1] {
+                    Value::List(vs) => vs.iter().map(|v| match v {
+                        Value::Str(s) => s.clone(),
+                        other => format!("{}", other),
+                    }).collect::<Vec<_>>(),
+                    _ => return Err(EvalError { kind: EvalErrorKind::Type, message: "str_join: expected list".into() }),
+                };
+                Ok(Value::Str(items.join(&sep)))
             }
             "json_escape" => {
                 let s = sval(&args[0])?

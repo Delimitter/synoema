@@ -110,6 +110,7 @@ impl Compiler {
         builder.symbol("synoema_str_starts_with", runtime::synoema_str_starts_with as *const u8);
         builder.symbol("synoema_str_trim", runtime::synoema_str_trim as *const u8);
         builder.symbol("synoema_str_len", runtime::synoema_str_len as *const u8);
+        builder.symbol("synoema_str_join", runtime::synoema_str_join as *const u8);
         builder.symbol("synoema_json_escape", runtime::synoema_json_escape as *const u8);
         builder.symbol("synoema_json_parse", runtime::synoema_json_parse as *const u8);
         builder.symbol("synoema_error", runtime::synoema_error as *const u8);
@@ -274,6 +275,7 @@ impl Compiler {
         // String stdlib: fn(i64) -> i64
         decl(self, "synoema_str_trim", "str_trim", &sig1)?;
         decl(self, "synoema_str_len", "str_len", &sig1)?;
+        decl(self, "synoema_str_join", "str_join", &sig2)?;
         decl(self, "synoema_json_escape", "json_escape", &sig1)?;
         decl(self, "synoema_json_parse", "json_parse", &sig1)?;
         decl(self, "synoema_error", "error", &sig1)?;

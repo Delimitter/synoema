@@ -123,16 +123,18 @@ test "fac base" = fac 0 == 1
 
 ```
 -- List
-length map filter foldl concatMap head tail sum
+length map filter foldl concatMap head tail sum for_each
 -- String
-str_len str_slice str_find str_starts_with str_trim
+str_len str_slice str_find str_starts_with str_trim str_join
 -- Math
 sqrt floor ceil round abs even odd
 -- Result (prelude)
 Result a e = Ok a | Err e
 map_ok map_err unwrap unwrap_or is_ok is_err and_then error
+-- JSON (prelude)
+json_parse json_get json_str json_num json_arr json_obj
 -- IO
-print show readline
+print show readline file_read args
 ```
 
 Full stdlib: `docs/llm/stdlib.md`

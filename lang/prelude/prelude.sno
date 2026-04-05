@@ -116,3 +116,18 @@ JsonValue = JNull | JBool Bool | JNum Int | JStr String | JArr (List JsonValue) 
 --- Access a field in a JSON object by key.
 json_get k (JObj pairs) = map_lookup_list k pairs
 json_get k _ = Err "json_get: not an object"
+
+json_str (JStr s) = s
+json_str _ = error "json_str: expected string"
+
+json_num (JNum n) = n
+json_num _ = error "json_num: expected number"
+
+json_arr (JArr xs) = xs
+json_arr _ = error "json_arr: expected array"
+
+json_obj (JObj pairs) = pairs
+json_obj _ = error "json_obj: expected object"
+
+--- Apply a function to each element for side effects.
+for_each f xs = foldl (\u x -> f x) () xs

@@ -333,17 +333,14 @@ fn init_project(name_arg: Option<&str>, force: bool, no_git: bool, ai_target: Op
     let wants = |t: &str| target == t || target == "all";
 
     // Claude Code: CLAUDE.md + .claude/settings.json
-    if wants("claude") || ai_target.is_none() {
-        // Always create CLAUDE.md (thin pointer)
-        write_file(&root.join("CLAUDE.md"), &apply_tmpl(TMPL_CLAUDE, &name));
-    }
     let mcp_mode = if mcp_binary { "binary" } else { "npx" };
 
-    if wants("claude") {
+    if wants("claude") || ai_target.is_none() {
+        // Always create CLAUDE.md + MCP config (CLAUDE.md references settings.json)
+        write_file(&root.join("CLAUDE.md"), &apply_tmpl(TMPL_CLAUDE, &name));
         let claude_dir = root.join(".claude");
         write_dir(&claude_dir);
         write_file(&claude_dir.join("settings.json"), &mcp_config_json("mcpServers", mcp_binary));
-        println!("  Claude Code: CLAUDE.md + .claude/settings.json (MCP {mcp_mode})");
     }
 
     // Cursor: .cursorrules + .cursor/mcp.json
@@ -455,13 +452,21 @@ fn mcp_install(prefix: Option<&str>, from_source: bool) {
 
     if from_source {
         println!("Building synoema-mcp from source...");
-        // Try to find mcp/ relative to executable
+        // Try to find mcp/ relative to executable (check 3 and 4 levels up)
         let exe = std::env::current_exe().unwrap_or_default();
         let mcp_dir = exe.parent()
             .and_then(|p| p.parent())
             .and_then(|p| p.parent())
             .map(|p| p.join("mcp"))
-            .filter(|p| p.join("Cargo.toml").exists());
+            .filter(|p| p.join("Cargo.toml").exists())
+            .or_else(|| {
+                exe.parent()
+                    .and_then(|p| p.parent())
+                    .and_then(|p| p.parent())
+                    .and_then(|p| p.parent())
+                    .map(|p| p.join("mcp"))
+                    .filter(|p| p.join("Cargo.toml").exists())
+            });
 
         let mcp_dir = match mcp_dir {
             Some(d) => d,

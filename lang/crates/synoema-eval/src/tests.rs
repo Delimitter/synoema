@@ -2404,6 +2404,69 @@ main = get_both "{\"task\": \"fac\", \"counts\": 42}""#;
     ]));
 }
 
+// ── JSON extractors (prelude) ───────────────────────────
+
+#[test]
+fn json_str_extract() {
+    let (val, _) = run_main(r#"main = json_str (JStr "hello")"#);
+    assert_eq!(val, Value::Str("hello".into()));
+}
+
+#[test]
+fn json_num_extract() {
+    let (val, _) = run_main("main = json_num (JNum 42)");
+    assert_eq!(val, Value::Int(42));
+}
+
+#[test]
+fn json_arr_extract() {
+    let src = r#"
+main =
+  raw = unwrap (json_parse "[1, 2, 3]")
+  length (json_arr raw)"#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Int(3));
+}
+
+#[test]
+fn json_obj_extract() {
+    let src = r#"
+main =
+  raw = unwrap (json_parse "{\"a\": 1}")
+  length (json_obj raw)"#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Int(1));
+}
+
+// ── str_join (builtin) ─────────────────────────────────
+
+#[test]
+fn str_join_basic() {
+    let (val, _) = run_main(r#"main = str_join ", " ["a" "b" "c"]"#);
+    assert_eq!(val, Value::Str("a, b, c".into()));
+}
+
+#[test]
+fn str_join_empty() {
+    let (val, _) = run_main(r#"main = str_join " | " []"#);
+    assert_eq!(val, Value::Str("".into()));
+}
+
+#[test]
+fn str_join_single() {
+    let (val, _) = run_main(r#"main = str_join " | " ["only"]"#);
+    assert_eq!(val, Value::Str("only".into()));
+}
+
+// ── for_each (prelude) ─────────────────────────────────
+
+#[test]
+fn for_each_prints() {
+    let src = r#"main = for_each (\x -> print x) ["a" "b"]"#;
+    let (_, out) = run_main(src);
+    assert_eq!(out, vec!["a".to_string(), "b".to_string()]);
+}
+
 // ── Map operations ──────────────────────────────────────
 
 #[test]

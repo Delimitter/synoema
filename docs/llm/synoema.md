@@ -319,6 +319,9 @@ main =                      -- monadic bind
 | `str_len` `str_slice` `str_find` `str_trim` | String ops | see stdlib.md |
 | `map_insert` `map_lookup` `map_keys` | Map ops | sorted assoc list |
 | `json_parse` `json_get` | JSON ops | Result-wrapped |
+| `json_str` `json_num` `json_arr` `json_obj` | JSON extractors | unwrap JsonValue ADT |
+| `str_join` | `String -> [String] -> String` | join with separator |
+| `for_each` | `(a->b) -> [a] -> ()` | apply for side effects |
 | `env` `env_or` | `String -> String` | env variables |
 | `args` | `[String]` | CLI args after `--` |
 
@@ -461,4 +464,24 @@ qsort (x:xs) =
   qsort lt ++ [x] ++ qsort ge
 
 main = qsort [3 6 8 10 1 2 1]
+```
+
+### JSON pipeline (file_read + json_parse + extractors)
+```sno
+main =
+  content = file_read (head args)
+  data = unwrap (json_parse content)
+  items = json_arr (unwrap (json_get "items" data))
+  names = map (\item -> json_str (unwrap (json_get "name" item))) items
+  header = "Items: " ++ str_join ", " names
+  print header
+```
+
+### Side effects sequencing
+```sno
+--- Use let-bindings to sequence side effects (not ;)
+output header items =
+  s1 = print header
+  s2 = for_each (\x -> print x) items
+  print ("Total: " ++ show (length items))
 ```

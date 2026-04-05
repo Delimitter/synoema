@@ -751,6 +751,24 @@ pub extern "C" fn synoema_str_trim(s: i64) -> i64 {
     alloc_str(trimmed)
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn synoema_str_join(sep_tagged: i64, list_tagged: i64) -> i64 {
+    let (sd, sl) = unsafe { str_data(sep_tagged) };
+    let sep = unsafe { std::str::from_utf8(std::slice::from_raw_parts(sd, sl)).unwrap_or("") };
+    let mut items = Vec::new();
+    let mut cur = list_tagged;
+    while cur != 0 {
+        let node = cur as *const ListNode;
+        let head = unsafe { (*node).head };
+        let tail = unsafe { (*node).tail };
+        let (hd, hl) = unsafe { str_data(head) };
+        let s = unsafe { std::str::from_utf8(std::slice::from_raw_parts(hd, hl)).unwrap_or("") };
+        items.push(s.to_string());
+        cur = tail;
+    }
+    alloc_str(&items.join(sep))
+}
+
 /// Return byte length of string as untagged i64.
 pub extern "C" fn synoema_str_len(s: i64) -> i64 {
     let p = str_ptr(s);
