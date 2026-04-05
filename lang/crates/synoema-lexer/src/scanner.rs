@@ -61,6 +61,7 @@ impl<'src> Scanner<'src> {
         while !self.at_end() && self.peek() != b'\n' { self.advance(); }
     }
 
+
     fn scan_doc_comment(&mut self) -> String {
         // Skip optional leading space after ---
         if !self.at_end() && self.peek() == b' ' { self.advance(); }
@@ -228,7 +229,7 @@ impl<'src> Scanner<'src> {
                             self.advance(); // consume third '-'
                             Token::DocComment(self.scan_doc_comment())
                         } else {
-                            // -- regular comment (stripped)
+                            // -- regular comment (stripped from token stream)
                             self.skip_comment();
                             Token::Newline
                         }

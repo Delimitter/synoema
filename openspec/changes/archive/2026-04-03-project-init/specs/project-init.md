@@ -66,7 +66,7 @@ synoema test tests/        -- test
 synoema doc src/           -- docs
 
 ## Language
-See: https://github.com/synoema/synoema/blob/main/docs/llm/synoema.md
+See: https://github.com/Delimitter/synoema/blob/main/docs/llm/synoema.md
 ```
 
 ### `.gitignore`

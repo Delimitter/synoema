@@ -1,0 +1,37 @@
+-- SPDX-License-Identifier: MIT-0
+-- String manipulation utilities
+
+--- String utilities: reverse, repeat, contains, pad.
+--- example: main == ()
+
+-- Reverse a string character by character
+str_reverse s =
+  ? str_len s <= 1 -> s
+  : "${str_reverse (str_slice s 1 (str_len s))}${str_slice s 0 1}"
+
+-- Repeat a string n times
+str_repeat s n =
+  ? n <= 0 -> ""
+  : "${s}${str_repeat s (n - 1)}"
+
+-- Check if a string contains a substring
+str_contains haystack needle = str_find haystack needle 0 >= 0
+
+-- Pad right with spaces to given width
+str_pad_right s width =
+  padding = width - str_len s
+  ? padding <= 0 -> s
+  : "${s}${str_repeat " " padding}"
+
+-- Pad left with spaces to given width
+str_pad_left s width =
+  padding = width - str_len s
+  ? padding <= 0 -> s
+  : "${str_repeat " " padding}${s}"
+
+main =
+  p1 = print ("reverse 'hello': " ++ str_reverse "hello")
+  p2 = print ("repeat 'ab' 3: " ++ str_repeat "ab" 3)
+  p3 = print ("contains 'foobar' 'oba': " ++ show (str_contains "foobar" "oba"))
+  p4 = print ("pad_right 'hi' 10: '" ++ str_pad_right "hi" 10 ++ "'")
+  print ("pad_left '42' 6: '" ++ str_pad_left "42" 6 ++ "'")

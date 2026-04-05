@@ -1,0 +1,6 @@
+-- SPDX-License-Identifier: MIT-0
+
+palindrome xs = xs == reverse xs
+
+main =
+  show (palindrome [1 2 3 2 1]) ++ "\n" ++ show (palindrome [1 2 3])

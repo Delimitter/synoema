@@ -1,0 +1,1 @@
+Write three functions: double (multiply by 2), increment (add 1), and square. Compose them into a pipeline (double then increment then square) and apply to each element of [1 2 3 4 5]. Print the resulting list.

@@ -1,0 +1,1 @@
+Define an operation type (Push a number, Add, Multiply) and write a stack-based RPN calculator. Evaluate the sequence: Push 3, Push 4, Add, Push 5, Multiply. Print the result.

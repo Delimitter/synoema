@@ -1,0 +1,1 @@
+Write a function that splits a string by a delimiter. Use it to parse the CSV line "Alice,30,NYC" into fields. Print "name is age from city" using the parsed fields.

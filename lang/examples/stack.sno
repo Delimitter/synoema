@@ -1,0 +1,29 @@
+-- SPDX-License-Identifier: MIT-0
+-- Stack data structure via list
+
+--- Stack ADT: push, pop, peek, size.
+--- example: main == ()
+
+Stack a = MkStack (List a)
+
+stack_new = MkStack []
+stack_push x (MkStack xs) = MkStack (x : xs)
+
+stack_pop (MkStack xs) =
+  ? length xs == 0 -> Err "stack underflow"
+  : Ok (MkPair (head xs) (MkStack (tail xs)))
+
+stack_peek (MkStack xs) =
+  ? length xs == 0 -> Err "empty stack"
+  : Ok (head xs)
+
+stack_is_empty (MkStack xs) = length xs == 0
+
+stack_size (MkStack xs) = length xs
+
+main =
+  s = stack_push 10 (stack_push 20 (stack_push 30 stack_new))
+  p1 = print ("peek: " ++ show (stack_peek s))
+  p2 = print ("size: " ++ show (stack_size s))
+  popped = unwrap (stack_pop s)
+  print ("pop: " ++ show (fst popped) ++ ", remaining: " ++ show (stack_size (snd popped)))

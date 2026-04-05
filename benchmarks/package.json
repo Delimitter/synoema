@@ -1,0 +1,10 @@
+{
+  "name": "synoema-benchmarks",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Benchmark suite dependencies for TypeScript syntax validation and runtime",
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "tsx": "^4.0.0"
+  }
+}

@@ -1,0 +1,21 @@
+-- SPDX-License-Identifier: MIT-0
+-- Data pipeline with |> composition
+
+--- Pipeline: multi-stage data transformation using pipe operator.
+--- example: main == ()
+
+-- Pipeline stages
+cap_at limit xs = map (\x -> ? x > limit -> limit : x) xs
+
+main =
+  raw = [15 0 42 8 0 27 100 5]
+  capped = raw |> cap_at 50
+  filtered = capped |> filter (\x -> x > 0)
+  doubled = filtered |> map (\x -> x * 2)
+  p1 = print ("raw:      " ++ show raw)
+  p2 = print ("capped:   " ++ show capped)
+  p3 = print ("filtered: " ++ show filtered)
+  p4 = print ("doubled:  " ++ show doubled)
+  p5 = print ("sum:      " ++ show (sum doubled))
+  labels = doubled |> map (\x -> "${show x} pts")
+  print ("labels:   " ++ show labels)

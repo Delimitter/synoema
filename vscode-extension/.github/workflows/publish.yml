@@ -1,0 +1,44 @@
+name: Publish to VSCode Marketplace
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install
+        working-directory: vscode-extension
+
+      - name: Build extension
+        run: npm run build
+        working-directory: vscode-extension
+
+      - name: Package extension
+        run: npm run package
+        working-directory: vscode-extension
+
+      - name: Publish to Marketplace
+        run: npx vsce publish --pat ${{ secrets.VSCODE_MARKETPLACE_TOKEN }}
+        working-directory: vscode-extension
+        env:
+          VSCE_PAT: ${{ secrets.VSCODE_MARKETPLACE_TOKEN }}
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: vscode-extension/*.vsix
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

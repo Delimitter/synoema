@@ -1,12 +1,12 @@
 # Testing
 
-Synoema is covered by 771 tests across 7 crates. All tests pass with `0 failures, 0 warnings`.
+Synoema is covered by 998 tests across 8 crates. All tests pass with `0 failures, 0 warnings`.
 
 ## Quick Start
 
 ```bash
 cd lang/
-cargo test        # all tests — 771/771 green
+cargo test        # all tests — 998/998 green
 ```
 
 ## Test Structure
@@ -18,13 +18,14 @@ Each crate contains integration tests in `src/tests.rs`:
 | Crate | Tests | What is tested |
 |-------|------:|----------------|
 | `synoema-lexer` | 97 | Tokenization, offside rule, escape sequences, string interpolation |
-| `synoema-parser` | 72 | Pratt parser, type aliases, imports, error recovery, string interp |
+| `synoema-parser` | 90 | Pratt parser, type aliases, imports, error recovery, string interp |
 | `synoema-types` | 90 | Hindley-Milner, row polymorphism, type classes, alias expansion |
-| `synoema-core` | 50 | Core IR, desugaring, optimizations |
-| `synoema-eval` | 183 | Tree-walking interpreter, all language features |
-| `synoema-codegen` | 209 | Cranelift JIT — arithmetic, strings, ADTs, closures |
-| `synoema-diagnostic` | — | No separate tests (covered through eval/codegen) |
-| **Total** | **771** | |
+| `synoema-core` | 60 | Core IR, desugaring, optimizations |
+| `synoema-eval` | 294 | Tree-walking interpreter, all language features |
+| `synoema-codegen` | 225 | Cranelift JIT — arithmetic, strings, ADTs, closures |
+| `synoema-diagnostic` | 29 | Diagnostic messages, LLM hints, error formatting |
+| `synoema-repl` | 28 | CLI commands, project scaffolding |
+| **Total** | **998** | |
 
 ### Stress tests
 
@@ -43,7 +44,7 @@ cargo test --test stress -p synoema-codegen -- --nocapture
 | `synoema-lexer` | 10 (+ 3 ignored) | 100K tokens, deep nesting |
 | `synoema-types` | 9 (+ 2 ignored) | 500 functions, 100 ADT variants |
 | `synoema-eval` | 17 (+ 6 ignored) | fib(25), sorting 10K, typeclass dispatch |
-| `synoema-codegen` | 23 (+ 9 ignored) | fib(35) via JIT, 1K iterations map/filter |
+| `synoema-codegen` | 49 (+ 9 ignored) | fib(35) via JIT, 1K iterations map/filter |
 
 Tests marked with `#[ignore]` require the `--ignored` flag and may take a long time:
 

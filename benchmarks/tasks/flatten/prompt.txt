@@ -1,0 +1,1 @@
+Define a nested list type (Flat value or Nested list-of-nested) and write a flatten function that converts a nested structure into a flat list. Demonstrate with a nested structure containing [1 [2 3] [4 [5 6]]].

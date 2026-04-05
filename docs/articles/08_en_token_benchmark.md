@@ -174,7 +174,7 @@ The takeaway: **choose the right tool for the task.** Synoema excels at exactly 
 ## Reproduce It
 
 ```bash
-git clone https://github.com/synoema/synoema
+git clone https://github.com/Delimitter/synoema
 cd synoema
 
 # Run token benchmarks (no runtime deps needed)

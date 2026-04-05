@@ -2,56 +2,58 @@
 
 **Platform:** Windows 10/11 x64
 
-## Download
+## Prerequisites
 
-Download from [GitHub Releases](https://github.com/Delimitter/synoema/releases/tag/v0.1.0-alpha.1):
+- [Rust toolchain](https://www.rust-lang.org/tools/install) (download `rustup-init.exe`)
+- Visual Studio Build Tools (C++ workload) or Visual Studio with C++ support
+- Target: `rustup target add x86_64-pc-windows-msvc` (usually pre-installed)
 
-- `synoema-0.1.0-alpha.1-win32-x64.exe`
-- `synoema-mcp-0.1.0-alpha.1-win32-x64.exe`
-
-Or via PowerShell:
-
-```powershell
-Invoke-WebRequest `
-  -Uri "https://github.com/Delimitter/synoema/releases/download/v0.1.0-alpha.1/synoema-0.1.0-alpha.1-win32-x64.exe" `
-  -OutFile "synoema.exe"
-
-Invoke-WebRequest `
-  -Uri "https://github.com/Delimitter/synoema/releases/download/v0.1.0-alpha.1/synoema-mcp-0.1.0-alpha.1-win32-x64.exe" `
-  -OutFile "synoema-mcp.exe"
-```
-
-## Setup
-
-Move the executables to a directory in your `PATH`, e.g. `C:\Tools\`:
+## Build from source
 
 ```powershell
-Move-Item synoema.exe C:\Tools\synoema.exe
-Move-Item synoema-mcp.exe C:\Tools\synoema-mcp.exe
+cd releases\v0.1.0-alpha.1\win32-x64
+.\build.ps1
 ```
 
-Add `C:\Tools` to your system PATH if not already there.
+This produces two binaries in the current directory:
 
-## Run
+| Binary | What it does |
+|--------|-------------|
+| `synoema.exe` | Compiler CLI: eval, run, jit, repl, test, build |
+| `synoema-mcp.exe` | MCP server for Claude Desktop / Cursor / Zed |
+
+## Quick Start
 
 ```powershell
 # Evaluate an expression
-synoema eval "6 * 7"
+.\synoema.exe eval "6 * 7"
 # → 42
 
 # Run a file (interpreter)
-synoema run examples\quicksort.sno
-# → [1 2 3 4 5 6 7 8 9]
+.\synoema.exe run ..\..\..\lang\examples\quicksort.sno
+# → [1, 2, 3, 4, 5, 6, 7, 8, 9]
 
-# JIT compile and run
-synoema jit examples\factorial.sno
+# Run with JIT (faster)
+.\synoema.exe jit ..\..\..\lang\examples\factorial.sno
 # → 3628800
 
 # Interactive REPL
-synoema
+.\synoema.exe
+
+# Run doctests in a directory
+.\synoema.exe test ..\..\..\lang\examples\
 ```
 
-## MCP Server (Claude Desktop)
+## Install (optional)
+
+```powershell
+.\build.ps1 -Install
+# Copies to C:\Tools\ and prints PATH instructions
+```
+
+After install, use `synoema` from anywhere without `.\`.
+
+## MCP Setup (Claude Desktop)
 
 Edit `%APPDATA%\Claude\claude_desktop_config.json`:
 
@@ -65,16 +67,15 @@ Edit `%APPDATA%\Claude\claude_desktop_config.json`:
 }
 ```
 
-Restart Claude Desktop. The tools `eval`, `typecheck`, `run` will be available.
-
-Full MCP documentation: [docs/mcp.md](../../../docs/mcp.md)
+Restart Claude Desktop. Tools `eval`, `typecheck`, `run` become available.
 
 ## Windows Defender
 
-If Windows Defender flags the binary, you may need to add an exclusion for the binary path, or compile from source:
+If Defender flags the binary, add an exclusion for the binary path or compile from source (which you just did).
+
+## Alternative: Download Pre-built Binary
 
 ```powershell
-rustup target add x86_64-pc-windows-msvc
-cd mcp
-cargo build --release
+Invoke-WebRequest -Uri "https://github.com/Delimitter/synoema/releases/download/v0.1.0-alpha.1/synoema-0.1.0-alpha.1-win32-x64.exe" -OutFile "synoema.exe"
+Invoke-WebRequest -Uri "https://github.com/Delimitter/synoema/releases/download/v0.1.0-alpha.1/synoema-mcp-0.1.0-alpha.1-win32-x64.exe" -OutFile "synoema-mcp.exe"
 ```

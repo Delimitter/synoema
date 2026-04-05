@@ -1,0 +1,17 @@
+-- SPDX-License-Identifier: MIT-0
+
+Maybe a = Just a | Nothing
+
+map_maybe f (Just x) = Just (f x)
+map_maybe f Nothing = Nothing
+
+safe_div x 0 = Nothing
+safe_div x y = Just (x / y)
+
+show_maybe (Just x) = "Just " ++ show x
+show_maybe Nothing = "Nothing"
+
+main =
+  r1 = safe_div 10 2 |> map_maybe (\x -> x * 3)
+  r2 = safe_div 10 0 |> map_maybe (\x -> x * 3)
+  show_maybe r1 ++ "\n" ++ show_maybe r2

@@ -1,0 +1,34 @@
+-- SPDX-License-Identifier: MIT-0
+-- Memoization via Map
+
+--- Cache: memoization table using Map for expensive computations.
+--- example: main == ()
+
+-- Fibonacci with memoization (helpers defined before main function)
+fib_go 0 cache = MkPair 0 cache
+fib_go 1 cache = MkPair 1 cache
+fib_go n cache =
+  ? is_ok (map_lookup n cache) -> MkPair (unwrap (map_lookup n cache)) cache
+  : r1 = fib_go (n - 1) cache
+    r2 = fib_go (n - 2) (snd r1)
+    val = fst r1 + fst r2
+    MkPair val (map_insert n val (snd r2))
+
+fib_memo n = fst (fib_go n map_empty)
+
+-- Generic memoized call
+memo_call f key cache =
+  ? is_ok (map_lookup key cache) -> MkPair (unwrap (map_lookup key cache)) cache
+  : val = f key
+    MkPair val (map_insert key val cache)
+
+-- Simulate expensive computation
+expensive n = foldl (\a b -> a * b) 1 [1..n]
+
+main =
+  p1 = print ("fib(10): " ++ show (fib_memo 10))
+  p2 = print ("fib(20): " ++ show (fib_memo 20))
+  r1 = memo_call expensive 5 map_empty
+  p3 = print ("expensive(5): " ++ show (fst r1))
+  r2 = memo_call expensive 5 (snd r1)
+  print ("cached(5): " ++ show (fst r2))

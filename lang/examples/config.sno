@@ -1,0 +1,29 @@
+-- SPDX-License-Identifier: MIT-0
+-- Configuration from environment variables
+
+--- Config: env-based configuration with defaults and validation.
+--- example: main == ()
+
+-- Load config values from env with defaults
+get_host = env_or "APP_HOST" "localhost"
+get_port = env_or "APP_PORT" "8080"
+get_debug = env_or "APP_DEBUG" "false"
+get_name = env_or "APP_NAME" "myapp"
+
+-- Validate port is non-empty
+validate_port p = ? str_len p == 0 -> Err "port must not be empty" : Ok p
+
+-- Validate host is non-empty
+validate_host h = ? str_len h == 0 -> Err "host must not be empty" : Ok h
+
+main =
+  host = get_host
+  port = get_port
+  debug = get_debug
+  name = get_name
+  p1 = print ("host: " ++ host)
+  p2 = print ("port: " ++ port)
+  p3 = print ("debug: " ++ debug)
+  p4 = print ("name: " ++ name)
+  p5 = print ("valid host: " ++ show (validate_host host))
+  print ("valid port: " ++ show (validate_port port))

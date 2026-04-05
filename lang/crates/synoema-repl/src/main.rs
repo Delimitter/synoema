@@ -153,6 +153,22 @@ fn main() {
                 .copied();
             init_project(name_arg, force, no_git, ai_target, mcp_binary);
         }
+        Some("watch") => {
+            let sub = positional.get(1).unwrap_or_else(|| {
+                eprintln!("Usage: synoema watch <run|jit|build|test> <file> [--interval <ms>] [--no-clear]");
+                std::process::exit(1);
+            });
+            let path = positional.get(2).unwrap_or_else(|| {
+                eprintln!("Usage: synoema watch {} <file>", sub);
+                std::process::exit(1);
+            });
+            let interval = positional.iter().position(|a| *a == "--interval")
+                .and_then(|i| positional.get(i + 1))
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(500);
+            let clear = !positional.iter().any(|a| *a == "--no-clear");
+            watch_loop(sub, path, interval, clear, format);
+        }
         Some("mcp-install") => {
             let prefix = positional.iter().position(|a| *a == "--prefix")
                 .and_then(|i| positional.get(i + 1))
@@ -162,6 +178,13 @@ fn main() {
         }
         Some("mcp-update") => {
             mcp_update();
+        }
+        Some("install") => {
+            let prefix = positional.iter().position(|a| *a == "--prefix")
+                .and_then(|i| positional.get(i + 1))
+                .copied();
+            let no_path = positional.iter().any(|a| *a == "--no-path");
+            self_install(prefix, no_path);
         }
         Some("fmt") => {
             let path = positional.get(1).unwrap_or_else(|| {
@@ -196,8 +219,14 @@ fn main() {
             println!("  synoema build <file>       Build and compile to bytecode");
             println!("  synoema test <path>        Run tests (doctests + test declarations)");
             println!("  synoema doc <path>         Generate documentation (Markdown)");
+            println!("  synoema watch <cmd> <file> Watch file and re-run on change (debug mode)");
+            println!("  synoema install            Install to ~/.synoema/bin and add to PATH");
             println!("  synoema mcp-install        Install MCP server binary (no Node.js needed)");
             println!("  synoema mcp-update         Update MCP server to latest version");
+            println!();
+            println!("Self-install options:");
+            println!("  --prefix <path>            Install to <path>/bin/ instead of ~/.synoema/bin/");
+            println!("  --no-path                  Don't modify shell profile / PATH");
             println!();
             println!("Init options:");
             println!("  --force                    Init even if directory is non-empty");
@@ -205,6 +234,10 @@ fn main() {
             println!("  --ai <target>              Setup AI agent config + MCP server");
             println!("                             Targets: claude, cursor, copilot, windsurf, cline, all");
             println!("  --mcp-binary               Use local binary path instead of npx in MCP configs");
+            println!();
+            println!("Watch options:");
+            println!("  --interval <ms>            Polling interval in milliseconds (default: 500)");
+            println!("  --no-clear                 Don't clear terminal between runs");
             println!();
             println!("MCP install options:");
             println!("  --prefix <path>            Install to <path>/bin/ instead of ~/.synoema/bin/");
@@ -689,6 +722,163 @@ fn fetch_latest_version(api_url: &str) -> Option<String> {
     None
 }
 
+// ── Self Install ────────────────────────────────────────
+
+fn self_install(prefix: Option<&str>, no_path: bool) {
+    let exe = std::env::current_exe().unwrap_or_else(|e| {
+        eprintln!("Error: cannot determine current executable: {}", e);
+        std::process::exit(1);
+    });
+
+    let ext = if cfg!(windows) { ".exe" } else { "" };
+    let bin_dir = if let Some(p) = prefix {
+        std::path::PathBuf::from(p).join("bin")
+    } else if cfg!(windows) {
+        let home = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".into());
+        std::path::PathBuf::from(home).join(".synoema").join("bin")
+    } else {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        std::path::PathBuf::from(home).join(".synoema").join("bin")
+    };
+
+    let dest = bin_dir.join(format!("synoema{ext}"));
+
+    // Don't copy over ourselves
+    let same = dest.exists()
+        && exe.canonicalize().ok() == dest.canonicalize().ok();
+    if same {
+        println!("Already installed at {}", dest.display());
+    } else {
+        copy_binary(&exe, &dest);
+        println!("Installed: {}", dest.display());
+    }
+
+    // Also copy synoema-mcp if it sits next to current exe
+    let mcp_sibling = exe.parent()
+        .map(|p| p.join(format!("synoema-mcp{ext}")));
+    if let Some(ref mcp_src) = mcp_sibling {
+        if mcp_src.exists() {
+            let mcp_dest = bin_dir.join(format!("synoema-mcp{ext}"));
+            copy_binary(mcp_src, &mcp_dest);
+            println!("Installed: {}", mcp_dest.display());
+        }
+    }
+
+    if no_path {
+        println!();
+        println!("Add to PATH manually:");
+        if cfg!(windows) {
+            println!("  $env:PATH = \"{};$env:PATH\"", bin_dir.display());
+        } else {
+            println!("  export PATH=\"{}:$PATH\"", bin_dir.display());
+        }
+        return;
+    }
+
+    // Setup PATH
+    if cfg!(windows) {
+        setup_path_windows(&bin_dir);
+    } else {
+        setup_path_unix(&bin_dir);
+    }
+}
+
+fn setup_path_unix(bin_dir: &std::path::Path) {
+    let shell = std::env::var("SHELL").unwrap_or_default();
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+
+    let (profile_path, path_line) = if shell.ends_with("/fish") {
+        let config = std::path::PathBuf::from(&home)
+            .join(".config/fish/config.fish");
+        (config, format!("fish_add_path {}", bin_dir.display()))
+    } else if shell.ends_with("/zsh") {
+        (std::path::PathBuf::from(&home).join(".zshrc"),
+         format!("export PATH=\"{}:$PATH\"", bin_dir.display()))
+    } else {
+        // bash: prefer .bashrc, fall back to .bash_profile
+        let bashrc = std::path::PathBuf::from(&home).join(".bashrc");
+        let profile = if bashrc.exists() {
+            bashrc
+        } else {
+            std::path::PathBuf::from(&home).join(".bash_profile")
+        };
+        (profile, format!("export PATH=\"{}:$PATH\"", bin_dir.display()))
+    };
+
+    // Check if already in profile
+    let marker = ".synoema/bin";
+    if let Ok(contents) = std::fs::read_to_string(&profile_path) {
+        if contents.contains(marker) {
+            println!("PATH already configured in {}", profile_path.display());
+            return;
+        }
+    }
+
+    // Create parent dirs if needed (e.g. fish config)
+    if let Some(parent) = profile_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    // Append to profile
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&profile_path)
+        .unwrap_or_else(|e| {
+            eprintln!("Error writing {}: {}", profile_path.display(), e);
+            std::process::exit(1);
+        });
+    use std::io::Write;
+    let _ = writeln!(file);
+    let _ = writeln!(file, "# Synoema");
+    let _ = writeln!(file, "{}", path_line);
+
+    println!("Added to {}", profile_path.display());
+    println!();
+    println!("Run to activate now:");
+    println!("  source {}", profile_path.display());
+}
+
+fn setup_path_windows(bin_dir: &std::path::Path) {
+    let bin_str = bin_dir.to_string_lossy();
+
+    // Check if already in PATH
+    if let Ok(current_path) = std::env::var("PATH") {
+        if current_path.contains(&*bin_str) {
+            println!("PATH already contains {}", bin_dir.display());
+            return;
+        }
+    }
+
+    // Add to User PATH via PowerShell
+    let ps_script = format!(
+        "$old = [Environment]::GetEnvironmentVariable('PATH', 'User'); \
+         if ($old -notlike '*{}*') {{ \
+             [Environment]::SetEnvironmentVariable('PATH', '{};' + $old, 'User'); \
+             Write-Host 'PATH updated' \
+         }} else {{ \
+             Write-Host 'PATH already set' \
+         }}",
+        bin_str, bin_str
+    );
+
+    let status = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command", &ps_script])
+        .status();
+
+    match status {
+        Ok(s) if s.success() => {
+            println!("Added to User PATH: {}", bin_dir.display());
+            println!();
+            println!("Restart your terminal for PATH changes to take effect.");
+        }
+        _ => {
+            eprintln!("Warning: could not update PATH automatically.");
+            eprintln!("Add manually: {}", bin_dir.display());
+        }
+    }
+}
+
 fn is_dir_non_empty(path: &std::path::Path) -> bool {
     path.exists() && path.read_dir()
         .map(|mut d| d.next().is_some())
@@ -907,12 +1097,82 @@ mod init_tests {
     }
 }
 
-fn run_file(path: &str, format: ErrorFormat, script_args: Vec<String>) {
+#[cfg(test)]
+mod watch_tests {
+    use super::*;
+
+    #[test]
+    fn collect_watched_single_file() {
+        let dir = std::env::temp_dir().join("synoema_watch_test_single");
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("hello.sno");
+        std::fs::write(&file, "main = 42").unwrap();
+
+        let files = collect_watched_files(file.to_str().unwrap());
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0], file);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn collect_watched_with_import() {
+        let dir = std::env::temp_dir().join("synoema_watch_test_import");
+        let _ = std::fs::create_dir_all(&dir);
+        std::fs::write(dir.join("lib.sno"), "double x = x * 2").unwrap();
+        std::fs::write(dir.join("main.sno"), "import \"lib.sno\"\nmain = double 21").unwrap();
+
+        let files = collect_watched_files(dir.join("main.sno").to_str().unwrap());
+        assert!(files.len() >= 2, "should include main.sno + lib.sno, got {:?}", files);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn collect_watched_directory() {
+        let dir = std::env::temp_dir().join("synoema_watch_test_dir");
+        let _ = std::fs::create_dir_all(&dir);
+        std::fs::write(dir.join("a.sno"), "x = 1").unwrap();
+        std::fs::write(dir.join("b.sno"), "y = 2").unwrap();
+
+        let files = collect_watched_files(dir.to_str().unwrap());
+        assert!(files.len() >= 2, "should include .sno files in dir, got {:?}", files);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn get_max_mtime_works() {
+        let dir = std::env::temp_dir().join("synoema_watch_test_mtime");
+        let _ = std::fs::create_dir_all(&dir);
+        let f1 = dir.join("a.sno");
+        let f2 = dir.join("b.sno");
+        std::fs::write(&f1, "x = 1").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        std::fs::write(&f2, "y = 2").unwrap();
+
+        let files = vec![f1, f2.clone()];
+        let mtime = get_max_mtime(&files);
+        assert!(mtime.is_some());
+        // The max mtime should be from the second file
+        let f2_mtime = std::fs::metadata(&f2).unwrap().modified().unwrap();
+        assert_eq!(mtime.unwrap(), f2_mtime);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn chrono_free_timestamp_format() {
+        let ts = chrono_free_timestamp();
+        // Should be HH:MM:SS format
+        assert_eq!(ts.len(), 8, "timestamp should be 8 chars (HH:MM:SS), got '{}'", ts);
+        assert_eq!(&ts[2..3], ":", "expected colon at position 2, got '{}'", ts);
+        assert_eq!(&ts[5..6], ":", "expected colon at position 5, got '{}'", ts);
+    }
+}
+
+fn run_file_inner(path: &str, format: ErrorFormat, script_args: Vec<String>) -> Result<(), ()> {
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Error reading '{}': {}", path, e);
-            std::process::exit(1);
+            return Err(());
         }
     };
 
@@ -923,20 +1183,27 @@ fn run_file(path: &str, format: ErrorFormat, script_args: Vec<String>) {
                 println!("{}", line);
             }
             println!("{}", val);
+            Ok(())
         }
         Err(diag) => {
             print_diag(&diag, Some(&source), format);
-            std::process::exit(1);
+            Err(())
         }
     }
 }
 
-fn jit_file(path: &str, format: ErrorFormat) {
+fn run_file(path: &str, format: ErrorFormat, script_args: Vec<String>) {
+    if run_file_inner(path, format, script_args).is_err() {
+        std::process::exit(1);
+    }
+}
+
+fn jit_file_inner(path: &str, format: ErrorFormat) -> Result<(), ()> {
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Error reading '{}': {}", path, e);
-            std::process::exit(1);
+            return Err(());
         }
     };
 
@@ -948,7 +1215,7 @@ fn jit_file(path: &str, format: ErrorFormat) {
         Err(e) => {
             let diag = Diagnostic::error(synoema_diagnostic::codes::PARSE_UNEXPECTED_TOKEN, format!("{}", e));
             print_diag(&diag, Some(&source), format);
-            std::process::exit(1);
+            return Err(());
         }
     };
     let program = match synoema_parser::resolve_imports(program, base_dir) {
@@ -961,22 +1228,28 @@ fn jit_file(path: &str, format: ErrorFormat) {
             };
             let diag = Diagnostic::error(code, e.message).with_span(e.span);
             print_diag(&diag, Some(&source), format);
-            std::process::exit(1);
+            return Err(());
         }
     };
     if let Err(e) = synoema_types::typecheck_program(&program) {
         let diag = synoema_eval::type_err_to_diagnostic(e);
         print_diag(&diag, Some(&source), format);
-        std::process::exit(1);
+        return Err(());
     }
 
     // JIT compile and run via Cranelift
     match synoema_codegen::compile_and_display_with_base_dir(&source, Some(base_dir)) {
-        Ok(result) => println!("{}", result),
+        Ok(result) => { println!("{}", result); Ok(()) }
         Err(diag) => {
             print_diag(&diag, Some(&source), format);
-            std::process::exit(1);
+            Err(())
         }
+    }
+}
+
+fn jit_file(path: &str, format: ErrorFormat) {
+    if jit_file_inner(path, format).is_err() {
+        std::process::exit(1);
     }
 }
 
@@ -1074,6 +1347,143 @@ fn build_file(path: &str, output: Option<&str>, check_only: bool, _verbose: bool
             std::process::exit(1);
         }
     }
+}
+
+// ── Watch Mode ──────────────────────────────────────────
+
+fn collect_watched_files(path: &str) -> Vec<std::path::PathBuf> {
+    let main_path = std::path::PathBuf::from(path);
+    let mut files = vec![main_path.clone()];
+
+    // For .sno files, also collect imported files
+    if main_path.extension().map(|e| e == "sno").unwrap_or(false) {
+        if let Ok(source) = std::fs::read_to_string(&main_path) {
+            if let Ok(program) = synoema_parser::parse(&source) {
+                let base_dir = main_path.parent().unwrap_or(std::path::Path::new("."));
+                for imp in &program.imports {
+                    let resolved = base_dir.join(&imp.path);
+                    if resolved.exists() {
+                        files.push(resolved);
+                    }
+                }
+            }
+        }
+    }
+
+    // For directories (test mode), collect all .sno files
+    if main_path.is_dir() {
+        let mut sno_files = Vec::new();
+        collect_sno_files(path, &mut sno_files);
+        for f in sno_files {
+            files.push(std::path::PathBuf::from(f));
+        }
+    }
+
+    files
+}
+
+fn get_max_mtime(files: &[std::path::PathBuf]) -> Option<std::time::SystemTime> {
+    files.iter()
+        .filter_map(|f| std::fs::metadata(f).ok()?.modified().ok())
+        .max()
+}
+
+fn watch_loop(subcommand: &str, path: &str, interval_ms: u64, clear: bool, format: ErrorFormat) {
+    let interval = std::time::Duration::from_millis(interval_ms);
+    let mut run_count = 0u64;
+    let mut last_mtime: Option<std::time::SystemTime> = None;
+    let mut last_duration = std::time::Duration::ZERO;
+
+    println!("Watching {} ({}), interval {}ms. Ctrl+C to stop.", path, subcommand, interval_ms);
+    println!();
+
+    loop {
+        let files = collect_watched_files(path);
+        let current_mtime = get_max_mtime(&files);
+
+        let changed = match (&last_mtime, &current_mtime) {
+            (None, _) => true, // first run
+            (Some(prev), Some(curr)) => curr > prev,
+            _ => false,
+        };
+
+        if changed {
+            run_count += 1;
+            last_mtime = current_mtime;
+
+            if clear && run_count > 1 {
+                // ANSI clear screen + move cursor to top
+                print!("\x1b[2J\x1b[H");
+            }
+
+            // Debug header
+            let now = chrono_free_timestamp();
+            let label = if run_count == 1 { "initial" } else { "modified" };
+            let timing = if run_count > 1 {
+                format!(" | {}ms", last_duration.as_millis())
+            } else {
+                String::new()
+            };
+            println!("[watch #{}] {} | {} ({}){}", run_count, now, path, label, timing);
+            println!("{}", "─".repeat(48));
+
+            let start = std::time::Instant::now();
+
+            match subcommand {
+                "run" => { let _ = run_file_inner(path, format, vec![]); }
+                "jit" => { let _ = jit_file_inner(path, format); }
+                "build" => { build_file(path, None, false, false, format); }
+                "test" => { run_all_tests(path, format, None); }
+                other => {
+                    eprintln!("Unknown watch subcommand: {}", other);
+                    std::process::exit(1);
+                }
+            }
+
+            last_duration = start.elapsed();
+            println!();
+        }
+
+        std::thread::sleep(interval);
+    }
+}
+
+fn chrono_free_timestamp() -> String {
+    // Format current time without chrono dependency
+    use std::time::SystemTime;
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = now.as_secs();
+    // Simple HH:MM:SS from unix timestamp (local time approximation via env)
+    // Use libc localtime for proper local time
+    let (h, m, s) = {
+        #[cfg(unix)]
+        {
+            extern "C" {
+                fn localtime(time: *const i64) -> *const Tm;
+            }
+            #[repr(C)]
+            struct Tm {
+                tm_sec: i32,
+                tm_min: i32,
+                tm_hour: i32,
+                _rest: [i32; 6],
+            }
+            let t = secs as i64;
+            let tm = unsafe { &*localtime(&t) };
+            (tm.tm_hour as u64, tm.tm_min as u64, tm.tm_sec as u64)
+        }
+        #[cfg(not(unix))]
+        {
+            // Fallback: UTC
+            let h = (secs / 3600) % 24;
+            let m = (secs % 3600) / 60;
+            let s = secs % 60;
+            (h, m, s)
+        }
+    };
+    format!("{:02}:{:02}:{:02}", h, m, s)
 }
 
 fn repl(format: ErrorFormat) {
@@ -1788,20 +2198,221 @@ fn generate_doc_file(path: &str) {
     }
 }
 
-fn generate_docs(path: &str, _fmt: &str) {
+fn generate_docs(path: &str, fmt: &str) {
     let meta = std::fs::metadata(path);
-    if meta.as_ref().map(|m| m.is_dir()).unwrap_or(false) {
-        let mut files = Vec::new();
-        collect_sno_files(path, &mut files);
-        files.sort();
-        for file in &files {
-            generate_doc_file(file);
-            println!("---");
+    if fmt == "json" {
+        if meta.as_ref().map(|m| m.is_dir()).unwrap_or(false) {
+            let mut files = Vec::new();
+            collect_sno_files(path, &mut files);
+            files.sort();
+            print!("[");
+            for (i, file) in files.iter().enumerate() {
+                if i > 0 { print!(","); }
+                generate_doc_json(file);
+            }
+            println!("]");
+        } else {
+            generate_doc_json(path);
             println!();
         }
     } else {
-        generate_doc_file(path);
+        if meta.as_ref().map(|m| m.is_dir()).unwrap_or(false) {
+            let mut files = Vec::new();
+            collect_sno_files(path, &mut files);
+            files.sort();
+            for file in &files {
+                generate_doc_file(file);
+                println!("---");
+                println!();
+            }
+        } else {
+            generate_doc_file(path);
+        }
     }
+}
+
+/// Extract `--` comment lines from source text, keyed by line number (1-based).
+/// Returns only comments on their own line (not inline after code).
+fn extract_source_comments(source: &str) -> Vec<(u32, String)> {
+    let mut comments = Vec::new();
+    for (i, line) in source.lines().enumerate() {
+        let trimmed = line.trim();
+        // Own-line comment: starts with `--` but not `---` (which is DocComment)
+        if trimmed.starts_with("--") && !trimmed.starts_with("---") {
+            let text = trimmed.strip_prefix("--").unwrap().trim();
+            // Skip license/SPDX headers
+            if !text.starts_with("SPDX-") {
+                comments.push((i as u32 + 1, text.to_string()));
+            }
+        }
+    }
+    comments
+}
+
+/// Find the `--` comment immediately above a given line (no blank lines between).
+fn find_comment_for_line(_comments: &[(u32, String)], source: &str, decl_line: u32) -> Option<String> {
+    if decl_line <= 1 { return None; }
+    let lines: Vec<&str> = source.lines().collect();
+
+    // Walk upward from decl_line - 1, collecting consecutive comment lines
+    let mut collected = Vec::new();
+    let mut check_line = decl_line - 1; // 1-based
+    loop {
+        if check_line == 0 { break; }
+        let idx = (check_line - 1) as usize;
+        if idx >= lines.len() { break; }
+        let trimmed = lines[idx].trim();
+        if trimmed.starts_with("--") && !trimmed.starts_with("---") {
+            let text = trimmed.strip_prefix("--").unwrap().trim();
+            if !text.starts_with("SPDX-") {
+                collected.push(text.to_string());
+            }
+            check_line -= 1;
+        } else {
+            break;
+        }
+    }
+    if collected.is_empty() { return None; }
+    collected.reverse();
+    Some(collected.join("\n"))
+}
+
+fn escape_json(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\t', "\\t")
+}
+
+fn generate_doc_json(path: &str) {
+    let source = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error reading '{}': {}", path, e);
+            return;
+        }
+    };
+
+    let program = match synoema_parser::parse(&source) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("Parse error in '{}': {}", path, e);
+            return;
+        }
+    };
+
+    let _comments = extract_source_comments(&source);
+
+    // Extract top-level description from first module or first decl with doc
+    let top_doc: Vec<String> = program.modules.first()
+        .filter(|m| !m.doc.is_empty())
+        .map(|m| m.doc.clone())
+        .unwrap_or_else(|| {
+            // Check first decl with doc-comments
+            for decl in &program.decls {
+                let doc = match decl {
+                    synoema_parser::Decl::Func { doc, .. } => doc,
+                    synoema_parser::Decl::TypeDef { doc, .. } => doc,
+                    synoema_parser::Decl::TraitDecl { doc, .. } => doc,
+                    _ => continue,
+                };
+                if !doc.is_empty() { return doc.clone(); }
+            }
+            Vec::new()
+        });
+
+    let description = top_doc.iter()
+        .find(|l| !l.starts_with("guide:") && !l.starts_with("order:") && !l.starts_with("requires:") && !l.starts_with("example:"))
+        .map(|s| escape_json(s));
+
+    // Extract examples from top-level docs
+    let examples: Vec<String> = top_doc.iter()
+        .filter_map(|l| l.strip_prefix("example:").map(|r| r.trim().to_string()))
+        .map(|ex| {
+            let (expr, expected) = split_example(&ex);
+            let exp_json = match &expected {
+                Some(v) => format!("\"{}\"", escape_json(v)),
+                None => "null".to_string(),
+            };
+            format!("{{\"expr\":\"{}\",\"expected\":{}}}", escape_json(&expr), exp_json)
+        })
+        .collect();
+
+    // Collect functions and types
+    let render_func = |name: &str, doc: &[String], span: &synoema_lexer::Span| -> String {
+        let comment = find_comment_for_line(&_comments, &source, span.start.line);
+        let doc_lines: Vec<String> = doc.iter()
+            .filter(|l| !l.starts_with("example:") && !l.starts_with("guide:") && !l.starts_with("order:") && !l.starts_with("requires:"))
+            .map(|s| format!("\"{}\"", escape_json(s)))
+            .collect();
+        let comment_json = match &comment {
+            Some(c) => format!("\"{}\"", escape_json(c)),
+            None => "null".to_string(),
+        };
+        format!("{{\"name\":\"{}\",\"comment\":{},\"doc\":[{}],\"line\":{}}}",
+            escape_json(name), comment_json, doc_lines.join(","), span.start.line)
+    };
+
+    let render_type = |name: &str, doc: &[String], variants: &[synoema_parser::Variant], span: &synoema_lexer::Span| -> String {
+        let comment = find_comment_for_line(&_comments, &source, span.start.line);
+        let doc_lines: Vec<String> = doc.iter()
+            .filter(|l| !l.starts_with("example:"))
+            .map(|s| format!("\"{}\"", escape_json(s)))
+            .collect();
+        let variant_names: Vec<String> = variants.iter()
+            .map(|v| format!("\"{}\"", escape_json(&v.name)))
+            .collect();
+        let comment_json = match &comment {
+            Some(c) => format!("\"{}\"", escape_json(c)),
+            None => "null".to_string(),
+        };
+        format!("{{\"name\":\"{}\",\"comment\":{},\"doc\":[{}],\"variants\":[{}],\"line\":{}}}",
+            escape_json(name), comment_json, doc_lines.join(","), variant_names.join(","), span.start.line)
+    };
+
+    // Modules
+    let mut module_jsons = Vec::new();
+    for module in &program.modules {
+        let mut funcs = Vec::new();
+        let mut types = Vec::new();
+        for decl in &module.body {
+            match decl {
+                synoema_parser::Decl::Func { name, doc, span, .. } => {
+                    funcs.push(render_func(name, doc, span));
+                }
+                synoema_parser::Decl::TypeDef { name, doc, variants, span, .. } => {
+                    types.push(render_type(name, doc, variants, span));
+                }
+                _ => {}
+            }
+        }
+        let mod_doc: Vec<String> = module.doc.iter()
+            .filter(|l| !l.starts_with("guide:") && !l.starts_with("order:") && !l.starts_with("requires:") && !l.starts_with("example:"))
+            .map(|s| format!("\"{}\"", escape_json(s)))
+            .collect();
+        module_jsons.push(format!("{{\"name\":\"{}\",\"doc\":[{}],\"functions\":[{}],\"types\":[{}]}}",
+            escape_json(&module.name), mod_doc.join(","), funcs.join(","), types.join(",")));
+    }
+
+    // Top-level functions and types
+    let mut top_funcs = Vec::new();
+    let mut top_types = Vec::new();
+    for decl in &program.decls {
+        match decl {
+            synoema_parser::Decl::Func { name, doc, span, .. } => {
+                top_funcs.push(render_func(name, doc, span));
+            }
+            synoema_parser::Decl::TypeDef { name, doc, variants, span, .. } => {
+                top_types.push(render_type(name, doc, variants, span));
+            }
+            _ => {}
+        }
+    }
+
+    let desc_json = match &description {
+        Some(d) => format!("\"{}\"", d),
+        None => "null".to_string(),
+    };
+
+    print!("{{\"file\":\"{}\",\"description\":{},\"examples\":[{}],\"modules\":[{}],\"functions\":[{}],\"types\":[{}]}}",
+        escape_json(path), desc_json, examples.join(","), module_jsons.join(","), top_funcs.join(","), top_types.join(","));
 }
 
 fn type_of(expr: &str, env_source: &str, format: ErrorFormat) {

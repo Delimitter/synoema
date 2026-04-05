@@ -145,7 +145,7 @@ This taxonomy directly maps to the three constraint levels from our constrained 
 ## Reproduce It
 
 ```bash
-git clone https://github.com/synoema/synoema
+git clone https://github.com/Delimitter/synoema
 cd synoema
 
 # Run LLM generation benchmarks (requires OpenRouter API key)

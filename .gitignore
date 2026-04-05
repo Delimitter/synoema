@@ -1,6 +1,13 @@
 # Rust build artifacts
 lang/target/
 mcp/target/
+benchmarks/runner/target/
+
+# Node modules
+node_modules/
+
+# Benchmark results (generated data, not committed)
+benchmarks/results/
 
 # npm platform binaries (copied by CI at release time, not committed)
 npm/platforms/*/synoema-mcp

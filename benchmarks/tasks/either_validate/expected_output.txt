@@ -1,0 +1,2 @@
+Ok Alice is 25
+Err empty name

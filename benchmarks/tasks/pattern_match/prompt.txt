@@ -1,1 +1,4 @@
-Write a function that describes a shape: Circle with radius, Rectangle with width and height, Triangle with base and height. Print area for each.
+Define shape types (Circle, Rectangle, Triangle) and compute their areas. Use: Circle radius=5 (area=pi*r*r, use 3.14), Rectangle width=4 height=6 (area=w*h), Triangle base=6 height=5 (area=0.5*b*h). Print each on a separate line. Output must be exactly:
+Circle: 78.5
+Rectangle: 24
+Triangle: 15

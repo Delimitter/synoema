@@ -1,51 +1,63 @@
-# Synoema v0.1.0-alpha.1 — macOS Intel (darwin-x64)
+# Synoema v0.1.0-alpha.1 — macOS Intel
 
 **Platform:** macOS 12+ (Monterey or later), Intel x86_64
 
-## Download
+## Prerequisites
+
+- [Rust toolchain](https://rustup.rs/) (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`)
+- Target: `rustup target add x86_64-apple-darwin`
+
+## Build from source
 
 ```bash
-curl -L https://github.com/Delimitter/synoema/releases/download/v0.1.0-alpha.1/synoema-0.1.0-alpha.1-darwin-x64 \
-  -o synoema
-
-curl -L https://github.com/Delimitter/synoema/releases/download/v0.1.0-alpha.1/synoema-mcp-0.1.0-alpha.1-darwin-x64 \
-  -o synoema-mcp
+cd releases/v0.1.0-alpha.1/darwin-x64
+make
 ```
 
-## Setup
+This produces two binaries in the current directory:
 
-```bash
-# Make executable
-chmod +x synoema synoema-mcp
+| Binary | What it does |
+|--------|-------------|
+| `synoema` | Compiler CLI: eval, run, jit, repl, test, build |
+| `synoema-mcp` | MCP server for Claude Desktop / Cursor / Zed |
 
-# Remove macOS quarantine flag (required for unsigned binaries)
-xattr -dr com.apple.quarantine synoema synoema-mcp
-
-# Optional: move to PATH
-sudo mv synoema /usr/local/bin/
-sudo mv synoema-mcp /usr/local/bin/
-```
-
-## Run
+## Quick Start
 
 ```bash
 # Evaluate an expression
-synoema eval "6 * 7"
+./synoema eval "6 * 7"
 # → 42
 
 # Run a file (interpreter)
-synoema run examples/quicksort.sno
-# → [1 2 3 4 5 6 7 8 9]
+./synoema run ../../../lang/examples/quicksort.sno
+# → [1, 2, 3, 4, 5, 6, 7, 8, 9]
 
-# JIT compile and run (4.4× faster)
-synoema jit examples/factorial.sno
+# Run with JIT (faster)
+./synoema jit ../../../lang/examples/factorial.sno
 # → 3628800
 
 # Interactive REPL
-synoema
+./synoema
+
+# Run doctests in a directory
+./synoema test ../../../lang/examples/
 ```
 
-## MCP Server (Claude Desktop)
+## Install (optional)
+
+```bash
+sudo make install
+# Copies synoema and synoema-mcp to /usr/local/bin/
+```
+
+After install, use `synoema` from anywhere without `./`.
+
+If macOS blocks the binary:
+```bash
+xattr -dr com.apple.quarantine /usr/local/bin/synoema /usr/local/bin/synoema-mcp
+```
+
+## MCP Setup (Claude Desktop)
 
 Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
@@ -59,6 +71,12 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-Restart Claude Desktop. The tools `eval`, `typecheck`, `run` will be available.
+Restart Claude Desktop. Tools `eval`, `typecheck`, `run` become available.
 
-Full MCP documentation: [docs/mcp.md](../../../docs/mcp.md)
+## Alternative: Download Pre-built Binary
+
+```bash
+curl -L https://github.com/Delimitter/synoema/releases/download/v0.1.0-alpha.1/synoema-0.1.0-alpha.1-darwin-x64 -o synoema
+curl -L https://github.com/Delimitter/synoema/releases/download/v0.1.0-alpha.1/synoema-mcp-0.1.0-alpha.1-darwin-x64 -o synoema-mcp
+chmod +x synoema synoema-mcp
+```

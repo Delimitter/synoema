@@ -38,6 +38,8 @@ Grammar: `lang/tools/constrained/synoema.gbnf` (use for constrained decoding).
 - All bindings immutable
 - Strict eval, left-to-right
 - Types inferred — annotations optional: `f : Int -> Int`
+- **Define before use** — functions must be defined before first reference (no forward declarations)
+- **Multi-equation defs are top-level only** — `f 0 = ... / f n = ...` only at module top level, not inside let blocks
 
 ---
 
@@ -193,8 +195,10 @@ dist p = p.x * p.x + p.y * p.y
 
 ## 8. ADTs & pattern matching
 
+**Note:** `Maybe` is NOT built-in. Define it when needed. `Result` IS in the prelude.
+
 ```sno
--- type definition
+-- type definition (user-defined — not in prelude)
 Maybe a = Just a | None
 Shape   = Circle Float | Rect Float Float | Point
 
@@ -306,13 +310,15 @@ main =                      -- monadic bind
 | `concatMap` | `(a->[b]) -> [a] -> [b]` | map + flatten |
 | `sum` | `[Int] -> Int` | sum list |
 | `zip` | `[a] -> [b] -> [(a,b)]` | pair elements |
-| `index` | `[a] -> Int -> a` | 0-based index |
+| `index` | `Int -> [a] -> a` | 0-based index |
 | `take` `drop` | `Int -> [a] -> [a]` | first/skip n |
 | `reverse` | `[a] -> [a]` | reverse list |
 | `sqrt` `floor` `ceil` `abs` `round` | `Float -> Float` | math |
+| `even` `odd` | `Int -> Bool` | parity check |
+| `not` | `Bool -> Bool` | logical negation |
 | `str_len` `str_slice` `str_find` `str_trim` | String ops | see stdlib.md |
 | `map_insert` `map_lookup` `map_keys` | Map ops | sorted assoc list |
-| `json_parse` `json_encode` `json_get` | JSON ops | Result-wrapped |
+| `json_parse` `json_get` | JSON ops | Result-wrapped |
 | `env` `env_or` | `String -> String` | env variables |
 | `args` | `[String]` | CLI args after `--` |
 
@@ -344,10 +350,115 @@ Keywords: `test` (declaration), `prop` (generator), `when` (conditional). Run: `
 
 ---
 
-## 16. Gotchas
+## 16. Gotchas (CRITICAL — read before generating code)
 
 1. **Cons pattern needs parens** — `head (x:_) = x` ✓  `head x:_ = x` ✗
 2. **List: space-separated** — `[1 2 3]` never `[1, 2, 3]`
 3. **`:` is both else-branch AND cons** — protect cons: `? c -> (x:xs) : rest`
-4. **String concat `++`** — `+` is numeric only
+4. **String concat `++`** — `+` is numeric only, strings use `++`
 5. **No `return`** — last expr is the result
+6. **`[f x]` is a 2-element list** — for single-element `[(f x)]` use parens
+7. **`show` converts any value to String** — `show 42` = `"42"`, `show [1 2]` = `"[1, 2]"`
+8. **Integer division** — `/` on Int returns Int (truncated)
+9. **`index i xs`** — 0-based list indexing, NOT `xs[i]` or `xs !! i`
+10. **Multi-line result** — use `"\n"` in string concat: `"line1" ++ "\n" ++ "line2"`
+11. **`json_get` = single flat key** — `json_get "key" obj`, NOT `json_get "a.b.c"`. Chain calls for nesting: `json_get "b" (unwrap (json_get "a" obj))`
+12. **`?` is if/else only** — NOT pattern matching. For ADT dispatch, use multi-equation functions: `f (Just x) = ... / f None = ...`
+13. **`Maybe` is NOT in prelude** — define when needed: `Maybe a = Just a | None`. `Result` IS built-in.
+
+---
+
+## 17. Complete Examples (use as templates)
+
+### Fibonacci (recursive)
+```sno
+fib 0 = 0
+fib 1 = 1
+fib n = fib (n - 1) + fib (n - 2)
+
+main = fib 30
+```
+
+### Binary search (list indexing + recursion)
+```sno
+bsearch xs target lo hi =
+  mid = (lo + hi) / 2
+  val = index mid xs
+  ? lo > hi -> -1
+  : ? val == target -> mid
+  : ? val < target -> bsearch xs target (mid + 1) hi
+  : bsearch xs target lo (mid - 1)
+
+binary_search xs target = bsearch xs target 0 (length xs - 1)
+
+main = binary_search [1 2 3 4 5 6 7 8 9 10] 7
+```
+
+### ADT + pattern matching (shapes)
+```sno
+Shape = Circle Float | Rectangle Float Float | Triangle Float Float
+
+area (Circle r) = 3.14 * r * r
+area (Rectangle w h) = w * h
+area (Triangle b h) = 0.5 * b * h
+
+describe name shape = name ++ ": " ++ show (area shape)
+
+main =
+  c = describe "Circle" (Circle 5.0)
+  r = describe "Rectangle" (Rectangle 4.0 6.0)
+  t = describe "Triangle" (Triangle 6.0 5.0)
+  c ++ "\n" ++ r ++ "\n" ++ t
+```
+
+### Linked list type definition
+```sno
+List a = Nil | Cons a (List a)
+
+len Nil = 0
+len (Cons _ xs) = 1 + len xs
+
+append Nil x = Cons x Nil
+append (Cons h t) x = Cons h (append t x)
+
+main =
+  xs = Cons 1 (Cons 2 (Cons 3 Nil))
+  ys = append xs 4
+  len ys
+```
+
+### Filter + map (higher-order functions)
+```sno
+main =
+  nums = [1 2 3 4 5 6 7 8 9 10]
+  evens = filter (\x -> x % 2 == 0) nums
+  squared = map (\x -> x * x) evens
+  sum squared
+```
+
+### Error handling (Result type)
+```sno
+Result a e = Ok a | Err e
+
+divide x 0 = Err "division by zero"
+divide x y = Ok (x / y)
+
+show_result (Ok v) = "Ok " ++ show v
+show_result (Err e) = "Err " ++ e
+
+main =
+  r1 = divide 10 0
+  r2 = divide 10 2
+  show_result r1 ++ "\n" ++ show_result r2
+```
+
+### Quicksort
+```sno
+qsort [] = []
+qsort (x:xs) =
+  lt = filter (\y -> y < x) xs
+  ge = filter (\y -> y >= x) xs
+  qsort lt ++ [x] ++ qsort ge
+
+main = qsort [3 6 8 10 1 2 1]
+```

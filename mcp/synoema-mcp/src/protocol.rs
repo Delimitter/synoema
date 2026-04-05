@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

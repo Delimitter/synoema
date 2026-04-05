@@ -25,7 +25,7 @@ Synoema [sy-NO-e-ma] solves all three. From Greek σύν (together) + νόημα
 ## Quick Start
 
 ```bash
-git clone https://github.com/synoema/synoema
+git clone https://github.com/Delimitter/synoema
 cd synoema && cargo build --release
 
 synoema run examples/quicksort.sno   # → [1 2 3 4 5 6 7 8 9]
@@ -172,7 +172,7 @@ We've built a working compiler (937 tests, 8 crates, ~12K lines of Rust) and pub
 ## Try It
 
 ```bash
-git clone https://github.com/synoema/synoema
+git clone https://github.com/Delimitter/synoema
 cd synoema/lang
 cargo test                                          # 937 tests
 cargo run -p synoema-repl -- run examples/quicksort.sno

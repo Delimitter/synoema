@@ -1,7 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Check if ollama is installed and reachable.
 pub fn ollama_available() -> bool {
@@ -119,8 +124,11 @@ const LLM_TASKS: &[&str] = &[
     "type_definition",
 ];
 
+const MAX_CONSECUTIVE_FAILURES: u32 = 10;
+
 pub fn resolve_models(
     filter: &Option<Vec<String>>,
+    exclude: &Option<Vec<String>>,
     tier: &Option<String>,
 ) -> Vec<(String, String)> {
     ALL_MODELS
@@ -132,7 +140,14 @@ pub fn resolve_models(
                 }
             }
             if let Some(f) = filter {
-                return f.iter().any(|name| m.id.contains(name.as_str()));
+                if !f.iter().any(|name| m.id.contains(name.as_str())) {
+                    return false;
+                }
+            }
+            if let Some(ex) = exclude {
+                if ex.iter().any(|name| m.id.contains(name.as_str())) {
+                    return false;
+                }
             }
             true
         })
@@ -140,8 +155,7 @@ pub fn resolve_models(
         .collect()
 }
 
-/// Run Phase C via local ollama. Ensures model is pulled, then delegates to `run()` with
-/// ollama's OpenAI-compatible endpoint.
+/// Run Phase C via local ollama (always sequential — single GPU).
 pub fn run_ollama(
     bench_root: &Path,
     task_list: &[String],
@@ -156,7 +170,6 @@ pub fn run_ollama(
     ensure_model(model, verbose)?;
 
     let model_list = vec![(model.to_string(), "local".to_string())];
-    // Use "ollama" as api_key (ollama doesn't require auth) and pass base_url
     run_with_base_url(
         bench_root,
         task_list,
@@ -166,6 +179,7 @@ pub fn run_ollama(
         repeats,
         verbose,
         Some("http://localhost:11434/v1"),
+        1, // always sequential for ollama
     )
 }
 
@@ -177,8 +191,219 @@ pub fn run(
     api_key: &str,
     repeats: usize,
     verbose: bool,
+    parallel: usize,
 ) -> Result<LlmResults, String> {
-    run_with_base_url(bench_root, task_list, languages, model_list, api_key, repeats, verbose, None)
+    run_with_base_url(bench_root, task_list, languages, model_list, api_key, repeats, verbose, None, parallel)
+}
+
+/// Run all tasks/languages/repeats for a single model. Returns ModelResults.
+/// Has its own consecutive_failures counter — one model failing doesn't abort others.
+fn run_one_model(
+    script: &Path,
+    context_file: &Path,
+    bench_root: &Path,
+    model_id: &str,
+    tier: &str,
+    llm_tasks: &[&String],
+    languages: &[&str],
+    api_key: &str,
+    repeats: usize,
+    verbose: bool,
+    base_url: Option<&str>,
+    save_dir: Option<&Path>,
+    progress: &AtomicUsize,
+    total_ops: usize,
+) -> ModelResults {
+    let mut model_tasks = Vec::new();
+    let mut consecutive_failures = 0u32;
+    let mut aborted = false;
+
+    for task in llm_tasks {
+        let task_dir = bench_root.join("tasks").join(task);
+        let expected = task_dir.join("expected_output.txt");
+
+        for &lang in languages {
+            let mut syntax_ok = 0u32;
+            let mut correct = 0u32;
+            let mut total_tok_in = 0u64;
+            let mut total_tok_out = 0u64;
+
+            for attempt in 0..repeats {
+                if aborted {
+                    progress.fetch_add(1, Ordering::Relaxed);
+                    continue;
+                }
+
+                let mut cmd = Command::new("python3");
+                cmd.arg(script)
+                    .arg("--model")
+                    .arg(model_id)
+                    .arg("--language")
+                    .arg(lang)
+                    .arg("--task-dir")
+                    .arg(&task_dir)
+                    .arg("--key")
+                    .arg(api_key);
+
+                if let Some(dir) = save_dir {
+                    cmd.arg("--save-dir").arg(dir);
+                    cmd.arg("--attempt").arg(attempt.to_string());
+                }
+
+                if let Some(url) = base_url {
+                    cmd.arg("--base-url").arg(url);
+                }
+
+                if lang == "synoema" && context_file.exists() {
+                    cmd.arg("--context").arg(context_file);
+                }
+                if expected.exists() {
+                    cmd.arg("--expected").arg(&expected);
+                }
+
+                if verbose {
+                    eprintln!("    cmd: python3 {} --model {model_id} --language {lang} --task-dir {}", script.display(), task_dir.display());
+                }
+
+                match cmd.output() {
+                    Ok(output) if output.status.success() => {
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+                        if let Ok(res) = serde_json::from_str::<GenerateResult>(&stdout) {
+                            if let Some(ref err) = res.error {
+                                consecutive_failures += 1;
+                                if consecutive_failures <= 3 || verbose {
+                                    eprintln!("    API error ({model_id}): {err}");
+                                }
+                            } else {
+                                consecutive_failures = 0;
+                                if verbose {
+                                    eprintln!(
+                                        "    {model_id}/{task}/{lang}: syntax={} correct={} tok_in={} tok_out={}",
+                                        res.syntax_ok, res.correct, res.tokens_in, res.tokens_out
+                                    );
+                                }
+                                if res.syntax_ok {
+                                    syntax_ok += 1;
+                                }
+                                if res.correct {
+                                    correct += 1;
+                                }
+                                total_tok_in += res.tokens_in;
+                                total_tok_out += res.tokens_out;
+                            }
+                        } else {
+                            consecutive_failures += 1;
+                            if verbose {
+                                eprintln!("    parse error ({model_id}): {}", stdout.trim());
+                            }
+                        }
+                    }
+                    Ok(output) => {
+                        consecutive_failures += 1;
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        if consecutive_failures <= 3 || verbose {
+                            eprintln!("  Warning ({model_id}): llm_generate.py failed: {stderr}");
+                        }
+                    }
+                    Err(e) => {
+                        consecutive_failures += 1;
+                        if consecutive_failures <= 3 || verbose {
+                            eprintln!("  Warning ({model_id}): failed to run llm_generate.py: {e}");
+                        }
+                    }
+                }
+
+                progress.fetch_add(1, Ordering::Relaxed);
+
+                if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
+                    eprintln!(
+                        "\n  ERROR: {MAX_CONSECUTIVE_FAILURES} consecutive failures for {model_id} — skipping remaining."
+                    );
+                    aborted = true;
+                    // Fast-forward progress for remaining ops in this model
+                    let done_so_far = progress.load(Ordering::Relaxed);
+                    let model_done = done_so_far; // approximate
+                    let _ = model_done; // progress will be incremented via continue above
+                    break;
+                }
+            }
+
+            let total_runs = repeats as u32;
+            let avg_in = total_tok_in as f64 / total_runs as f64;
+            let avg_out = total_tok_out as f64 / total_runs as f64;
+
+            if !aborted {
+                let done = progress.load(Ordering::Relaxed);
+                eprint!(
+                    "\r  [C] {}/{} ({:.0}%) — {model_id} / {task} / {lang}: {syntax_ok}/{total_runs} syntax, {correct}/{total_runs} correct    ",
+                    done, total_ops, done as f64 / total_ops as f64 * 100.0
+                );
+            }
+
+            model_tasks.push(LlmTaskResult {
+                task: task.to_string(),
+                language: lang.to_string(),
+                syntax_ok,
+                correct,
+                total_runs,
+                avg_tokens_in: avg_in,
+                avg_tokens_out: avg_out,
+            });
+        }
+    }
+
+    ModelResults {
+        model: model_id.to_string(),
+        tier: tier.to_string(),
+        tasks: model_tasks,
+    }
+}
+
+/// Compute language averages from collected model results.
+fn compute_language_averages(
+    models: &[ModelResults],
+    languages: &[&str],
+) -> BTreeMap<String, LlmLanguageAvg> {
+    let mut lang_syntax: BTreeMap<String, (u32, u32)> = BTreeMap::new();
+    let mut lang_correct: BTreeMap<String, (u32, u32)> = BTreeMap::new();
+    let mut lang_tokens: BTreeMap<String, (f64, u32)> = BTreeMap::new();
+
+    for model in models {
+        for t in &model.tasks {
+            let l = t.language.clone();
+            lang_syntax.entry(l.clone()).or_insert((0, 0)).0 += t.syntax_ok;
+            lang_syntax.entry(l.clone()).or_insert((0, 0)).1 += t.total_runs;
+            lang_correct.entry(l.clone()).or_insert((0, 0)).0 += t.correct;
+            lang_correct.entry(l.clone()).or_insert((0, 0)).1 += t.total_runs;
+            lang_tokens.entry(l.clone()).or_insert((0.0, 0)).0 += t.avg_tokens_in + t.avg_tokens_out;
+            lang_tokens.entry(l).or_insert((0.0, 0)).1 += 1;
+        }
+    }
+
+    // Pricing approximation: $5/M input, $15/M output (weighted avg across models)
+    let price_in = 5.0 / 1_000_000.0;
+    let price_out = 15.0 / 1_000_000.0;
+
+    let mut averages = BTreeMap::new();
+    for lang in languages {
+        let l = lang.to_string();
+        let (syn_ok, syn_total) = lang_syntax.get(&l).copied().unwrap_or((0, 1));
+        let (cor_ok, cor_total) = lang_correct.get(&l).copied().unwrap_or((0, 1));
+        let (tok_sum, tok_count) = lang_tokens.get(&l).copied().unwrap_or((0.0, 1));
+        let avg_tok = tok_sum / tok_count as f64;
+
+        averages.insert(
+            l,
+            LlmLanguageAvg {
+                syntax_pct: syn_ok as f64 / syn_total as f64 * 100.0,
+                correct_pct: cor_ok as f64 / cor_total as f64 * 100.0,
+                avg_tokens: avg_tok,
+                avg_cost: avg_tok * 0.6 * price_in + avg_tok * 0.4 * price_out,
+            },
+        );
+    }
+
+    averages
 }
 
 fn run_with_base_url(
@@ -190,6 +415,7 @@ fn run_with_base_url(
     repeats: usize,
     verbose: bool,
     base_url: Option<&str>,
+    parallel: usize,
 ) -> Result<LlmResults, String> {
     let script = bench_root.join("scripts/llm_generate.py");
     if !script.exists() {
@@ -220,179 +446,61 @@ fn run_with_base_url(
         }
     }
 
-    let mut results = LlmResults::default();
     let total_ops = model_list.len() * llm_tasks.len() * languages.len() * repeats;
-    let mut done = 0usize;
-    let mut consecutive_failures = 0u32;
-    const MAX_CONSECUTIVE_FAILURES: u32 = 10;
+    let progress = AtomicUsize::new(0);
 
-    // Accumulators for language averages
-    let mut lang_syntax: BTreeMap<String, (u32, u32)> = BTreeMap::new();
-    let mut lang_correct: BTreeMap<String, (u32, u32)> = BTreeMap::new();
-    let mut lang_tokens: BTreeMap<String, (f64, u32)> = BTreeMap::new();
+    // Create save directory for generated code
+    let save_dir = bench_root.join("results").join("generated");
+    let _ = std::fs::create_dir_all(&save_dir);
 
-    for (model_id, tier) in model_list {
-        let mut model_tasks = Vec::new();
+    // Owned copies for thread safety
+    let base_url_owned: Option<String> = base_url.map(|s| s.to_string());
+    let script = script.clone();
+    let context_file = context_file.clone();
+    let bench_root_buf: PathBuf = bench_root.to_path_buf();
 
-        for task in &llm_tasks {
-            let task_dir = bench_root.join("tasks").join(task);
-            let expected = task_dir.join("expected_output.txt");
-
-            for &lang in languages {
-                let mut syntax_ok = 0u32;
-                let mut correct = 0u32;
-                let mut total_tok_in = 0u64;
-                let mut total_tok_out = 0u64;
-
-                for _ in 0..repeats {
-                    if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
-                        eprintln!(
-                            "\n  ERROR: {MAX_CONSECUTIVE_FAILURES} consecutive failures — aborting Phase C."
-                        );
-                        eprintln!("  Check API key and network connectivity.");
-                        return Ok(results);
-                    }
-
-                    let mut cmd = Command::new("python3");
-                    cmd.arg(&script)
-                        .arg("--model")
-                        .arg(model_id)
-                        .arg("--language")
-                        .arg(lang)
-                        .arg("--task-dir")
-                        .arg(&task_dir)
-                        .arg("--key")
-                        .arg(api_key);
-
-                    if let Some(url) = base_url {
-                        cmd.arg("--base-url").arg(url);
-                    }
-
-                    if lang == "synoema" && context_file.exists() {
-                        cmd.arg("--context").arg(&context_file);
-                    }
-                    if expected.exists() {
-                        cmd.arg("--expected").arg(&expected);
-                    }
-
-                    if verbose {
-                        eprintln!("    cmd: python3 {} --model {model_id} --language {lang} --task-dir {}", script.display(), task_dir.display());
-                    }
-
-                    match cmd.output() {
-                        Ok(output) if output.status.success() => {
-                            let stdout = String::from_utf8_lossy(&output.stdout);
-                            if let Ok(res) = serde_json::from_str::<GenerateResult>(&stdout) {
-                                if let Some(ref err) = res.error {
-                                    consecutive_failures += 1;
-                                    if consecutive_failures <= 3 || verbose {
-                                        eprintln!("    API error: {err}");
-                                    }
-                                } else {
-                                    consecutive_failures = 0;
-                                    if verbose {
-                                        eprintln!(
-                                            "    {model_id}/{task}/{lang}: syntax={} correct={} tok_in={} tok_out={}",
-                                            res.syntax_ok, res.correct, res.tokens_in, res.tokens_out
-                                        );
-                                    }
-                                    if res.syntax_ok {
-                                        syntax_ok += 1;
-                                    }
-                                    if res.correct {
-                                        correct += 1;
-                                    }
-                                    total_tok_in += res.tokens_in;
-                                    total_tok_out += res.tokens_out;
-                                }
-                            } else {
-                                consecutive_failures += 1;
-                                if verbose {
-                                    eprintln!("    parse error: {}", stdout.trim());
-                                }
-                            }
-                        }
-                        Ok(output) => {
-                            consecutive_failures += 1;
-                            let stderr = String::from_utf8_lossy(&output.stderr);
-                            if consecutive_failures <= 3 || verbose {
-                                eprintln!("  Warning: llm_generate.py failed: {stderr}");
-                            }
-                        }
-                        Err(e) => {
-                            consecutive_failures += 1;
-                            if consecutive_failures <= 3 || verbose {
-                                eprintln!("  Warning: failed to run llm_generate.py: {e}");
-                            }
-                        }
-                    }
-
-                    done += 1;
-                }
-
-                let total_runs = repeats as u32;
-                let avg_in = total_tok_in as f64 / total_runs as f64;
-                let avg_out = total_tok_out as f64 / total_runs as f64;
-
-                // Accumulate for language averages
-                let l = lang.to_string();
-                lang_syntax.entry(l.clone()).or_insert((0, 0)).0 += syntax_ok;
-                lang_syntax.entry(l.clone()).or_insert((0, 0)).1 += total_runs;
-                lang_correct.entry(l.clone()).or_insert((0, 0)).0 += correct;
-                lang_correct.entry(l.clone()).or_insert((0, 0)).1 += total_runs;
-                lang_tokens.entry(l.clone()).or_insert((0.0, 0)).0 += avg_in + avg_out;
-                lang_tokens.entry(l).or_insert((0.0, 0)).1 += 1;
-
-                eprint!(
-                    "\r  [C] {}/{} ({:.0}%) — {model_id} / {task} / {lang}: {syntax_ok}/{total_runs} syntax, {correct}/{total_runs} correct    ",
-                    done, total_ops, done as f64 / total_ops as f64 * 100.0
-                );
-
-                model_tasks.push(LlmTaskResult {
-                    task: task.to_string(),
-                    language: lang.to_string(),
-                    syntax_ok,
-                    correct,
-                    total_runs,
-                    avg_tokens_in: avg_in,
-                    avg_tokens_out: avg_out,
-                });
-            }
-        }
-
-        results.models.push(ModelResults {
-            model: model_id.clone(),
-            tier: tier.clone(),
-            tasks: model_tasks,
-        });
+    let threads = if parallel == 0 { 1 } else { parallel };
+    if threads > 1 {
+        eprintln!("  (parallel: {threads} threads across {} models)", model_list.len());
     }
+
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .build()
+        .map_err(|e| format!("Failed to create thread pool: {e}"))?;
+
+    let model_results: Vec<ModelResults> = pool.install(|| {
+        model_list
+            .par_iter()
+            .map(|(model_id, tier)| {
+                run_one_model(
+                    &script,
+                    &context_file,
+                    &bench_root_buf,
+                    model_id,
+                    tier,
+                    &llm_tasks,
+                    languages,
+                    api_key,
+                    repeats,
+                    verbose,
+                    base_url_owned.as_deref(),
+                    Some(&save_dir),
+                    &progress,
+                    total_ops,
+                )
+            })
+            .collect()
+    });
 
     eprintln!();
 
-    // Compute language averages
-    // Pricing approximation: $5/M input, $15/M output (weighted avg across models)
-    let price_in = 5.0 / 1_000_000.0;
-    let price_out = 15.0 / 1_000_000.0;
+    let language_averages = compute_language_averages(&model_results, languages);
 
-    for lang in languages {
-        let l = lang.to_string();
-        let (syn_ok, syn_total) = lang_syntax.get(&l).copied().unwrap_or((0, 1));
-        let (cor_ok, cor_total) = lang_correct.get(&l).copied().unwrap_or((0, 1));
-        let (tok_sum, tok_count) = lang_tokens.get(&l).copied().unwrap_or((0.0, 1));
-        let avg_tok = tok_sum / tok_count as f64;
-
-        results.language_averages.insert(
-            l,
-            LlmLanguageAvg {
-                syntax_pct: syn_ok as f64 / syn_total as f64 * 100.0,
-                correct_pct: cor_ok as f64 / cor_total as f64 * 100.0,
-                avg_tokens: avg_tok,
-                avg_cost: avg_tok * 0.6 * price_in + avg_tok * 0.4 * price_out,
-            },
-        );
-    }
-
-    Ok(results)
+    Ok(LlmResults {
+        models: model_results,
+        language_averages,
+    })
 }
 
 #[cfg(test)]
@@ -401,10 +509,7 @@ mod tests {
 
     #[test]
     fn test_ollama_detection() {
-        // ollama_available() should return a bool without panicking,
-        // regardless of whether ollama is installed
         let result = ollama_available();
-        // Just verify it returns a bool (type system ensures this)
         assert!(result || !result);
     }
 
@@ -425,7 +530,6 @@ mod tests {
             eprintln!("skipping: ollama not available");
             return;
         }
-        // Find bench root
         let bench_root = std::env::current_dir()
             .unwrap()
             .parent()

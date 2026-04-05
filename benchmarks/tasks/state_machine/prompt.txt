@@ -1,0 +1,1 @@
+Define a traffic light state type (Red, Yellow, Green). Write a next_state function that cycles Green->Yellow->Red->Green. Starting from Green, apply next_state 3 times and print each transition as "State1 -> State2".

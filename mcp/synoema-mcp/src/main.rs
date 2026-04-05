@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 //! Synoema MCP Server
 //!
 //! Implements the Model Context Protocol (2024-11-05) over stdio.
@@ -8,9 +11,13 @@
 //!
 //!   "synoema": { "command": "/path/to/synoema-mcp" }
 
+mod dev_tools;
+mod index;
 mod protocol;
 mod prompts;
+mod recipes;
 mod resources;
+mod state;
 mod tools;
 
 use std::io::{self, BufRead, Write};
@@ -18,6 +25,19 @@ use protocol::{JsonRpcRequest, JsonRpcResponse};
 use serde_json::{json, Value};
 
 fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("synoema-mcp {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+    if args.iter().any(|a| a == "--health") {
+        println!(
+            r#"{{"status":"ok","version":"{}","protocol":"2024-11-05"}}"#,
+            env!("CARGO_PKG_VERSION")
+        );
+        return;
+    }
+
     let stdin = io::stdin();
     let stdout = io::stdout();
 
@@ -82,7 +102,7 @@ fn handle_initialize() -> Value {
         },
         "serverInfo": {
             "name": "synoema",
-            "version": "0.1.0"
+            "version": env!("CARGO_PKG_VERSION")
         }
     })
 }
@@ -94,6 +114,11 @@ fn handle_tools_call(params: &Value) -> Value {
     let args = params.get("arguments").unwrap_or(&Value::Null);
 
     let (content, is_error) = tools::call(name, args);
+
+    // Update state tracker based on tool result
+    let error_text = if is_error { content.first().map(|c| c.text.as_str()) } else { None };
+    state::on_tool_result(name, is_error, error_text);
+
     let content_json: Vec<Value> = content.iter()
         .map(|c| json!({ "type": c.kind, "text": c.text }))
         .collect();
@@ -122,5 +147,27 @@ fn handle_prompts_get(params: &Value) -> Value {
     match prompts::get(name) {
         Ok(v) => v,
         Err(e) => json!({ "error": e }),
+    }
+}
+
+// ── tests ────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn handle_initialize_returns_version() {
+        let result = handle_initialize();
+        let version = result["serverInfo"]["version"].as_str().unwrap();
+        assert_eq!(version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(result["protocolVersion"].as_str().unwrap(), "2024-11-05");
+    }
+
+    #[test]
+    fn handle_tools_call_unknown_tool() {
+        let params = json!({ "name": "nonexistent", "arguments": {} });
+        let result = handle_tools_call(&params);
+        assert!(result.get("isError").and_then(|v| v.as_bool()).unwrap_or(false));
     }
 }

@@ -1,0 +1,35 @@
+-- SPDX-License-Identifier: MIT-0
+-- Search algorithms
+
+--- Search: binary search on sorted list, linear search, find indices.
+--- example: main == ()
+
+-- Linear search: return index or -1
+linear_search _ [] _ = -1
+linear_search target (x:xs) idx =
+  ? x == target -> idx : linear_search target xs (idx + 1)
+
+-- Binary search (single recursive function)
+-- Note: index takes (Int -> [a] -> a)
+bin_go target xs lo hi =
+  ? lo > hi -> -1
+  : val = index ((lo + hi) / 2) xs
+    ? val == target -> (lo + hi) / 2
+    : ? val < target -> bin_go target xs ((lo + hi) / 2 + 1) hi
+    : bin_go target xs lo ((lo + hi) / 2 - 1)
+
+bin_search target xs = bin_go target xs 0 (length xs - 1)
+
+-- Find all indices matching predicate
+find_go pred [] _ = []
+find_go pred (x:xs) idx =
+  ? pred x -> (idx : find_go pred xs (idx + 1)) : find_go pred xs (idx + 1)
+
+find_indices pred xs = find_go pred xs 0
+
+main =
+  sorted = [2 4 6 8 10 12 14 16 18 20]
+  p1 = print ("binary search 12: index " ++ show (bin_search 12 sorted))
+  p2 = print ("binary search 7: index " ++ show (bin_search 7 sorted))
+  p3 = print ("linear search 14: index " ++ show (linear_search 14 sorted 0))
+  print ("find indices >10: " ++ show (find_indices (\x -> x > 10) sorted))

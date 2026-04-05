@@ -1,0 +1,31 @@
+-- SPDX-License-Identifier: MIT-0
+-- Finite state machine via ADT
+
+--- State machine: traffic light FSM with ADT states and transitions.
+--- example: main == ()
+
+-- Traffic light states
+Light = Red | Yellow | Green
+
+-- Transition function
+next_light Red = Green
+next_light Green = Yellow
+next_light Yellow = Red
+
+-- Duration in seconds
+duration Red = 30
+duration Green = 25
+duration Yellow = 5
+
+-- Run N transitions collecting state names
+run_fsm state n =
+  ? n == 0 -> [(show state)]
+  : (show state : run_fsm (next_light state) (n - 1))
+
+-- Total cycle time
+cycle_time = duration Red + duration Green + duration Yellow
+
+main =
+  p1 = print ("cycle: " ++ show (run_fsm Red 6))
+  p2 = print ("cycle time: " ++ show cycle_time ++ "s")
+  print ("next of Green: " ++ show (next_light Green))

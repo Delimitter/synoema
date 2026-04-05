@@ -147,6 +147,7 @@
 | 6 | #11 Cost Calculator | NEXT | NEXT | | Practical takeaway |
 | 7 | **#6 Launch** | NEXT | NEXT | **HN (Show HN)** | **ЗАПУСК** |
 | 8 | #7 Future | NEXT | NEXT | HN, Twitter/X | Vision, дискуссия |
+| 9 | **#14 Doc-as-Code** | NEXT | NEXT | r/ProgrammingLanguages | **Paradigm** |
 
 ### Логика нового порядка
 
@@ -159,6 +160,18 @@
 7. **#11 Cost Calculator** — практический takeaway перед launch
 8. **#6 Launch** — Show HN, аудитория уже прогрета 7 статьями
 9. **#7 Future** — завершение серии, open discussion
+
+---
+
+## Фаза 5: Парадигма (новая)
+
+### Статья 14: «Executable Documentation: When Your Comments Become Tests»
+- **Файл:** `14_en_doc_as_code.md`
+- **Тезис:** Doc-as-Code как языковая парадигма. `---` doc comments хранятся в AST, `example:` — исполняемые ассёрты. Три уровня тестов (doctests, unit, property) из одного `synoema test`.
+- **Hook:** "Documentation lies. Not intentionally, but inevitably."
+- **Формат:** ~2500 слов, side-by-side (Python vs Synoema), pipeline diagram
+- **Связи:** ссылается на #2 (BPE), #5 (Hindley-Milner), MCP
+- **Аудитория:** разработчики, страдающие от stale docs; LLM-инженеры, строящие RAG/code context
 
 ---
 

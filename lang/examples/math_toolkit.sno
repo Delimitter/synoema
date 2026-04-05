@@ -1,0 +1,42 @@
+-- SPDX-License-Identifier: MIT-0
+-- Mathematical utilities
+
+--- Math toolkit: gcd, lcm, primes, fibonacci sequence.
+--- example: main == ()
+
+-- Greatest common divisor (Euclid)
+gcd_of a 0 = a
+gcd_of a b = gcd_of b (a % b)
+
+-- Least common multiple
+lcm_of a b = a * b / gcd_of a b
+
+-- Check if n is prime (helper first)
+check_prime n d =
+  ? d * d > n -> true
+  : ? n % d == 0 -> false
+  : check_prime n (d + 1)
+
+is_prime n =
+  ? n < 2 -> false
+  : check_prime n 2
+
+-- Primes up to n via trial division
+primes_up_to n = filter is_prime [2..n]
+
+-- Fibonacci: first n numbers
+fib_go 0 _ _ acc = reverse acc
+fib_go n a b acc = fib_go (n - 1) b (a + b) (a : acc)
+
+fib_list n = fib_go n 0 1 []
+
+-- Integer power
+int_pow base 0 = 1
+int_pow base n = base * int_pow base (n - 1)
+
+main =
+  p1 = print ("gcd(48, 18): " ++ show (gcd_of 48 18))
+  p2 = print ("lcm(4, 6): " ++ show (lcm_of 4 6))
+  p3 = print ("primes up to 30: " ++ show (primes_up_to 30))
+  p4 = print ("fib first 10: " ++ show (fib_list 10))
+  print ("2^10: " ++ show (int_pow 2 10))

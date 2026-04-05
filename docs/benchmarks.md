@@ -100,24 +100,38 @@ Sends identical prompts to LLM models and validates generated code. Two backends
 
 ## Tasks
 
-| Task | A | B | C | Tests |
-|------|---|---|---|-------|
-| factorial | x | x | x | Recursion, base case |
-| fibonacci | x | x | x | Pattern matching |
-| quicksort | x | x | x | Lists, HOF, comprehensions |
-| mergesort | x | x | | Divide & conquer |
-| collatz | x | x | | Iteration, modulo |
-| gcd | x | x | | Euclid's algorithm |
-| fizzbuzz | x | x | x | Branching, strings |
-| filter_map | x | x | x | Pipes, lambdas |
-| binary_search | x | x | x | Index-based search |
-| tree_traverse | x | x | | ADT, recursion |
-| matrix_mult | | x | | Pure compute |
-| string_ops | x | x | | String operations |
-| json_build | x | | | Data structures |
-| error_handling | x | | x | Result vs try/catch |
-| pattern_match | x | | x | ADT vs class hierarchy |
-| type_definition | x | | x | Custom types |
+| Task | A | B | C | D | Tests |
+|------|---|---|---|---|-------|
+| factorial | x | x | x | x | Recursion, base case |
+| fibonacci | x | x | x | x | Pattern matching |
+| quicksort | x | x | x | x | Lists, HOF, comprehensions |
+| mergesort | x | x | | x | Divide & conquer |
+| collatz | x | x | | x | Iteration, modulo |
+| gcd | x | x | | x | Euclid's algorithm |
+| fizzbuzz | x | x | x | x | Branching, strings |
+| filter_map | x | x | x | x | Pipes, lambdas |
+| binary_search | x | x | x | x | Index-based search |
+| tree_traverse | x | x | | x | ADT, recursion |
+| matrix_mult | | x | | x | Pure compute |
+| string_ops | x | x | | x | String operations |
+| json_build | x | | | x | Data structures |
+| error_handling | x | | x | x | Result vs try/catch |
+| pattern_match | x | | x | x | ADT vs class hierarchy |
+| type_definition | x | | x | x | Custom types |
+| power | | | | x | Recursive exponentiation |
+| palindrome | | | | x | List reverse + compare |
+| flatten | | | | x | Nested ADT, recursion |
+| bst_insert | | | | x | BST insert, inorder |
+| stack_calc | | | | x | RPN calculator, ADT ops |
+| compose_chain | | | | x | Function composition |
+| group_by | | | | x | List partition |
+| scan_left | | | | x | Running fold |
+| maybe_chain | | | | x | Maybe/Option chaining |
+| either_validate | | | | x | Result/Either validation |
+| record_transform | | | | x | Record creation + update |
+| csv_parse | | | | x | String split + parse |
+| word_freq | | | | x | Word frequency count |
+| state_machine | | | | x | FSM with ADTs |
 
 ## Output
 
@@ -134,6 +148,43 @@ Results are saved to `benchmarks/results/<date>_run_<NNN>/`:
 - **Token counting**: tiktoken cl100k_base (exact, not approximate). SPDX headers stripped for fair comparison.
 - **Runtime**: subprocess timing via `std::time::Instant`. 3 warm-up runs discarded, 5 measured, median reported. C++ compiled with `-O2 -std=c++17`. Synoema uses pre-built release binary.
 - **LLM generation**: OpenRouter API (OpenAI-compatible). Temperature 0.2. Synoema prompts include `docs/llm/synoema.md` as context (in-context learning). Validation: compile/parse check + run + output comparison.
+
+### D. Model Size Reduction (local, sequential)
+
+Proves that Synoema reduces minimum model size requirements for correct code generation.
+Uses llama.cpp server for local inference with GBNF constrained decoding support.
+
+**Prerequisites:**
+- [llama.cpp](https://github.com/ggerganov/llama.cpp) built with `make`
+- GGUF model files (Qwen2.5-Coder family: 0.5B, 1.5B, 3B, 7B)
+- Python 3.9+ with `tiktoken` and `requests`
+- `runghc` (GHC) for Haskell validation
+
+**Quick start:**
+
+```bash
+# 1. Start llama-server with a model
+llama-server -m models/qwen2.5-coder-3b-instruct-q4_k_m.gguf --port 8090 --ctx-size 4096
+
+# 2. Run Phase D benchmark
+python3 benchmarks/scripts/size_benchmark.py \
+  --base-url http://localhost:8090 \
+  --tasks-dir benchmarks/tasks \
+  --context-dir docs/llm \
+  --grammar lang/tools/constrained/synoema.gbnf \
+  --output-dir benchmarks/results/size_proof
+
+# 3. Analyze results
+python3 benchmarks/scripts/size_analysis.py benchmarks/results/size_proof/
+```
+
+**Models:** Qwen2.5-Coder 0.5B / 1.5B / 3B / 7B (Q4_K_M quantization)
+
+**Languages:** Synoema (with/without GBNF), Python, Haskell
+
+**Modes:** zero-shot ICL, few-shot ICL, ICL + GBNF (Synoema only)
+
+**Tasks:** 30 tasks, 5 attempts each. See [Article 15](articles/15_en_small_model_proof.md) for methodology.
 
 ## Troubleshooting
 

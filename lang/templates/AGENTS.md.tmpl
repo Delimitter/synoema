@@ -1,0 +1,172 @@
+# {{name}}
+
+Synoema project. Files: `.sno`. Entry point: `src/main.sno`.
+
+## Commands
+
+```
+synoema run src/main.sno        -- interpret
+synoema jit src/main.sno        -- JIT-compile (native speed)
+synoema test tests/              -- run tests
+synoema doc src/                 -- generate docs
+synoema fmt src/                 -- format code
+synoema --errors json run src/main.sno  -- JSON errors for LLM
+```
+
+## Language Quick Reference
+
+BPE-aligned functional language for LLM code generation.
+All 33 operators = exactly 1 cl100k_base token. 46% fewer tokens than Python.
+
+### Mental model: what NOT to write
+
+| Instead of (Haskell/Python) | Write in Synoema | Why |
+|------------------------------|------------------|-----|
+| `if c then x else y` | `? c -> x : y` | 3 tokens, no keywords |
+| `let x = e in body` | indented block: `x = e` then `body` | offside rule |
+| `def f(x):` / `fn x ->` / `fun` | `f x = body` | no def keyword |
+| `return x` | last expression = value | expression-oriented |
+| `case x of` | multi-equation `f Con = ...` | — |
+| `data T = A \| B` | `T = A \| B` | no `data` |
+| `class` / `instance` | `trait` / `impl` | — |
+| `import M` | `use M (f g)` or `use M (*)` | selective or wildcard |
+| `[1, 2, 3]` | `[1 2 3]` | **no commas** |
+| `x:xs` bare in pattern | `(x:xs)` | **parens required** |
+| `s1 + s2` (strings) | `s1 ++ s2` | `+` = numbers only |
+| `f"x={x}"` | `"x=${x}"` | `${}` interpolation |
+| `// comment` | `-- comment` | — |
+
+### Core axioms
+
+- **No def keyword** — `name args = body`; patterns via multiple equations
+- **Offside rule** — indentation defines blocks (2-space)
+- **Expression-oriented** — last expr = result; no `return`
+- **Immutable** — all bindings are immutable
+- **Strict** — eager evaluation, left-to-right
+- **Types inferred** — annotations optional
+
+### Operators (precedence low -> high)
+
+| Op | Meaning | Prec |
+|----|---------|------|
+| `<-` | bind (IO) | 1 |
+| `\|>` | pipe | 2 |
+| `\|\|` `&&` | logic | 3-4 |
+| `==` `!=` `<` `>` `<=` `>=` | compare | 5-6 |
+| `++` | concat | 7 |
+| `+` `-` | add/sub | 8 |
+| `*` `/` `%` | mul/div/mod | 9 |
+| `**` | power | 9 |
+| `>>` | compose | 10 |
+| `.` | field access | 12 |
+| juxtaposition | apply `f x` | 13 |
+
+### Examples
+
+```sno
+-- functions & pattern matching
+fac 0 = 1
+fac n = n * fac (n - 1)
+
+-- conditional
+fizzbuzz n =
+  ? n % 15 == 0 -> "FizzBuzz"
+  : ? n % 3 == 0 -> "Fizz"
+  : ? n % 5 == 0 -> "Buzz"
+  : show n
+
+-- local bindings
+hyp a b =
+  a2 = a * a
+  b2 = b * b
+  a2 + b2
+
+-- lists (space-separated, no commas)
+xs = [1 2 3 4 5]
+evens = [x | x <- [1..20], x % 2 == 0]
+result = [1..10] |> filter (\x -> x % 2 == 0) |> map (\x -> x * x)
+
+-- records
+pt = {x = 3, y = 4}
+dist {x, y} = x * x + y * y
+moved = {...pt, x = pt.x + 1}
+
+-- ADTs
+Shape = Circle Float | Rect Float Float
+area (Circle r) = r * r
+area (Rect w h) = w * h
+
+-- type classes
+trait Show a
+  show : a -> String
+impl Show Shape
+  show (Circle r) = "Circle " ++ show r
+  show (Rect w h) = show w ++ "x" ++ show h
+
+-- modules
+mod Math
+  square x = x * x
+use Math (square)
+
+-- multi-file imports
+import "lib.sno"
+use Lib (helper)
+
+-- IO
+main = print "hello" ; print "world"
+
+-- testing
+test "fac base" = fac 0 == 1
+```
+
+### Stdlib (key functions)
+
+```
+-- List
+length map filter foldl concatMap head tail sum
+-- String
+str_len str_slice str_find str_starts_with str_trim
+-- Math
+sqrt floor ceil round abs even odd
+-- Result (prelude)
+Result a e = Ok a | Err e
+map_ok map_err unwrap unwrap_or is_ok is_err and_then error
+-- IO
+print show readline
+```
+
+Full stdlib: `docs/llm/stdlib.md`
+
+### File Conventions
+
+Every `.sno` file should follow this structure:
+
+```sno
+-- SPDX-License-Identifier: MIT-0           -- 1. license header
+
+--- Module description.                      -- 2. file-level doc-comment
+--- example: main == ()                      -- 3. doctest (optional)
+
+-- ── Section name ──────────────────────    -- 4. section separators (for files >30 lines)
+
+--- Sort a list using quicksort.             -- 5. per-function doc-comment
+--- example: qsort [3 1 2] == [1 2 3]       -- 6. per-function doctest
+qsort [] = []
+qsort (p:xs) = ...
+
+main = ...                                   -- 7. entry point last
+```
+
+**Rules:**
+- **Define before use** — functions must be defined before first reference
+- **Multi-equation defs are top-level only** — `f 0 = ... / f n = ...` only at module top level
+- **`?` is if/else only** — for ADT dispatch use multi-equation functions
+- **`Maybe` is NOT in prelude** — define when needed. `Result` IS built-in.
+- **`json_get`** takes one flat key, not dot-paths. Chain calls for nesting.
+
+### Gotchas
+
+1. **Cons pattern needs parens** — `head (x:_) = x` not `head x:_ = x`
+2. **Lists: space-separated** — `[1 2 3]` never `[1, 2, 3]`
+3. **String concat `++`** — `+` is numeric only
+4. **No `return`** — last expression is the result

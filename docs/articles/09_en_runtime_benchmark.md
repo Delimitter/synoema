@@ -137,7 +137,7 @@ The real question for AI agents isn't "which language is fastest?" It's: **what'
 ## Reproduce It
 
 ```bash
-git clone https://github.com/synoema/synoema
+git clone https://github.com/Delimitter/synoema
 cd synoema
 
 # Build release binary first

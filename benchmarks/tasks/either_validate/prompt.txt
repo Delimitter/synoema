@@ -1,0 +1,1 @@
+Define a Result type (Ok value or Err message). Write validate_age that returns Err for negative ages and Ok otherwise. Write validate_name that returns Err for empty strings. Chain validations for ("Alice", 25) and ("", -1). Print results on separate lines.

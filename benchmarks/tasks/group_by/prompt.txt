@@ -1,0 +1,1 @@
+Write a partition function that splits a list into two lists based on a predicate. Partition [1..10] into even and odd numbers. Print even numbers on the first line and odd on the second.

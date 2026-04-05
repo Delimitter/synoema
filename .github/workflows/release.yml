@@ -89,9 +89,18 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Set platform npm package version from tag
+        working-directory: npm/platforms/${{ matrix.platform.name }}
+        run: npm version ${{ steps.version.outputs.VERSION }} --no-git-tag-version --allow-same-version
+
       - name: Publish platform npm package
         working-directory: npm/platforms/${{ matrix.platform.name }}
-        run: npm publish --access public --tag alpha
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          TAG="alpha"
+          if echo "$VERSION" | grep -q "beta"; then TAG="beta"; fi
+          if echo "$VERSION" | grep -qvE "(alpha|beta)"; then TAG="latest"; fi
+          npm publish --access public --tag $TAG
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -169,8 +178,27 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Set main npm package version from tag
+        working-directory: npm/synoema-mcp
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          npm version $VERSION --no-git-tag-version --allow-same-version
+          # Sync optionalDependencies to same version
+          for platform in darwin-arm64 darwin-x64 linux-x64 win32-x64; do
+            sed -i "s/\"@delimitter\/mcp-$platform\": \"[^\"]*\"/\"@delimitter\/mcp-$platform\": \"$VERSION\"/" package.json
+          done
+
       - name: Publish synoema-mcp to npm
         working-directory: npm/synoema-mcp
-        run: npm publish --access public --tag alpha
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          TAG="alpha"
+          if echo "$VERSION" | grep -q "beta"; then TAG="beta"; fi
+          if echo "$VERSION" | grep -qvE "(alpha|beta)"; then TAG="latest"; fi
+          npm publish --access public --tag $TAG
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

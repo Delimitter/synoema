@@ -14,6 +14,31 @@ The Synoema MCP server integrates the Synoema compiler and evaluator into any MC
 | `typecheck` | Full Synoema program (with `main`) | `main : Type` or structured errors |
 | `run` | Full Synoema program (with `main`) | stdout output + final value |
 
+#### Dev Intelligence Tools
+
+| Tool | Input | Output |
+|------|-------|--------|
+| `project_overview` | — | Crate structure, LOC, test counts (≤300 tok) |
+| `crate_info` | `crate_name: string` | Pub API surface: functions, types, structs (≤500 tok) |
+| `file_summary` | `file: string` | Function list with signatures, no bodies (≤300 tok) |
+| `search_code` | `query: string`, `scope?: code\|docs\|all` | Top-5 keyword matches with context (≤400 tok) |
+| `get_context_for_edit` | `file: string`, `line: number` | Enclosing function, ±20 lines context (≤500 tok) |
+| `doc_query` | `file: string` | Structured docs from a .sno file: description, functions with comments, types, examples (≤500 tok) |
+| `recipe` | `task: string` | Dynamic step-by-step recipe with current line numbers (≤500 tok) |
+
+Dev intelligence tools use a **live index** powered by `syn` parsing — line numbers and API surfaces are always current. All responses are budgeted to ≤500 tokens for compatibility with small context models (8K–32K).
+
+**Available recipes:** `add_operator`, `add_builtin`, `add_type`, `fix_from_error`
+
+#### State-Aware Context Tools
+
+| Tool | Input | Output |
+|------|-------|--------|
+| `get_context` | — | Baseline context for current dev phase (≤1800 tok) |
+| `get_state` | — | Current state + last 5 transitions (JSON) |
+
+The server tracks development state (Create/Check/Run/Debug) by observing tool call results. `get_context` returns phase-appropriate documentation: full LLM reference when writing code, error context when debugging, minimal output when the program runs successfully.
+
 ### Resources
 
 | URI | Description |

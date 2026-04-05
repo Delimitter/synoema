@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 use clap::Parser;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -29,9 +32,13 @@ enum Command {
         #[arg(long)]
         openrouter_key: Option<String>,
 
-        /// Filter models (comma-separated)
+        /// Filter models (comma-separated, include only matching)
         #[arg(long, value_delimiter = ',')]
         models: Option<Vec<String>>,
+
+        /// Exclude models (comma-separated, skip matching)
+        #[arg(long, value_delimiter = ',')]
+        exclude_models: Option<Vec<String>>,
 
         /// Filter by model tier: frontier, mid, weak
         #[arg(long)]
@@ -48,6 +55,10 @@ enum Command {
         /// Verbose output: show commands, individual run timings, script stderr
         #[arg(long, short = 'v')]
         verbose: bool,
+
+        /// Parallel threads for Phase C models (default: 2, 0 = sequential)
+        #[arg(long, default_value = "2")]
+        parallel: usize,
 
         /// Use local ollama for Phase C instead of OpenRouter
         #[arg(long)]
@@ -99,10 +110,12 @@ fn main() {
             phases,
             openrouter_key,
             models,
+            exclude_models,
             tier,
             tasks,
             repeats,
             verbose,
+            parallel,
             ollama,
             ollama_model,
         } => {
@@ -165,9 +178,10 @@ fn main() {
                         Err(e) => eprintln!("  Phase C error: {e}"),
                     }
                 } else if let Some(ref key) = openrouter_key {
-                    telemetry::print_phase_start("C", "LLM CODE GENERATION", "sequential");
+                    let mode = if parallel > 1 { "parallel" } else { "sequential" };
+                    telemetry::print_phase_start("C", "LLM CODE GENERATION", mode);
                     let model_list =
-                        phases::llm::resolve_models(&models, &tier);
+                        phases::llm::resolve_models(&models, &exclude_models, &tier);
                     match phases::llm::run(
                         &bench_root,
                         &task_list,
@@ -176,6 +190,7 @@ fn main() {
                         key,
                         repeats,
                         verbose,
+                        parallel,
                     ) {
                         Ok(results) => {
                             telemetry::print_llm_results(&results);

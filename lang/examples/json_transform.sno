@@ -1,0 +1,23 @@
+-- SPDX-License-Identifier: MIT-0
+-- JSON processing pipeline
+
+--- JSON transform: parse, extract fields, transform.
+--- example: main == ()
+
+-- Extract string field from JSON object
+get_str key obj = fold_result show "" (json_get key obj)
+
+-- Process user JSON: extract and format
+process_user src =
+  parsed = unwrap (json_parse src)
+  name = get_str "name" parsed
+  age = get_str "age" parsed
+  "User: ${name}, age: ${age}"
+
+main =
+  src = "{\"name\": \"Alice\", \"age\": 30, \"active\": true}"
+  parsed = unwrap (json_parse src)
+  p1 = print ("parsed: " ++ show parsed)
+  p2 = print ("name: " ++ show (json_get "name" parsed))
+  p3 = print ("missing: " ++ show (json_get "email" parsed))
+  print (process_user src)

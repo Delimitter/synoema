@@ -1,0 +1,40 @@
+-- SPDX-License-Identifier: MIT-0
+-- Queue data structure via two stacks
+
+--- Queue: enqueue, dequeue, peek — O(1) amortized via two-list trick.
+--- example: main == ()
+
+Queue a = MkQueue (List a) (List a)
+
+queue_new = MkQueue [] []
+queue_enqueue x (MkQueue front back) = MkQueue front (x : back)
+
+queue_normalize (MkQueue front back) =
+  ? length front == 0 -> MkQueue (reverse back) []
+  : MkQueue front back
+
+queue_deq_go (MkQueue front back) =
+  Ok (MkPair (head front) (MkQueue (tail front) back))
+
+queue_dequeue (MkQueue front back) =
+  ? length front == 0 && length back == 0 -> Err "queue empty"
+  : queue_deq_go (queue_normalize (MkQueue front back))
+
+queue_peek_go (MkQueue front _) = Ok (head front)
+
+queue_peek (MkQueue front back) =
+  ? length front == 0 && length back == 0 -> Err "queue empty"
+  : queue_peek_go (queue_normalize (MkQueue front back))
+
+queue_size (MkQueue front back) = length front + length back
+
+main =
+  q = queue_enqueue 3 (queue_enqueue 2 (queue_enqueue 1 queue_new))
+  p1 = print ("peek: " ++ show (queue_peek q))
+  p2 = print ("size: " ++ show (queue_size q))
+  r1 = unwrap (queue_dequeue q)
+  p3 = print ("dequeue: " ++ show (fst r1))
+  r2 = unwrap (queue_dequeue (snd r1))
+  p4 = print ("dequeue: " ++ show (fst r2))
+  r3 = unwrap (queue_dequeue (snd r2))
+  print ("dequeue: " ++ show (fst r3) ++ ", empty? " ++ show (queue_size (snd r3) == 0))

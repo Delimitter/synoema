@@ -436,8 +436,12 @@ impl Infer {
             Type::arrow(Type::list(Type::int()), Type::int()),
         ));
 
-        // even: Int -> Bool
+        // even/odd: Int -> Bool
         env.insert("even".into(), Scheme::mono(Type::arrow(Type::int(), Type::bool())));
+        env.insert("odd".into(), Scheme::mono(Type::arrow(Type::int(), Type::bool())));
+
+        // not: Bool -> Bool
+        env.insert("not".into(), Scheme::mono(Type::arrow(Type::bool(), Type::bool())));
 
         // Float math builtins: Float -> Float
         for name in &["sqrt", "floor", "ceil", "round"] {

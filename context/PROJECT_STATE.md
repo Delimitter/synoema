@@ -13,11 +13,12 @@
 - **Prelude:** `lang/prelude/prelude.sno` — Result type + combinators (map_ok, map_err, unwrap, unwrap_or, is_ok, is_err, and_then)
 - **`error : String -> a`** builtin — runtime panic в interpreter + JIT
 - **npm дистрибуция:** `npx synoema-mcp` — 5 пакетов (launcher + 4 платформенных бинарника), версии синхронизированы из git tag через CI
-- **Phases 9.2–23** завершены + TCO в JIT + String stdlib в JIT + Doc-as-Code + LLM Cost Reduction v1 + Region Inference
+- **Phases 9.2–23** завершены + TCO в JIT + String stdlib в JIT + Doc-as-Code + LLM Cost Reduction v1 + Region Inference + Doc Extraction API
 - JIT поддерживает: int, bool, float, string, list, closures, records, record patterns, **record update**, modules, ADTs, ==, !=, list comprehensions, IO (print/readline), show (все типы), type class dispatch, higher-order stdlib, **self-recursive TCO**, **string stdlib** (str_slice/find/starts_with/trim/len/json_escape)
 - Interpreter: всё вышеперечисленное + сетевые примитивы (tcp_listen/accept, fd_*/popen)
 - Type checker: Hindley-Milner + row polymorphism + linear types (LinearArrow) + **type aliases** (`type Pos = {x: Int, y: Int}`)
 - Система диагностики: synoema-diagnostic, структурированные ошибки с span, JSON/human рендереры, **LLM error feedback** (llm_hint, fixability, did_you_mean для top-12 ошибок)
+- **Doc Extraction API:** `synoema doc --format json` — structured JSON output с doc-comments и inline-комментариями; MCP tool `doc_query` для LLM-запросов документации из .sno файлов
 - **Error recovery:** `parse_recovering()` и `typecheck_recovering()` — сбор всех ошибок за один проход
 - **Feedback loop:** `tools/llm/feedback_loop.py` — generate → check → enrich → retry pipeline
 - **Stdlib catalog:** `docs/llm/stdlib.md` — машиночитаемый каталог всех builtins с типами
@@ -30,8 +31,8 @@ Synoema [sy-NO-e-ma] — язык программирования, оптими
 языковыми моделями (LLM). Название: σύν (вместе) + νόημα (содержание мысли).
 
 **Три ключевых преимущества:**
-- **-46% токенов** vs Python (12 бенчмарков, верифицировано)
-- **4.4× быстрее** Python (Cranelift JIT, 3 бенчмарка)
+- **-15% токенов** vs Python в среднем, до 52% на алгоритмических задачах (16 автоматизированных бенчмарков, tiktoken cl100k_base)
+- **3× медиана скорости** vs Python (Cranelift JIT, 12 бенчмарков, диапазон 2.1×–28×)
 - **100% синтаксическая корректность** через GBNF constrained decoding
 
 ## 2. Структура репозитория
@@ -51,7 +52,7 @@ synoema-repo/
 │   │   ├── synoema-eval/       # 1894 строки, 119 тестов — tree-walking interpreter
 │   │   ├── synoema-codegen/    # 3044 строки, 126 тестов — Cranelift JIT + runtime
 │   │   └── synoema-repl/       # 271 строка — CLI: run/jit/eval/REPL
-│   ├── examples/               # 10 программ .sno
+│   ├── examples/               # 44 программы .sno (алгоритмы, структуры, паттерны, утилиты)
 │   ├── benchmarks/
 │   │   ├── token-count/        # 12 программ, BPE-бенчмарк
 │   │   └── performance/        # JIT vs Python бенчмарки
@@ -93,8 +94,8 @@ synoema-repo/
 | Крейтов | 8 (добавлен synoema-diagnostic) |
 | Примеров | 14 программ (.sno) |
 | BPE-aligned операторов | 33/33 |
-| Экономия токенов vs Python | 46% |
-| Ускорение vs Python (JIT) | 4.4× среднее |
+| Экономия токенов vs Python | 15% среднее (до 52%, 16 задач) |
+| Ускорение vs Python (JIT) | 3× медиана (2.1×–28×, 12 задач) |
 | GBNF-грамматика | 162 строки, 48 правил |
 
 ## 4. Что работает
@@ -153,12 +154,16 @@ euler1.sno     JIT=233168    Interp=233168     ✓ (Phase 10.1 TCO: 64MB stack t
 fizzbuzz.sno   JIT=FizzBuzz  Interp=FizzBuzz   ✓ (Phase 9.3 strings in JIT)
 ```
 
-### Performance (JIT vs CPython 3.12):
+### Performance (JIT vs CPython 3.12, 12 задач, median of 5 runs):
 ```
-fib(30):      5.9× faster
-gcd(100K):    1.7× faster
-collatz(10K): 5.6× faster
-Average:      4.4× faster
+fibonacci:      28.2× faster
+factorial:       4.2× faster
+gcd:             3.5× faster
+collatz:         3.1× faster
+quicksort:       2.7× faster
+matrix_mult:     2.1× faster
+────────────────────────────
+Median (12):     3.0× faster
 ```
 
 ## 6. Известные баги

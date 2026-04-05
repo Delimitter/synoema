@@ -1,0 +1,17 @@
+.git
+.gitignore
+.github
+node_modules
+dist/*.map
+*.vsix
+.DS_Store
+.env
+.envrc
+tsconfig.json
+webpack.config.js
+esbuild.config.js
+package-lock.json
+*.test.ts
+src/**/*.ts
+install.sh
+DEVELOPMENT.md

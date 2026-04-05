@@ -1,44 +1,73 @@
-# Synoema — Pre-built Binaries
+# Synoema — Releases
 
-Pre-built binaries for the Synoema compiler and MCP server.
-
-> See [versioning policy](../docs/versioning.md) for version guarantees.
+Pre-built binaries and build scripts for the Synoema compiler and MCP server.
 
 ## Latest Release
 
 **[v0.1.0-alpha.1](v0.1.0-alpha.1/)** — April 2026
 
-## Binaries per release
+## How to build
 
-Each release contains two binaries:
+```bash
+# 1. Clone the repo (if you haven't)
+git clone https://github.com/Delimitter/synoema
+cd synoema
+
+# 2. Go to your platform's release directory
+cd releases/v0.1.0-alpha.1/darwin-arm64   # macOS Apple Silicon
+# cd releases/v0.1.0-alpha.1/darwin-x64   # macOS Intel
+# cd releases/v0.1.0-alpha.1/linux-x64    # Linux x86_64
+# cd releases/v0.1.0-alpha.1/win32-x64    # Windows (use .\build.ps1)
+
+# 3. Build
+make
+
+# 4. Run
+./synoema eval "6 * 7"   # → 42
+```
+
+**Prerequisite:** [Rust toolchain](https://rustup.rs/).
+
+## What gets built
 
 | Binary | Description |
 |--------|-------------|
-| `synoema` | CLI: `run` (interpreter), `jit` (Cranelift), `eval`, REPL |
+| `synoema` | CLI: `run` (interpreter), `jit` (Cranelift), `eval`, `build`, `test`, REPL |
 | `synoema-mcp` | MCP server for Claude Desktop / Cursor / Zed |
 
 ## Platforms
 
-| Directory | Platform |
-|-----------|---------|
-| `darwin-arm64/` | macOS Apple Silicon (M1/M2/M3/M4) |
-| `darwin-x64/` | macOS Intel (x86_64) |
-| `linux-x64/` | Linux x86_64 |
-| `win32-x64/` | Windows x64 |
+| Directory | Platform | Build |
+|-----------|---------|-------|
+| `darwin-arm64/` | macOS Apple Silicon (M1-M4) | `make` |
+| `darwin-x64/` | macOS Intel (x86_64) | `make` |
+| `linux-x64/` | Linux x86_64 | `make` |
+| `win32-x64/` | Windows x64 | `.\build.ps1` |
 
-## How to download
-
-The binary files themselves are hosted as GitHub Release assets (not committed to git).
-Download from the [Releases page](https://github.com/Delimitter/synoema/releases) or follow the platform-specific instructions in each directory's README.
-
-Full user guide: [docs/install.md](../docs/install.md)
-
-## Build from source
-
-If no pre-built binary is available for your platform:
+## Install via npm
 
 ```bash
-git clone https://github.com/Delimitter/synoema
-cd synoema/lang && cargo build --release   # → lang/target/release/synoema
-cd synoema/mcp  && cargo build --release   # → mcp/target/release/synoema-mcp
+# MCP server (recommended for Claude Desktop / Cursor / Zed)
+npx synoema-mcp
+
+# Or install globally
+npm install -g synoema-mcp
+synoema-mcp
 ```
+
+npm handles platform detection automatically — the correct native binary is installed.
+
+## Alternative: Download pre-built binaries
+
+Download from the [GitHub Releases page](https://github.com/Delimitter/synoema/releases).
+
+## Build from workspace root
+
+If you prefer building without the release scripts:
+
+```bash
+cd lang && cargo build --release        # → lang/target/release/synoema
+cd mcp && cargo build --release         # → mcp/target/release/synoema-mcp
+```
+
+Full documentation: [README.md](../README.md)

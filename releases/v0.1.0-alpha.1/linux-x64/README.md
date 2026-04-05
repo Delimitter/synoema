@@ -1,48 +1,58 @@
 # Synoema v0.1.0-alpha.1 — Linux x86_64
 
-**Platform:** Linux x86_64 (glibc ≥2.17, e.g. Ubuntu 18.04+, Debian 9+, Fedora 28+)
+**Platform:** Linux x86_64 (glibc 2.17+: Ubuntu 18.04+, Debian 9+, Fedora 28+)
 
-## Download
+## Prerequisites
 
-```bash
-curl -L https://github.com/Delimitter/synoema/releases/download/v0.1.0-alpha.1/synoema-0.1.0-alpha.1-linux-x64 \
-  -o synoema
+- [Rust toolchain](https://rustup.rs/) (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`)
+- Target: `rustup target add x86_64-unknown-linux-gnu` (usually pre-installed)
 
-curl -L https://github.com/Delimitter/synoema/releases/download/v0.1.0-alpha.1/synoema-mcp-0.1.0-alpha.1-linux-x64 \
-  -o synoema-mcp
-```
-
-## Setup
+## Build from source
 
 ```bash
-# Make executable
-chmod +x synoema synoema-mcp
-
-# Optional: move to PATH
-sudo mv synoema /usr/local/bin/
-sudo mv synoema-mcp /usr/local/bin/
+cd releases/v0.1.0-alpha.1/linux-x64
+make
 ```
 
-## Run
+This produces two binaries in the current directory:
+
+| Binary | What it does |
+|--------|-------------|
+| `synoema` | Compiler CLI: eval, run, jit, repl, test, build |
+| `synoema-mcp` | MCP server for Claude Desktop / Cursor / Zed |
+
+## Quick Start
 
 ```bash
 # Evaluate an expression
-synoema eval "6 * 7"
+./synoema eval "6 * 7"
 # → 42
 
 # Run a file (interpreter)
-synoema run examples/quicksort.sno
-# → [1 2 3 4 5 6 7 8 9]
+./synoema run ../../../lang/examples/quicksort.sno
+# → [1, 2, 3, 4, 5, 6, 7, 8, 9]
 
-# JIT compile and run (4.4× faster)
-synoema jit examples/factorial.sno
+# Run with JIT (faster)
+./synoema jit ../../../lang/examples/factorial.sno
 # → 3628800
 
 # Interactive REPL
-synoema
+./synoema
+
+# Run doctests in a directory
+./synoema test ../../../lang/examples/
 ```
 
-## MCP Server (Claude Desktop on Linux)
+## Install (optional)
+
+```bash
+sudo make install
+# Copies synoema and synoema-mcp to /usr/local/bin/
+```
+
+After install, use `synoema` from anywhere without `./`.
+
+## MCP Setup (Claude Desktop)
 
 Edit `~/.config/Claude/claude_desktop_config.json`:
 
@@ -56,15 +66,22 @@ Edit `~/.config/Claude/claude_desktop_config.json`:
 }
 ```
 
-Restart Claude Desktop. The tools `eval`, `typecheck`, `run` will be available.
+Restart Claude Desktop. Tools `eval`, `typecheck`, `run` become available.
 
-Full MCP documentation: [docs/mcp.md](../../../docs/mcp.md)
+## Static build (musl)
 
-## Note on glibc
-
-The binary is dynamically linked against glibc. If you need a statically linked build (musl), compile from source:
+If you need a fully static binary (no glibc dependency):
 
 ```bash
 rustup target add x86_64-unknown-linux-musl
-cd mcp && cargo build --release --target x86_64-unknown-linux-musl
+# Edit Makefile: change TARGET to x86_64-unknown-linux-musl
+make
+```
+
+## Alternative: Download Pre-built Binary
+
+```bash
+curl -L https://github.com/Delimitter/synoema/releases/download/v0.1.0-alpha.1/synoema-0.1.0-alpha.1-linux-x64 -o synoema
+curl -L https://github.com/Delimitter/synoema/releases/download/v0.1.0-alpha.1/synoema-mcp-0.1.0-alpha.1-linux-x64 -o synoema-mcp
+chmod +x synoema synoema-mcp
 ```

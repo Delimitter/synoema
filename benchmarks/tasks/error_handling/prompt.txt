@@ -1,1 +1,3 @@
-Write a safe division function that returns an error for division by zero. Demonstrate with divide(10, 0) and divide(10, 2).
+Write a safe division function that returns an error for division by zero. Demonstrate with divide(10, 0) and divide(10, 2). Print each result on a separate line. Use integer division. Output must be exactly:
+Err division by zero
+Ok 5

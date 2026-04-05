@@ -1,0 +1,45 @@
+-- SPDX-License-Identifier: MIT-0
+-- Simple recursive-descent parser
+
+--- Parser: tokenize and evaluate arithmetic expressions.
+--- example: main == ()
+
+-- Character classification
+is_digit c = c >= "0" && c <= "9"
+is_space c = c == " "
+
+-- Append accumulator to result list if non-empty
+append_acc acc rest = ? str_len acc > 0 -> (acc : rest) : rest
+
+-- Tokenize: split string into number and operator tokens
+tok_go s pos acc =
+  ? pos >= str_len s -> ? str_len acc > 0 -> [acc] : []
+  : ch = str_slice s pos (pos + 1)
+    ? is_space ch -> ? str_len acc > 0 -> (acc : tok_go s (pos + 1) "") : tok_go s (pos + 1) ""
+    : ? ch == "+" -> append_acc acc ("+" : tok_go s (pos + 1) "")
+    : ? ch == "*" -> append_acc acc ("*" : tok_go s (pos + 1) "")
+    : tok_go s (pos + 1) "${acc}${ch}"
+
+tokenize s = tok_go s 0 ""
+
+-- Simple string-to-int
+to_num s = ? s == "0" -> 0 : ? s == "1" -> 1 : ? s == "2" -> 2 : ? s == "3" -> 3 : ? s == "4" -> 4 : ? s == "5" -> 5 : ? s == "6" -> 6 : ? s == "7" -> 7 : ? s == "8" -> 8 : ? s == "9" -> 9 : ? s == "10" -> 10 : ? s == "42" -> 42 : 0
+
+-- Evaluate: left-to-right, + and * only
+eval_go acc [] = acc
+eval_go acc (op:rest) =
+  ? length rest == 0 -> acc
+  : val = to_num (head rest)
+    ? op == "+" -> eval_go (acc + val) (tail rest)
+    : ? op == "*" -> eval_go (acc * val) (tail rest)
+    : acc
+
+eval_tokens [] = 0
+eval_tokens (x:rest) = eval_go (to_num x) rest
+
+main =
+  expr = "3 + 4 * 2"
+  tokens = tokenize expr
+  p1 = print ("expr: " ++ expr)
+  p2 = print ("tokens: " ++ show tokens)
+  print ("result: " ++ show (eval_tokens tokens))

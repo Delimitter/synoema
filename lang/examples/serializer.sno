@@ -1,0 +1,31 @@
+-- SPDX-License-Identifier: MIT-0
+-- Record serialization
+
+--- Serializer: convert records to string representations.
+--- example: main == ()
+
+-- Serialize a user record to a display string
+serialize_user u = "User(name=${u.name}, age=${show (u.age)}, role=${u.role})"
+
+-- Serialize to key=value format
+serialize_kv u = "name=${u.name} age=${show (u.age)} role=${u.role}"
+
+-- Create a user record
+make_user name age role = {name, age, role}
+
+-- Update user role
+promote u = {...u, role = "admin"}
+
+-- Filter users by role
+users_with_role role users = filter (\u -> u.role == role) users
+
+main =
+  alice = make_user "Alice" 30 "dev"
+  bob = make_user "Bob" 25 "dev"
+  carol = make_user "Carol" 35 "admin"
+  users = [alice bob carol]
+  p1 = print (serialize_user alice)
+  p2 = print (serialize_user (promote bob))
+  devs = users_with_role "dev" users
+  p3 = print ("devs: " ++ show (map (\u -> u.name) devs))
+  print ("kv: " ++ serialize_kv carol)

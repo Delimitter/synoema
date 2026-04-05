@@ -144,10 +144,31 @@ docs/llm/
 | `examples/` | MIT-0 | `MIT-0` |
 
 **Правила для SPDX-заголовков:**
-- Каждый новый `.rs` файл ОБЯЗАН иметь SPDX-заголовок (первые 2 строки)
+- Каждый новый `.rs` и `.ts` файл ОБЯЗАН иметь SPDX-заголовок (первые 2 строки):
+  ```
+  // SPDX-License-Identifier: <license-id>
+  // Copyright (c) 2025-present Synoema Contributors
+  ```
 - Apache-2.0 файлы: copyright = `Synoema Contributors`
 - BSL-1.1 файлы: copyright = `Andrey Bubnov` (licensor)
 - Скрипт: `scripts/add_headers.sh` для добавления заголовков
+
+**LICENSE файлы в директориях:**
+- Каждая распространяемая директория верхнего уровня ОБЯЗАНА содержать файл `LICENSE`
+- Директории с LICENSE: `lang/`, `mcp/`, `benchmarks/`, `vscode-extension/`, `npm/`, `tools/`, `docs/`, `examples/`, `spec/`
+- Корневой `LICENSE` содержит multi-license таблицу со ссылками на все поддиректории
+
+**Поля лицензий в манифестах:**
+- Каждый `Cargo.toml` пакета ОБЯЗАН иметь поле `license` (напрямую или через `workspace`)
+- Каждый `package.json` ОБЯЗАН иметь поле `"license"`
+- Значение ДОЛЖНО соответствовать LICENSE файлу в той же директории
+
+**Чеклист copyright compliance (при архивации/верификации):**
+1. Новые `.rs`/`.ts` файлы → проверить SPDX-заголовки
+2. Новые директории → проверить наличие LICENSE файла
+3. Новые Cargo.toml / package.json → проверить поле license
+4. Корневой `LICENSE` → проверить, что таблица актуальна
+5. Лицензия в заголовках/манифестах → проверить соответствие LICENSE файлу
 
 **DCO (Developer Certificate of Origin):**
 - Все коммиты должны быть подписаны: `git commit -s`

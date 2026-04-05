@@ -4,7 +4,7 @@
 
 **Version: 0.1.0-alpha.1** — alpha stage, syntax and APIs may change. See [versioning policy](docs/versioning.md).
 
-**Synoema** [sy-NO-e-ma] — a BPE-aligned programming language for LLM code generation. Saves **46% tokens** vs Python, compiles to native code via Cranelift JIT at **4.4x Python speed**.
+**Synoema** [sy-NO-e-ma] — a BPE-aligned programming language for LLM code generation. Saves **15% tokens** vs Python on average (up to 52% on algorithmic tasks), compiles to native code via Cranelift JIT (**3x median speedup** over Python).
 
 > **Status: research project.** Active research prototype — not yet production-ready. Contributions welcome.
 
@@ -17,13 +17,16 @@ synoema eval "6 * 7"
 
 ## Install
 
+**Pre-built binary** (recommended) — download from [GitHub Releases](https://github.com/Delimitter/synoema/releases/latest) for macOS, Linux, or Windows, then run:
+```bash
+./synoema install   # copies to ~/.synoema/bin, adds to PATH
+```
+
 **cargo install** (requires Rust):
 ```bash
 git clone https://github.com/Delimitter/synoema && cd synoema
 cargo install --path lang/crates/synoema-repl
 ```
-
-**Pre-built binary** — download from [GitHub Releases](https://github.com/Delimitter/synoema/releases/latest) for macOS, Linux, or Windows.
 
 **MCP server** (no Rust needed):
 ```bash
@@ -119,31 +122,44 @@ No `def`. No `return`. No commas in lists. Every operator is a single BPE token.
 
 ## Why Synoema?
 
-**Token efficiency** — 46% fewer tokens than Python, verified on 12 programs:
+**Token efficiency** — 15% fewer tokens than Python on average, verified on 16 benchmark tasks (automated, tiktoken cl100k_base):
 
 ```
-Program              Synoema  Python  Saving
+Task              Synoema  Python  Saving
 ─────────────────────────────────────────────
-Factorial               16      29     45%
-QuickSort               51      83     39%
-FizzBuzz                44      64     31%
-Filter                  27      67     60%
+json_build            32      67     52%
+pattern_match        136     225     40%
+quicksort             77     124     38%
+mergesort            117     179     35%
+gcd                   26      35     26%
+fibonacci             38      49     22%
+factorial             25      32     22%
+fizzbuzz              59      63      6%
 ─────────────────────────────────────────────
-TOTAL (12 programs)    332     615     46%
+matrix_mult          212     152    -39%
+string_ops            28      15    -87%
+─────────────────────────────────────────────
+AVERAGE (16 tasks)  79.1    92.9     15%
 ```
 
-Due to quadratic attention cost, **46% fewer tokens ≈ 71% less attention compute.**
+Synoema excels at recursive algorithms and pattern-heavy code. Python is more compact for string operations and imperative-style tasks.
 
-**Native speed** — JIT-compiled via Cranelift:
+**Native speed** — JIT-compiled via Cranelift (12 tasks, median of 5 runs):
 
 ```
-Benchmark           Python    Synoema JIT    Speedup
+Benchmark         Python     Synoema JIT    Speedup
 ────────────────────────────────────────────────────
-fib(30)              277ms       47ms          5.9×
-collatz (10K)        505ms       90ms          5.6×
+fibonacci          144ms         5.1ms       28.2×
+factorial           24ms         5.7ms        4.2×
+gcd                 17ms         4.7ms        3.5×
+collatz             18ms         5.6ms        3.1×
+quicksort           17ms         6.2ms        2.7×
+matrix_mult         16ms         7.7ms        2.1×
 ────────────────────────────────────────────────────
-Average                                        4.4×
+Median (12 tasks)                              3.0×
 ```
+
+Fibonacci is an outlier — deep recursion where JIT's TCO shines. Typical speedup: 2–4×.
 
 **Guaranteed correctness** — GBNF grammar for constrained decoding ensures 100% syntactically valid output from any LLM.
 
@@ -163,8 +179,15 @@ Average                                        4.4×
 | [MCP Server](docs/mcp.md) | Claude Desktop / Cursor / Zed integration |
 | [Formal Spec](docs/specs/language_reference.md) | EBNF grammar, type rules, operational semantics |
 | [Scientific Foundations](docs/research/scientific_foundations.md) | 23 peer-reviewed sources behind the design |
-| [Examples](lang/examples/) | 24 example programs from factorial to HTTP server |
+| [Examples](lang/examples/) | 44 example programs — algorithms, data structures, patterns, tools |
 
 ## License
 
-MIT
+Apache-2.0 — see [LICENSE](LICENSE) for details. Some components use different licenses:
+
+| Directory | License |
+|-----------|---------|
+| `lang/crates/synoema-codegen/` | BSL-1.1 → Apache-2.0 (after 36 months) |
+| `tools/` | BSL-1.1 → Apache-2.0 (after 36 months) |
+| `docs/`, `spec/` | CC-BY-SA-4.0 |
+| `examples/` | MIT-0 (no attribution required) |

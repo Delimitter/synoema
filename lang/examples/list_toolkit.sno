@@ -1,0 +1,44 @@
+-- SPDX-License-Identifier: MIT-0
+-- Advanced list processing utilities
+
+--- List toolkit: chunk, flatten, unique, partition, zip_with.
+--- example: main == ()
+
+-- Split list into chunks of size n
+chunk n [] = []
+chunk n xs =
+  ? length xs <= n -> [xs]
+  : take n xs : chunk n (drop n xs)
+
+-- Flatten a list of lists
+flatten [] = []
+flatten (x:xs) = x ++ flatten xs
+
+-- Check membership
+elem _ [] = false
+elem x (y:ys) = ? x == y -> true : elem x ys
+
+-- Remove duplicates (preserving first occurrence)
+unique [] = []
+unique (x:xs) =
+  rest = unique xs
+  ? elem x rest -> rest
+  : x : rest
+
+-- Partition by predicate into (matching, non-matching)
+partition_list pred xs =
+  yes = filter pred xs
+  no = filter (\x -> pred x == false) xs
+  MkPair yes no
+
+-- Zip two lists with a combining function
+zip_with f [] _ = []
+zip_with f _ [] = []
+zip_with f (x:xs) (y:ys) = f x y : zip_with f xs ys
+
+main =
+  p1 = print ("chunk 2 [1..6]: " ++ show (chunk 2 [1 2 3 4 5 6]))
+  p2 = print ("flatten: " ++ show (flatten [[1 2] [3 4] [5]]))
+  p3 = print ("unique: " ++ show (unique [1 2 3 2 1 4]))
+  p4 = print ("partition even: " ++ show (partition_list (\x -> x % 2 == 0) [1 2 3 4 5 6]))
+  print ("zip_with (+): " ++ show (zip_with (\a b -> a + b) [1 2 3] [10 20 30]))

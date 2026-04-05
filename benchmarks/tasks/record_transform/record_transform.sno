@@ -1,0 +1,9 @@
+-- SPDX-License-Identifier: MIT-0
+
+describe p = p.name ++ " at (" ++ show (p.x) ++ ", " ++ show (p.y) ++ ")"
+
+main =
+  p = {name = "Alice", x = 0, y = 0}
+  moved = {...p, x = 3, y = 4}
+  renamed = {...moved, name = "Bob"}
+  describe renamed

@@ -1,0 +1,1 @@
+Define a Maybe type (Just value or Nothing). Write safe_div that returns Nothing on division by zero. Chain: safe_div 10 2, then multiply result by 3 using map. Also chain: safe_div 10 0, show Nothing. Print both results on separate lines.

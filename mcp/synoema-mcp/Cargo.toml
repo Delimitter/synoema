@@ -2,6 +2,7 @@
 name = "synoema-mcp"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 description = "MCP server for the Synoema programming language"
 
 [[bin]]
@@ -9,8 +10,13 @@ name = "synoema-mcp"
 path = "src/main.rs"
 
 [dependencies]
+proc-macro2 = { version = "1", features = ["span-locations"] }
+quote = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+syn = { version = "2", features = ["full", "visit", "extra-traits"] }
 synoema-eval       = { path = "../../lang/crates/synoema-eval" }
+synoema-parser     = { path = "../../lang/crates/synoema-parser" }
+synoema-lexer      = { path = "../../lang/crates/synoema-lexer" }
 synoema-types      = { path = "../../lang/crates/synoema-types" }
 synoema-diagnostic = { path = "../../lang/crates/synoema-diagnostic" }

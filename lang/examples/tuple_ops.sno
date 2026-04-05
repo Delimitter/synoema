@@ -1,0 +1,37 @@
+-- SPDX-License-Identifier: MIT-0
+-- Pair/tuple operations
+
+--- Tuple ops: zip, unzip, assoc list lookup, map_snd.
+--- example: main == ()
+
+-- Zip two lists into Pairs
+zip_pairs [] _ = []
+zip_pairs _ [] = []
+zip_pairs (x:xs) (y:ys) = MkPair x y : zip_pairs xs ys
+
+-- Unzip a list of Pairs
+unzip_pairs [] = MkPair [] []
+unzip_pairs ((MkPair a b):rest) =
+  r = unzip_pairs rest
+  MkPair (a : fst r) (b : snd r)
+
+-- Lookup in association list
+assoc_find key [] = Err "not found"
+assoc_find key ((MkPair k v):rest) =
+  ? k == key -> Ok v
+  : assoc_find key rest
+
+-- Map over second elements
+map_snd f [] = []
+map_snd f ((MkPair a b):rest) = MkPair a (f b) : map_snd f rest
+
+main =
+  names = ["Alice" "Bob" "Carol"]
+  ages = [30 25 35]
+  pairs = zip_pairs names ages
+  p1 = print ("zip: " ++ show pairs)
+  parts = unzip_pairs pairs
+  p2 = print ("unzip fst: " ++ show (fst parts))
+  p3 = print ("lookup Bob: " ++ show (assoc_find "Bob" pairs))
+  doubled = map_snd (\x -> x * 2) pairs
+  print ("map_snd *2: " ++ show doubled)

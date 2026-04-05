@@ -6,6 +6,10 @@ for details:
 
   lang/crates/                    Apache-2.0 (this file)
   lang/crates/synoema-codegen/    BSL-1.1 (see lang/crates/synoema-codegen/LICENSE)
+  mcp/                            Apache-2.0 (see mcp/LICENSE)
+  benchmarks/                     Apache-2.0 (see benchmarks/LICENSE)
+  vscode-extension/               Apache-2.0 (see vscode-extension/LICENSE)
+  npm/                            Apache-2.0 (see npm/LICENSE)
   tools/                          BSL-1.1 (see tools/LICENSE)
   docs/                           CC-BY-SA-4.0 (see docs/LICENSE)
   examples/                       MIT-0 (see examples/LICENSE)

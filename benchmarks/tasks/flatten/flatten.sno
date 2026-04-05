@@ -1,0 +1,13 @@
+-- SPDX-License-Identifier: MIT-0
+
+Nested a = Flat a | List (List (Nested a))
+
+my_concat_map f [] = []
+my_concat_map f (x:xs) = f x ++ my_concat_map f xs
+
+flatten (Flat x) = [x]
+flatten (List xs) = my_concat_map flatten xs
+
+main =
+  nested = List [(Flat 1) (List [(Flat 2) (Flat 3)]) (List [(Flat 4) (List [(Flat 5) (Flat 6)])])]
+  flatten nested

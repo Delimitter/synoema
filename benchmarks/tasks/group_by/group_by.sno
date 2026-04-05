@@ -1,0 +1,8 @@
+-- SPDX-License-Identifier: MIT-0
+
+partition f xs = (filter f xs, filter (\x -> f x == false) xs)
+
+main =
+  evens = filter even [1..10]
+  odds = filter odd [1..10]
+  show evens ++ "\n" ++ show odds

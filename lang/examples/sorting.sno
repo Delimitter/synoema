@@ -1,0 +1,36 @@
+-- SPDX-License-Identifier: MIT-0
+-- Sorting algorithms
+
+--- Sorting: mergesort and insertion sort.
+--- example: main == ()
+
+-- Insert into sorted list
+insert x xs =
+  ? length xs == 0 -> [x]
+  : ? x <= head xs -> (x : xs)
+  : (head xs : insert x (tail xs))
+
+isort [] = []
+isort (x:xs) = insert x (isort xs)
+
+-- Merge two sorted lists (uses ternary to avoid 3-eq pattern bug)
+merge xs ys =
+  ? length xs == 0 -> ys
+  : ? length ys == 0 -> xs
+  : ? head xs <= head ys -> (head xs : merge (tail xs) ys)
+  : (head ys : merge xs (tail ys))
+
+-- Merge sort
+msort xs =
+  ? length xs <= 1 -> xs
+  : merge (msort (take (length xs / 2) xs)) (msort (drop (length xs / 2) xs))
+
+-- Sort descending
+sort_desc xs = reverse (msort xs)
+
+main =
+  data = [5 3 8 1 9 2 7 4 6]
+  p1 = print ("original:  " ++ show data)
+  p2 = print ("isort:     " ++ show (isort data))
+  p3 = print ("msort:     " ++ show (msort data))
+  print ("sort desc: " ++ show (sort_desc data))

@@ -101,7 +101,7 @@ Synoema: **maximum guarantees, zero cost.**
 ## Try It Yourself
 
 ```bash
-git clone https://github.com/synoema/synoema
+git clone https://github.com/Delimitter/synoema
 cd synoema/lang
 
 # Type inference in action:

@@ -12,9 +12,9 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 edition = "2021"
-license = "MIT"
+license = "Apache-2.0"
 description = "Synoema — programming language optimized for LLM code generation"
 repository = "https://github.com/Delimitter/synoema"
 homepage = "https://github.com/Delimitter/synoema"

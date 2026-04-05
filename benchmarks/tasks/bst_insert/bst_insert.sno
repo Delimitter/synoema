@@ -1,0 +1,20 @@
+-- SPDX-License-Identifier: MIT-0
+
+Tree a = Tip | Bin (Tree a) a (Tree a)
+
+insert (Tip) v = Bin Tip v Tip
+insert (Bin left val right) v =
+  ? v < val -> Bin (insert left v) val right
+  : ? v > val -> Bin left val (insert right v)
+  : Bin left val right
+
+inorder (Tip) = []
+inorder (Bin left val right) = inorder left ++ [val] ++ inorder right
+
+join_sp [] = ""
+join_sp (x:[]) = show x
+join_sp (x:xs) = show x ++ " " ++ join_sp xs
+
+tree = insert (insert (insert (insert (insert Tip 5) 3) 7) 1) 4
+
+main = inorder tree |> join_sp

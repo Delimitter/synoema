@@ -1,0 +1,13 @@
+-- SPDX-License-Identifier: MIT-0
+
+split delim s =
+  idx = str_find s delim 0
+  ? idx < 0 -> [s]
+  : str_slice s 0 idx : split delim (str_slice s (idx + str_len delim) (str_len s))
+
+main =
+  fields = split "," "Alice,30,NYC"
+  name = index 0 fields
+  age = index 1 fields
+  city = index 2 fields
+  name ++ " is " ++ age ++ " from " ++ city

@@ -378,7 +378,7 @@ main =
 | `foldl` | `(b -> a -> b) -> b -> [a] -> b` | Left fold |
 | `concatMap` | `(a -> [b]) -> [a] -> [b]` | Map and flatten |
 | `zip` | `[a] -> [b] -> [(a, b)]` | Pair elements (stops at shorter) |
-| `index` | `[a] -> Int -> a` | 0-based index (error on out-of-bounds) |
+| `index` | `Int -> [a] -> a` | 0-based index (error on out-of-bounds) |
 | `take` | `Int -> [a] -> [a]` | First n elements |
 | `drop` | `Int -> [a] -> [a]` | Skip first n elements |
 | `reverse` | `[a] -> [a]` | Reverse list |

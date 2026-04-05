@@ -1496,9 +1496,27 @@ fn jit_json_parse_number(b: &[u8], i: usize) -> Result<(i64, usize), String> {
         return Err(format!("expected digit at position {}", j));
     }
     while j < b.len() && b[j].is_ascii_digit() { j += 1; }
+    let mut is_float = false;
+    if j < b.len() && b[j] == b'.' {
+        is_float = true;
+        j += 1;
+        while j < b.len() && b[j].is_ascii_digit() { j += 1; }
+    }
+    if j < b.len() && (b[j] == b'e' || b[j] == b'E') {
+        is_float = true;
+        j += 1;
+        if j < b.len() && (b[j] == b'+' || b[j] == b'-') { j += 1; }
+        while j < b.len() && b[j].is_ascii_digit() { j += 1; }
+    }
     let s = std::str::from_utf8(&b[i..j]).unwrap();
-    let n: i64 = s.parse().map_err(|_| format!("invalid number at position {}", i))?;
-    Ok((jit_make_con("JNum", 2, &[n]), j))
+    if is_float {
+        let n: f64 = s.parse().map_err(|_| format!("invalid number at position {}", i))?;
+        let tagged_float = synoema_float_new(n.to_bits() as i64);
+        Ok((jit_make_con("JNum", 2, &[tagged_float]), j))
+    } else {
+        let n: i64 = s.parse().map_err(|_| format!("invalid number at position {}", i))?;
+        Ok((jit_make_con("JNum", 2, &[n]), j))
+    }
 }
 
 fn jit_json_parse_string(b: &[u8], i: usize) -> Result<(i64, usize), String> {
@@ -1562,7 +1580,7 @@ fn jit_json_parse_array(b: &[u8], i: usize) -> Result<(i64, usize), String> {
 
 fn jit_json_parse_object(b: &[u8], i: usize) -> Result<(i64, usize), String> {
     let mut j = i + 1; // skip '{'
-    let mut pairs = Vec::new();
+    let mut pairs: Vec<(String, i64)> = Vec::new();
     j = jit_skip_ws(b, j);
     if j < b.len() && b[j] == b'}' {
         return Ok((jit_make_con("JObj", 5, &[0]), j + 1)); // 0 = nil
@@ -1581,16 +1599,18 @@ fn jit_json_parse_object(b: &[u8], i: usize) -> Result<(i64, usize), String> {
         let (val, next) = jit_json_parse_value(b, j)?;
         let key_tagged = alloc_str(&key);
         let pair = jit_make_con("MkPair", 0, &[key_tagged, val]);
-        pairs.push(pair);
+        pairs.push((key, pair));
         j = jit_skip_ws(b, next);
         if j >= b.len() { return Err("unterminated object".into()); }
         if b[j] == b'}' { break; }
         if b[j] != b',' { return Err(format!("expected ',' or '}}' at position {}", j)); }
         j += 1;
     }
+    // Sort pairs by key for map_lookup_list compatibility
+    pairs.sort_by(|a, b| a.0.cmp(&b.0));
     // Build linked list from pairs (right to left)
     let mut list = 0i64; // nil
-    for pair in pairs.into_iter().rev() {
+    for (_, pair) in pairs.into_iter().rev() {
         list = synoema_cons(pair, list);
     }
     Ok((jit_make_con("JObj", 5, &[list]), j + 1))

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-present Synoema Contributors
+
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
@@ -110,7 +113,7 @@ fn read_example(name: &str) -> Result<Value, String> {
 /// Priority:
 /// 1. `SYNOEMA_ROOT` environment variable
 /// 2. Walk up from the executable's directory until we find a `lang/` subdirectory
-fn synoema_root() -> PathBuf {
+pub fn synoema_root() -> PathBuf {
     if let Ok(root) = std::env::var("SYNOEMA_ROOT") {
         return PathBuf::from(root);
     }

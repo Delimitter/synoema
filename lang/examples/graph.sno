@@ -1,0 +1,47 @@
+-- SPDX-License-Identifier: MIT-0
+-- Graph algorithms via adjacency list
+
+--- Graph: adjacency list (Map), DFS reachability, collect all nodes.
+--- example: main == ()
+
+-- Add directed edge to graph (Map-based adjacency list)
+add_edge from to g =
+  neighbors = map_get from [] g
+  map_insert from (to : neighbors) g
+
+-- Build undirected graph from edge pairs
+build_go [] g = g
+build_go ((MkPair a b):rest) g =
+  g1 = add_edge a b g
+  g2 = add_edge b a g1
+  build_go rest g2
+
+build_graph edges = build_go edges map_empty
+
+-- Membership check
+elem_in _ [] = false
+elem_in x (y:ys) = ? x == y -> true : elem_in x ys
+
+-- DFS: check if target is reachable from start
+dfs_go [] _ _ _ = false
+dfs_go (node:stack) visited target g =
+  ? node == target -> true
+  : ? elem_in node visited -> dfs_go stack visited target g
+  : dfs_go (map_get node [] g ++ stack) (node : visited) target g
+
+dfs_reachable start target g = dfs_go [start] [] target g
+
+-- Collect all reachable nodes from start
+dfs_all [] visited _ = reverse visited
+dfs_all (node:stack) visited g =
+  ? elem_in node visited -> dfs_all stack visited g
+  : dfs_all (map_get node [] g ++ stack) (node : visited) g
+
+dfs_collect start g = dfs_all [start] [] g
+
+main =
+  edges = [(MkPair 1 2) (MkPair 2 3) (MkPair 3 4) (MkPair 1 5) (MkPair 5 6)]
+  g = build_graph edges
+  p1 = print ("reachable 1->4: " ++ show (dfs_reachable 1 4 g))
+  p2 = print ("reachable 1->7: " ++ show (dfs_reachable 1 7 g))
+  print ("all from 1: " ++ show (dfs_collect 1 g))

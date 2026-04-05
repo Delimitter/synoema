@@ -1,0 +1,12 @@
+-- SPDX-License-Identifier: MIT-0
+
+split delim s =
+  idx = str_find s delim 0
+  ? idx < 0 -> [s]
+  : str_slice s 0 idx : split delim (str_slice s (idx + str_len delim) (str_len s))
+
+count w ws = length [x | x <- ws, x == w]
+
+main =
+  words = split " " "the cat sat on the mat the cat"
+  "the: " ++ show (count "the" words) ++ "\ncat: " ++ show (count "cat" words) ++ "\nsat: " ++ show (count "sat" words)

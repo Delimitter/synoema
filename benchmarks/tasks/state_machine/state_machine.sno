@@ -1,0 +1,21 @@
+-- SPDX-License-Identifier: MIT-0
+
+Light = Green | Yellow | Red
+
+next Green = Yellow
+next Yellow = Red
+next Red = Green
+
+show_light Green = "Green"
+show_light Yellow = "Yellow"
+show_light Red = "Red"
+
+step s =
+  n = next s
+  show_light s ++ " -> " ++ show_light n
+
+main =
+  s0 = Green
+  s1 = next s0
+  s2 = next s1
+  step s0 ++ "\n" ++ step s1 ++ "\n" ++ step s2

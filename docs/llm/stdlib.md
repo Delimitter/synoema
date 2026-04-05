@@ -11,7 +11,7 @@ filter    : (a -> Bool) -> [a] -> [a]
 foldl     : (b -> a -> b) -> b -> [a] -> b
 concatMap : (a -> [b]) -> [a] -> [b]
 zip       : [a] -> [b] -> [(a, b)]  -- pair elements, stop at shorter
-index     : [a] -> Int -> a          -- 0-based, error on out-of-bounds
+index     : Int -> [a] -> a          -- 0-based, error on out-of-bounds
 take      : Int -> [a] -> [a]        -- first n elements
 drop      : Int -> [a] -> [a]        -- skip first n elements
 reverse   : [a] -> [a]              -- reverse list
@@ -115,9 +115,15 @@ JsonValue = JNull | JBool Bool | JNum Int | JStr String
 
 json_parse  : String -> Result JsonValue String
 json_encode : JsonValue -> String              -- JIT only
-json_get    : String -> JsonValue -> Result JsonValue String
+json_get    : String -> JsonValue -> Result JsonValue String  -- single flat key, NOT dot-path
 json_escape : String -> String
 ```
+
+Notes:
+- `JNum` stores `Int` for integers, `Float` for decimals (e.g. `3.14`)
+- `json_get` takes ONE key, not dot-paths. Nest calls for deep access:
+  `json_get "b" (unwrap (json_get "a" obj))`
+- `JObj` pairs are sorted by key (compatible with `map_lookup_list`)
 
 ## Concurrency (interpreter only)
 ```

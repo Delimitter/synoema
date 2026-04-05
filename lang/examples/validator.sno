@@ -1,0 +1,26 @@
+-- SPDX-License-Identifier: MIT-0
+-- Composable data validation with Result chains
+
+--- Validator: composable Result-chain validation.
+--- example: main == ()
+
+-- Validation rules returning Result
+check_not_empty s = ? str_len s == 0 -> Err "must not be empty" : Ok s
+
+check_min_len n s = ? str_len s < n -> Err ("must be at least " ++ show n ++ " chars") : Ok s
+
+check_no_spaces s = ? str_find s " " 0 >= 0 -> Err "must not contain spaces" : Ok s
+
+-- Compose validators: run all, return first error
+validate_username name =
+  check_not_empty name |> and_then (check_min_len 3) |> and_then check_no_spaces
+
+validate_age age = ? age < 0 -> Err "age must be positive" : ? age > 150 -> Err "age seems invalid" : Ok age
+
+main =
+  p1 = print ("valid user: " ++ show (validate_username "alice"))
+  p2 = print ("empty user: " ++ show (validate_username ""))
+  p3 = print ("short user: " ++ show (validate_username "ab"))
+  p4 = print ("spaces:     " ++ show (validate_username "a b c"))
+  p5 = print ("valid age:  " ++ show (validate_age 25))
+  print ("bad age:    " ++ show (validate_age 200))

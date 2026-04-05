@@ -1,0 +1,121 @@
+{
+  "name": "synoema",
+  "displayName": "Synoema",
+  "description": "VSCode extension for the Synoema programming language",
+  "version": "0.1.0",
+  "publisher": "synoema",
+  "license": "Apache-2.0",
+  "engines": {
+    "vscode": "^1.75.0",
+    "node": "^16.0.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "synoema",
+    "language",
+    "code-generation",
+    "llm",
+    "functional"
+  ],
+  "main": "./dist/extension.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Delimitter/synoema"
+  },
+  "activationEvents": [
+    "onLanguage:synoema",
+    "onCommand:synoema.run",
+    "onCommand:synoema.jit",
+    "onCommand:synoema.eval"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "synoema",
+        "aliases": [
+          "Synoema",
+          "synoema"
+        ],
+        "extensions": [
+          ".sno"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "synoema",
+        "scopeName": "source.synoema",
+        "path": "./src/grammar/synoema.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "synoema.run",
+        "title": "Synoema: Run File",
+        "when": "editorLangId == synoema"
+      },
+      {
+        "command": "synoema.jit",
+        "title": "Synoema: JIT File",
+        "when": "editorLangId == synoema"
+      },
+      {
+        "command": "synoema.eval",
+        "title": "Synoema: Eval Selection",
+        "when": "editorLangId == synoema"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "synoema.run",
+        "key": "ctrl+shift+r",
+        "mac": "cmd+shift+r",
+        "when": "editorLangId == synoema"
+      },
+      {
+        "command": "synoema.jit",
+        "key": "ctrl+shift+j",
+        "mac": "cmd+shift+j",
+        "when": "editorLangId == synoema"
+      }
+    ],
+    "configuration": [
+      {
+        "title": "Synoema",
+        "properties": {
+          "synoema.path": {
+            "type": "string",
+            "default": "synoema",
+            "description": "Path to the synoema CLI executable"
+          },
+          "synoema.showOutput": {
+            "type": "boolean",
+            "default": true,
+            "description": "Automatically show output panel when running commands"
+          },
+          "synoema.timeout": {
+            "type": "number",
+            "default": 30000,
+            "description": "Timeout for synoema commands in milliseconds"
+          }
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --platform=node --external:vscode",
+    "watch": "npm run build -- --watch",
+    "package": "vsce package",
+    "test": "echo 'No tests yet'"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.75.0",
+    "esbuild": "^0.17.0",
+    "typescript": "^5.0.0",
+    "vsce": "^2.15.0"
+  }
+}

@@ -1,0 +1,1 @@
+Write a function that counts occurrences of a specific element in a list. Split the string "the cat sat on the mat the cat" by spaces, then count occurrences of "the", "cat", and "sat". Print each count as "word: N" on separate lines.

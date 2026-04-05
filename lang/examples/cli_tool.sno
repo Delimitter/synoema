@@ -1,0 +1,26 @@
+-- SPDX-License-Identifier: MIT-0
+-- CLI argument processing
+
+--- CLI tool: argument parsing and dispatch.
+--- Run with: synoema run cli_tool.sno -- greet Alice
+--- example: main == ()
+
+-- Command handlers (defined before dispatch)
+cmd_greet [] = print "Hello, World!"
+cmd_greet (name:_) = print "Hello, ${name}!"
+
+cmd_count rest = print ("${show (length rest)} arguments provided")
+
+-- Check if a flag exists in args
+has_flag flag [] = false
+has_flag flag (x:xs) = ? x == flag -> true : has_flag flag xs
+
+-- Dispatch based on first arg
+dispatch [] = print "Usage: cli_tool <command> [args]"
+dispatch (cmd:rest) =
+  ? cmd == "greet" -> cmd_greet rest
+  : ? cmd == "count" -> cmd_count rest
+  : ? cmd == "version" -> print "cli_tool v1.0.0"
+  : print ("Unknown command: " ++ cmd)
+
+main = dispatch args

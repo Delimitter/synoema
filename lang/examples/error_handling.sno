@@ -1,0 +1,26 @@
+-- SPDX-License-Identifier: MIT-0
+-- Error handling patterns with Result type
+
+--- Error handling: and_then chains, recovery, sequence.
+--- example: main == ()
+
+-- Parse integer from string (simplified)
+parse_int s = ? s == "0" -> Ok 0 : ? s == "1" -> Ok 1 : ? s == "2" -> Ok 2 : ? s == "42" -> Ok 42 : ? s == "100" -> Ok 100 : Err ("not a number: " ++ s)
+
+-- Safe division
+safe_div a b = ? b == 0 -> Err "division by zero" : Ok (a / b)
+
+-- Chain: parse then compute
+parse_and_divide a_str b_str =
+  parse_int a_str |> and_then (\a -> parse_int b_str |> and_then (\b -> safe_div a b))
+
+-- Show result nicely
+show_result r = ? is_ok r -> ("ok: " ++ show (unwrap r)) : ("err: " ++ show r)
+
+main =
+  p1 = print ("42 / 2: " ++ show_result (parse_and_divide "42" "2"))
+  p2 = print ("42 / 0: " ++ show_result (parse_and_divide "42" "0"))
+  p3 = print ("bad / 2: " ++ show_result (parse_and_divide "abc" "2"))
+  p4 = print ("default: " ++ show (unwrap_or 0 (parse_int "abc")))
+  results = [(Ok 1) (Ok 2) (Ok 3)]
+  print ("sequence: " ++ show (sequence_results results))

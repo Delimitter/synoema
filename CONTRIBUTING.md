@@ -10,7 +10,7 @@ Before contributing, please read this guide and our [Code of Conduct](CODE_OF_CO
 git clone https://github.com/Delimitter/synoema
 cd synoema/lang
 cargo build            # Build all crates
-cargo test             # Run 937 tests (must be 0 failures, 0 warnings)
+cargo test             # Run 998 tests (must be 0 failures, 0 warnings)
 ```
 
 **Prerequisites:** Rust stable ≥ 1.75 ([rustup.rs](https://rustup.rs)). No other dependencies — only Cranelift (JIT) and pretty_assertions (tests).
@@ -328,7 +328,7 @@ Run `scripts/add_headers.sh` to automatically add missing headers.
 - [x] Structured diagnostics — JSON + human-readable errors
 - [x] MCP server — eval, typecheck, run tools
 - [x] Constrained decoding — GBNF grammar
-- [x] 937 tests, 0 warnings
+- [x] 998 tests, 0 warnings
 - [ ] **LSP server** — autocomplete, go-to-definition, inline errors
 - [ ] **Web playground** — WASM-compiled interpreter in the browser
 - [ ] **LLVM backend** — `--backend llvm` for maximum optimization

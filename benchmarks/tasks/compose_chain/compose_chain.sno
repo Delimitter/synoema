@@ -1,0 +1,9 @@
+-- SPDX-License-Identifier: MIT-0
+
+double x = x * 2
+inc x = x + 1
+square x = x * x
+
+pipeline = double >> inc >> square
+
+main = map pipeline [1 2 3 4 5]

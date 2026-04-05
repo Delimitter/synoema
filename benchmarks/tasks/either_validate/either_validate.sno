@@ -1,0 +1,24 @@
+-- SPDX-License-Identifier: MIT-0
+
+Result a e = Ok a | Err e
+
+and_then f (Ok x) = f x
+and_then f (Err e) = Err e
+
+validate_name "" = Err "empty name"
+validate_name s = Ok s
+
+validate_age age =
+  ? age < 0 -> Err "negative age"
+  : Ok age
+
+validate name age =
+  validate_name name |> and_then (\n -> validate_age age |> and_then (\a -> Ok (n ++ " is " ++ show a)))
+
+show_result (Ok v) = "Ok " ++ v
+show_result (Err e) = "Err " ++ e
+
+main =
+  r1 = validate "Alice" 25
+  r2 = validate "" (-1)
+  show_result r1 ++ "\n" ++ show_result r2

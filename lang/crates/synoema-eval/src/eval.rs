@@ -30,6 +30,15 @@ fn next_io_fd() -> i64 {
     IO_NEXT_FD.with(|c| { let mut c = c.borrow_mut(); let fd = *c; *c += 1; fd })
 }
 
+// Unique counter for pattern match binding isolation
+thread_local! {
+    static CURRY_COUNTER: RefCell<u64> = RefCell::new(0);
+}
+
+fn next_curry_id() -> u64 {
+    CURRY_COUNTER.with(|c| { let mut c = c.borrow_mut(); let id = *c; *c += 1; id })
+}
+
 // ── Structured concurrency scope stack ───────────────────────────────────────
 // Each scope push adds an empty vec; spawn pushes handles onto the top vec.
 // On scope exit the top vec is popped and all handles are joined.
@@ -507,19 +516,38 @@ impl Evaluator {
                         });
                     }
 
-                    // Filter: keep only equations whose first pattern matches,
-                    // and bind any variables from those patterns.
+                    // Filter: keep only equations whose first pattern matches.
+                    // Store each equation's first-pattern bindings under unique
+                    // hidden names to avoid variable collisions across equations.
                     let mut remaining: Vec<Equation> = Vec::new();
                     for eq in &equations {
                         let mut probe = local.child();
                         if self.try_bind_pattern(&eq.pats[0], &arg, &mut probe) {
-                            // Merge bindings from this pattern into local env
-                            for (k, v) in probe.bindings() {
-                                local.insert(k.clone(), v.clone());
-                            }
+                            let bindings: Vec<(String, Value)> = probe.bindings()
+                                .into_iter()
+                                .map(|(k, v)| (k.clone(), v.clone()))
+                                .collect();
+                            let body = if bindings.is_empty() {
+                                eq.body.clone()
+                            } else {
+                                // Store values under unique hidden names in shared env,
+                                // then wrap body with let-bindings that alias them back.
+                                let uid = next_curry_id();
+                                let mut ast_bindings: Vec<Binding> = Vec::new();
+                                for (i, (k, v)) in bindings.iter().enumerate() {
+                                    let hidden = format!("__c{}_{}", uid, i);
+                                    local.insert(hidden.clone(), v.clone());
+                                    ast_bindings.push(Binding {
+                                        name: k.clone(),
+                                        value: Expr { kind: ExprKind::Var(hidden), span: eq.span },
+                                        span: eq.span,
+                                    });
+                                }
+                                Expr { kind: ExprKind::Block(ast_bindings, Box::new(eq.body.clone())), span: eq.span }
+                            };
                             remaining.push(Equation {
                                 pats: eq.pats[1..].to_vec(),
-                                body: eq.body.clone(),
+                                body,
                                 span: eq.span,
                             });
                         }
@@ -1335,9 +1363,26 @@ fn json_parse_number(b: &[u8], i: usize) -> Result<(Value, usize), String> {
         return Err(format!("expected digit at position {}", j));
     }
     while j < b.len() && b[j].is_ascii_digit() { j += 1; }
+    let mut is_float = false;
+    if j < b.len() && b[j] == b'.' {
+        is_float = true;
+        j += 1;
+        while j < b.len() && b[j].is_ascii_digit() { j += 1; }
+    }
+    if j < b.len() && (b[j] == b'e' || b[j] == b'E') {
+        is_float = true;
+        j += 1;
+        if j < b.len() && (b[j] == b'+' || b[j] == b'-') { j += 1; }
+        while j < b.len() && b[j].is_ascii_digit() { j += 1; }
+    }
     let s = std::str::from_utf8(&b[i..j]).unwrap();
-    let n: i64 = s.parse().map_err(|_| format!("invalid number at position {}", i))?;
-    Ok((Value::Con("JNum".into(), vec![Value::Int(n)]), j))
+    if is_float {
+        let n: f64 = s.parse().map_err(|_| format!("invalid number at position {}", i))?;
+        Ok((Value::Con("JNum".into(), vec![Value::Float(n)]), j))
+    } else {
+        let n: i64 = s.parse().map_err(|_| format!("invalid number at position {}", i))?;
+        Ok((Value::Con("JNum".into(), vec![Value::Int(n)]), j))
+    }
 }
 
 fn json_parse_string(b: &[u8], i: usize) -> Result<(Value, usize), String> {
@@ -1419,5 +1464,10 @@ fn json_parse_object(b: &[u8], i: usize) -> Result<(Value, usize), String> {
         if b[j] != b',' { return Err(format!("expected ',' or '}}' at position {}", j)); }
         j += 1; // skip ','
     }
+    pairs.sort_by(|a, b| {
+        let ka = if let Value::Con(_, ref args) = a { if let Value::Str(ref s) = args[0] { s.as_str() } else { "" } } else { "" };
+        let kb = if let Value::Con(_, ref args) = b { if let Value::Str(ref s) = args[0] { s.as_str() } else { "" } } else { "" };
+        ka.cmp(kb)
+    });
     Ok((Value::Con("JObj".into(), vec![Value::List(pairs)]), j + 1))
 }

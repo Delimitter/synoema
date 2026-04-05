@@ -1,0 +1,1 @@
+Write a scan_left function (running fold) that returns all intermediate accumulator values. Compute scan_left with addition starting from 0 over [1 2 3 4 5]. Print the result.

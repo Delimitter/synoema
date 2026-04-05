@@ -1,0 +1,43 @@
+-- SPDX-License-Identifier: MIT-0
+-- Binary search tree
+
+--- BST: insert, member, inorder traversal, height.
+--- example: main == ()
+
+Tree a = Leaf | Node (Tree a) a (Tree a)
+
+tree_insert x Leaf = Node Leaf x Leaf
+tree_insert x (Node left val right) =
+  ? x < val -> Node (tree_insert x left) val right
+  : ? x > val -> Node left val (tree_insert x right)
+  : Node left val right
+
+tree_member _ Leaf = false
+tree_member x (Node left val right) =
+  ? x == val -> true
+  : ? x < val -> tree_member x left
+  : tree_member x right
+
+tree_inorder Leaf = []
+tree_inorder (Node left val right) =
+  tree_inorder left ++ [val] ++ tree_inorder right
+
+tree_height Leaf = 0
+tree_height (Node left _ right) =
+  lh = tree_height left
+  rh = tree_height right
+  1 + (? lh > rh -> lh : rh)
+
+tree_size Leaf = 0
+tree_size (Node left _ right) = 1 + tree_size left + tree_size right
+
+-- Build BST from list
+tree_from_list xs = foldl (\t x -> tree_insert x t) Leaf xs
+
+main =
+  t = tree_from_list [5 3 8 1 4 7 9 2 6]
+  p1 = print ("inorder: " ++ show (tree_inorder t))
+  p2 = print ("member 4: " ++ show (tree_member 4 t))
+  p3 = print ("member 10: " ++ show (tree_member 10 t))
+  p4 = print ("height: " ++ show (tree_height t))
+  print ("size: " ++ show (tree_size t))

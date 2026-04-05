@@ -1,0 +1,19 @@
+-- SPDX-License-Identifier: MIT-0
+
+Op = Push Int | Add | Mul
+
+apply (Push n) stack = n : stack
+apply (Add) stack =
+  a = head stack
+  b = head (tail stack)
+  rest = tail (tail stack)
+  (b + a) : rest
+apply (Mul) stack =
+  a = head stack
+  b = head (tail stack)
+  rest = tail (tail stack)
+  (b * a) : rest
+
+eval_rpn ops = head (foldl (\stack op -> apply op stack) [] ops)
+
+main = eval_rpn [(Push 3) (Push 4) Add (Push 5) Mul]

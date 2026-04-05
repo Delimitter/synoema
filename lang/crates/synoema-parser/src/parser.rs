@@ -579,6 +579,9 @@ impl Parser {
                         Token::LParen => {
                             args.push(self.parse_paren_pattern()?);
                         }
+                        Token::LBracket => {
+                            args.push(self.parse_pattern()?);
+                        }
                         _ => break,
                     }
                 }

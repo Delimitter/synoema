@@ -1,0 +1,186 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Synoema",
+  "scopeName": "source.synoema",
+  "fileTypes": ["sno"],
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#punctuation"
+    },
+    {
+      "include": "#builtins"
+    },
+    {
+      "include": "#identifiers"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-dash.synoema",
+          "match": "--.*$"
+        },
+        {
+          "name": "comment.block.synoema",
+          "begin": "\\{-",
+          "end": "-\\}",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.begin.synoema"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.end.synoema"
+            }
+          }
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.synoema",
+          "begin": "\"",
+          "end": "\"",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.synoema"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.synoema"
+            }
+          },
+          "patterns": [
+            {
+              "name": "constant.character.escape.synoema",
+              "match": "\\\\[\\\\\"nrt]"
+            },
+            {
+              "name": "meta.interpolation.synoema",
+              "begin": "\\$\\{",
+              "end": "\\}",
+              "beginCaptures": {
+                "0": {
+                  "name": "punctuation.definition.interpolation.begin.synoema"
+                }
+              },
+              "endCaptures": {
+                "0": {
+                  "name": "punctuation.definition.interpolation.end.synoema"
+                }
+              },
+              "patterns": [
+                {
+                  "include": "source.synoema"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.synoema",
+          "match": "\\b\\d+\\.\\d+([eE][+-]?\\d+)?\\b"
+        },
+        {
+          "name": "constant.numeric.int.synoema",
+          "match": "\\b\\d+\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.synoema",
+          "match": "\\b(if|then|else|let|where|case|match|fn|type|import|export|main|as|hiding)\\b"
+        },
+        {
+          "name": "keyword.other.synoema",
+          "match": "\\b(True|False)\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.synoema",
+          "match": "(\\|>|->|=>|\\?|\\|)"
+        },
+        {
+          "name": "keyword.operator.arithmetic.synoema",
+          "match": "(\\+|-|\\*|/|%|\\^)"
+        },
+        {
+          "name": "keyword.operator.comparison.synoema",
+          "match": "(==|!=|<=|>=|<|>)"
+        },
+        {
+          "name": "keyword.operator.logical.synoema",
+          "match": "(&&|\\|\\||!)"
+        },
+        {
+          "name": "keyword.operator.other.synoema",
+          "match": "(\\+\\+|::|\\.\\.)"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.definition.synoema",
+          "match": "[{}\\[\\]()=,;.]"
+        },
+        {
+          "name": "punctuation.definition.colon.synoema",
+          "match": ":"
+        }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.synoema",
+          "match": "\\b(print|println|readLine|show|map|filter|fold|foldLeft|isEmpty|length|head|tail|reverse|sort|take|drop|zip|enumerate|range|max|min|sum|product|all|any|find|contains)\\b"
+        },
+        {
+          "name": "support.type.builtin.synoema",
+          "match": "\\b(Int|Float|Bool|String|List|Unit|Result|Option|Pair)\\b"
+        }
+      ]
+    },
+    "identifiers": {
+      "patterns": [
+        {
+          "name": "variable.other.synoema",
+          "match": "\\b[a-z_][a-zA-Z0-9_]*\\b"
+        },
+        {
+          "name": "type.other.synoema",
+          "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    }
+  }
+}

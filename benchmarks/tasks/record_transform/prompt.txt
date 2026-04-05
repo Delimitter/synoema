@@ -1,0 +1,1 @@
+Create a point record with name, x, and y fields. Demonstrate record creation, update (change fields using spread syntax), and display the final record as "name at (x, y)".

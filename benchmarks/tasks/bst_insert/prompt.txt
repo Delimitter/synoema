@@ -1,0 +1,1 @@
+Define a binary search tree type and write an insert function. Insert the values [5 3 7 1 4] into an empty tree, then print the in-order traversal (should be sorted).

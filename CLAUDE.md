@@ -1,6 +1,6 @@
 # Synoema
 
-Язык программирования для LLM code generation. ~12000 LOC Rust, 993 tests, 8 crates, Cranelift JIT.
+Язык программирования для LLM code generation. ~12000 LOC Rust, 998 tests, 8 crates, Cranelift JIT.
 
 ## Команды
 
@@ -8,11 +8,13 @@
 # Из директории lang/ (workspace root)
 cargo build                     # Сборка
 cargo test                      # Все тесты
+cargo run -p synoema-repl -- install                  # Установка в ~/.synoema/bin + PATH
 cargo run -p synoema-repl -- init myapp              # Scaffold проекта
 cargo run -p synoema-repl -- run examples/quicksort.sno  # Interpreter
 cargo run -p synoema-repl -- jit examples/factorial.sno   # JIT
 cargo run -p synoema-repl -- eval "6 * 7"                 # Eval выражения
 cargo run -p synoema-repl -- build examples/quicksort.sno  # Build to bytecode
+cargo run -p synoema-repl -- watch run examples/quicksort.sno  # Watch + re-run on change
 cargo run -p synoema-repl -- --errors json run file.sno   # JSON ошибки
 cargo run -p synoema-repl -- test examples/               # Doctests
 cargo run -p synoema-repl -- doc examples/quicksort.sno   # Генерация docs
@@ -72,7 +74,8 @@ cargo run -p synoema-repl -- doc examples/quicksort.sno   # Генерация d
 
 ## Статус
 
-- 0 warnings, 0 known bugs, 993 tests
+- 0 warnings, 0 known bugs, 998 tests
 - Prelude: `lang/prelude/prelude.sno` — Result type + комбинаторы (map_ok, unwrap, is_ok, and_then и др.)
 - `error : String -> a` builtin (interpreter + JIT)
-- Завершено: Phases 9.2–23 + TCO в JIT + String stdlib в JIT + Doc-as-Code + LLM Cost Reduction v1 + Region Inference
+- Doc Extraction API: `synoema doc --format json` + MCP tool `doc_query`
+- Завершено: Phases 9.2–23 + TCO в JIT + String stdlib в JIT + Doc-as-Code + LLM Cost Reduction v1 + Region Inference + Doc Extraction API

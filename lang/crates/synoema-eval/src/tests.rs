@@ -2352,6 +2352,58 @@ fn json_parse_whitespace() {
     ]));
 }
 
+#[test]
+fn json_parse_float() {
+    let src = r#"main = json_parse "3.14""#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Con("Ok".into(), vec![
+        Value::Con("JNum".into(), vec![Value::Float(3.14)]),
+    ]));
+}
+
+#[test]
+fn json_parse_negative_float() {
+    let src = r#"main = json_parse "-0.5""#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Con("Ok".into(), vec![
+        Value::Con("JNum".into(), vec![Value::Float(-0.5)]),
+    ]));
+}
+
+#[test]
+fn json_parse_float_exponent() {
+    let src = r#"main = json_parse "1.5e2""#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Con("Ok".into(), vec![
+        Value::Con("JNum".into(), vec![Value::Float(150.0)]),
+    ]));
+}
+
+#[test]
+fn json_get_unsorted_keys() {
+    let src = r#"main = json_get "alpha" (unwrap (json_parse "{\"beta\": 2, \"alpha\": 1}"))"#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::Con("Ok".into(), vec![
+        Value::Con("JNum".into(), vec![Value::Int(1)]),
+    ]));
+}
+
+#[test]
+fn json_get_unsorted_keys_all() {
+    let src = r#"
+get_both raw =
+  obj = unwrap (json_parse raw)
+  a = unwrap (json_get "task" obj)
+  b = unwrap (json_get "counts" obj)
+  [a b]
+main = get_both "{\"task\": \"fac\", \"counts\": 42}""#;
+    let (val, _) = run_main(src);
+    assert_eq!(val, Value::List(vec![
+        Value::Con("JStr".into(), vec![Value::Str("fac".into())]),
+        Value::Con("JNum".into(), vec![Value::Int(42)]),
+    ]));
+}
+
 // ── Map operations ──────────────────────────────────────
 
 #[test]

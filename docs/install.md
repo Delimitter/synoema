@@ -56,23 +56,36 @@ Download from [GitHub Releases](https://github.com/Delimitter/synoema/releases/l
 - [Linux x86_64](../releases/v0.1.0-alpha.1/linux-x64/)
 - [Windows x64](../releases/v0.1.0-alpha.1/win32-x64/)
 
-### Step 3 — Setup
+### Step 3 — Install
 
-**macOS / Linux:**
+**Automatic (recommended):**
+```bash
+chmod +x synoema              # macOS/Linux only
+xattr -dr com.apple.quarantine synoema synoema-mcp  # macOS only
+
+./synoema install
+# → copies to ~/.synoema/bin/
+# → adds to PATH (zsh/bash/fish on Unix, User PATH on Windows)
+```
+
+Options:
+- `--prefix <path>` — install to `<path>/bin/` instead of `~/.synoema/bin/`
+- `--no-path` — don't modify shell profile / PATH
+
+If `synoema-mcp` is in the same directory, it gets installed automatically.
+
+**Manual alternative:**
+
+macOS / Linux:
 ```bash
 chmod +x synoema synoema-mcp
-
-# macOS only: remove quarantine flag for unsigned binaries
-xattr -dr com.apple.quarantine synoema synoema-mcp
-
-# Move to PATH
+xattr -dr com.apple.quarantine synoema synoema-mcp  # macOS only
 sudo mv synoema /usr/local/bin/
 sudo mv synoema-mcp /usr/local/bin/
 ```
 
-**Windows (PowerShell):**
+Windows (PowerShell):
 ```powershell
-# Move to a directory in your PATH, e.g.:
 Move-Item synoema.exe C:\Tools\synoema.exe
 Move-Item synoema-mcp.exe C:\Tools\synoema-mcp.exe
 ```
