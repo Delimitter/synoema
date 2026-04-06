@@ -5,6 +5,8 @@ All 33 operators = exactly 1 cl100k_base token. 46% fewer tokens than Python.
 Files: `.sno`. Entry point: `main = <expr>`.
 Grammar: `lang/tools/constrained/synoema.gbnf` (use for constrained decoding).
 
+> **Small models (4B–32B)?** Use [`docs/llm/synoema-compact.md`](synoema-compact.md) (~900 tokens) or task-specific templates in [`docs/llm/templates/`](templates/README.md).
+
 ---
 
 ## 1. Overrides

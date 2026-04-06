@@ -22,6 +22,11 @@
 - **Error recovery:** `parse_recovering()` и `typecheck_recovering()` — сбор всех ошибок за один проход
 - **Feedback loop:** `tools/llm/feedback_loop.py` — generate → check → enrich → retry pipeline
 - **Stdlib catalog:** `docs/llm/stdlib.md` — машиночитаемый каталог всех builtins с типами
+- **Small Model Quality Stack Phase 1:**
+  - `docs/llm/synoema-compact.md` — compact reference ~900 токенов (vs 1800 full) для малых моделей 4B–32B
+  - `docs/llm/templates/` — 5 task-specific prompt templates (arithmetic, lists, adt-patterns, records-maps, string-io) по 540–730 токенов каждый
+  - `docs/llm/templates/gotcha-map.json` — feature → gotcha ID mapping для динамической инъекции предупреждений
+  - Phase D benchmark (`benchmarks/runner/src/phases/size.rs`) — multi-model × multi-config × multi-pass тестирование малых моделей через ollama
 
 ---
 
@@ -270,3 +275,79 @@ pretty_assertions = "1"
 
 Минимальные зависимости: только Cranelift + pretty_assertions для тестов.
 Нет tokio, нет serde, нет async — чистый синхронный Rust.
+
+## 11. Small Model Quality Stack — Roadmap
+
+Стратегия повышения качества генерации Synoema на малых моделях (4B–32B).
+Исследование проведено в апреле 2026 на основе 15+ научных работ (PLDI 2025, NeurIPS 2024, ICLR 2025, ACL 2025).
+
+### Phase 1: Quick Wins ✅ (завершено)
+
+- `docs/llm/synoema-compact.md` — compact reference ~900 токенов (gotcha-first ordering)
+- `docs/llm/templates/` — 5 task-specific prompt templates (540–730 tok each)
+- `docs/llm/templates/gotcha-map.json` — feature → gotcha ID mapping
+- `benchmarks/runner/src/phases/size.rs` — Phase D benchmark (multi-model × multi-config × multi-pass)
+- CLI: `--phases size`, `--size-models`
+
+### Phase 2: QLoRA Fine-Tune (ожидание: +40% run rate, 2–3 недели)
+
+**Требует подтверждения перед началом.**
+
+- Синтетический корпус: 10K–50K verified (instruction, code) pairs
+  - Генерация frontier-моделью (Claude/GPT-4o) с reference контекстом
+  - Верификация: `synoema run` → parse ✓ typecheck ✓ run ✓
+  - Dedup по AST similarity, баланс по сложности
+- QLoRA fine-tune Qwen2.5-Coder 7B (Unsloth, ~5 GB VRAM)
+  - r=16, alpha=32, 3 epochs, lr=2e-4, cosine scheduler
+  - Hardware: 1× RTX 4090 или A100
+- A/B benchmark: fine-tuned vs in-context на Phase D
+- Integrate DOMINO (arxiv:2403.06988) для zero-overhead grammar constraints
+
+### Phase 3: Type-Constrained Decoding (ожидание: -50% type errors, 4–6 недель)
+
+**Требует подтверждения. Research-heavy.**
+
+Основано на: Mündler et al., PLDI 2025 (arxiv:2504.09246) — type-constrained decoding для TypeScript.
+Synoema (Hindley-Milner, чистый, BPE-aligned) значительно проще для type-constrain чем TypeScript.
+
+- Incremental type checker: extend `synoema-types` для partial prefix → type constraints
+- XGrammar logit processor: type mask computation на каждом шаге генерации
+- Think-then-Constrain integration (arxiv:2601.07525, Jan 2026): свободное "думание" до trigger-токена, потом grammar+types kick in
+- IterGen backtracking (ICLR 2025): forward/backward generation с KV-cache reuse
+
+### Phase 4: Self-Play RL (ожидание: push к 80%+ run rate, 4+ недель)
+
+**Требует подтверждения. Наиболее research-тяжёлая фаза.**
+
+Основано на: Sol-Ver (arxiv:2502.14948, March 2026), CoCoS (arxiv:2505.23060, 2025).
+Ключевое преимущество Synoema: compiler = perfect verifier (ground truth без LLM-as-judge).
+
+- Sol-Ver adaptation: LLM-as-solver + compiler-as-verifier + LLM-as-test-generator
+- CoCoS-style RL для self-correction на 1B–7B моделях
+  - Accumulated reward с discount factor
+  - Fine-grained per-turn reward
+- Ожидание: +19–35% code generation quality (на основе results Sol-Ver и CoCoS)
+
+### Ожидаемый кумулятивный эффект (7B модель)
+
+| Стек | Syntax rate | Type rate | Run rate | Latency |
+|------|------------|-----------|----------|---------|
+| Baseline (in-context, no GBNF) | ~60% | ~35% | ~20% | ×1.0 |
+| Phase 1 (compact + templates + GBNF + multipass) | 100% | ~65% | ~45% | ×2.5 |
+| Phase 2 (+ QLoRA fine-tune + DOMINO) | 100% | ~80% | ~65% | ×1.5 |
+| Phase 3 (+ type-constrain + IterGen) | 100% | ~95% | ~75% | ×1.2 |
+| Phase 4 (+ Sol-Ver self-play) | 100% | ~95% | ~80%+ | ×1.0 |
+
+### Ключевые research-ссылки
+
+- DOMINO (ICML 2024): arxiv:2403.06988 — zero-overhead BPE-aligned grammar constraints
+- Pre³ (ACL 2025): arxiv:2506.03887 — deterministic PDA, +36% throughput vs XGrammar
+- Grammar-Aligned Decoding (NeurIPS 2024): arxiv:2405.21047 — unbiased grammar-constrained sampling
+- Type-Constrained Code Gen (PLDI 2025): arxiv:2504.09246 — incremental type checker for code LLMs
+- Think-then-Constrain (Jan 2026): arxiv:2601.07525 — hybrid free/constrained decoding, +27% accuracy
+- IterGen (ICLR 2025): arxiv:2410.07295 — grammar backtracking with KV-cache reuse, +18.5%
+- CoCoS (2025): arxiv:2505.23060 — self-correcting code gen for 1B models, +35.8% MBPP
+- Sol-Ver (March 2026): arxiv:2502.14948 — self-play solver-verifier, +19.6% code gen on 8B
+- Qwen2.5-Coder: qwenlm.github.io — 7B/14B/32B, 92 languages, 128K context
+- Qwen3-Coder-Next (2026): 3B active (MoE), SWE-Bench >70%
+- Unsloth: github.com/unslothai/unsloth — 2× faster QLoRA, 70% less VRAM

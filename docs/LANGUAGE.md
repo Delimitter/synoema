@@ -583,6 +583,8 @@ Use `run` for development and I/O. Use `jit` for performance.
 
 - [Installation Guide](install.md) — all install methods with troubleshooting
 - [Formal Language Specification](specs/language_reference.md) — EBNF grammar, type rules, operational semantics
-- [LLM Quick Reference](llm/synoema.md) — token-optimized reference for code generation
+- [LLM Quick Reference](llm/synoema.md) — token-optimized reference for code generation (~1800 tokens)
+- [LLM Compact Reference](llm/synoema-compact.md) — condensed reference for small models 4B–32B (~900 tokens)
+- [LLM Templates](llm/templates/README.md) — 5 task-specific prompt templates for small models
 - [Testing Guide](testing.md) — test infrastructure, running tests
 - [Scientific Foundations](research/scientific_foundations.md) — peer-reviewed research behind the design

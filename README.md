@@ -163,6 +163,8 @@ Fibonacci is an outlier — deep recursion where JIT's TCO shines. Typical speed
 
 **Guaranteed correctness** — GBNF grammar for constrained decoding ensures 100% syntactically valid output from any LLM.
 
+**Small model support** — compact reference (~900 tokens), 5 task-specific templates, and multi-pass error correction enable quality code generation on models as small as 4B–7B parameters. See [docs/llm/templates/](docs/llm/templates/README.md).
+
 **Scientific foundation** — design grounded in peer-reviewed research on token efficiency, type-guided generation, and grammar-constrained decoding. See [docs/research/scientific_foundations.md](docs/research/scientific_foundations.md).
 
 > Full benchmark methodology, all results, and how to reproduce: [docs/benchmarks.md](docs/benchmarks.md)
@@ -175,7 +177,9 @@ Fibonacci is an outlier — deep recursion where JIT's TCO shines. Typical speed
 | [Benchmarks](docs/benchmarks.md) | Token savings, runtime, LLM generation benchmarks |
 | [Contributing](CONTRIBUTING.md) | Build from source, architecture, how to contribute |
 | [Installation](docs/install.md) | All install methods, MCP setup, troubleshooting |
-| [LLM Reference](docs/llm/synoema.md) | Token-optimized quick reference for LLMs |
+| [LLM Reference](docs/llm/synoema.md) | Token-optimized quick reference for LLMs (~1800 tokens) |
+| [LLM Compact Ref](docs/llm/synoema-compact.md) | Condensed reference for small models 4B–32B (~900 tokens) |
+| [LLM Templates](docs/llm/templates/README.md) | 5 task-specific prompt templates for small models |
 | [MCP Server](docs/mcp.md) | Claude Desktop / Cursor / Zed integration |
 | [Formal Spec](docs/specs/language_reference.md) | EBNF grammar, type rules, operational semantics |
 | [Scientific Foundations](docs/research/scientific_foundations.md) | 23 peer-reviewed sources behind the design |

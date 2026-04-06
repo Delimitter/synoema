@@ -98,6 +98,38 @@ Sends identical prompts to LLM models and validates generated code. Two backends
 | Mid | GPT-4o-mini, DeepSeek V3, Qwen3 Coder, Llama 4 Maverick |
 | Weak | Qwen3.5 9B, LFM 1.2B (free), Reka Edge 7B |
 
+### D. Model Size Reduction (local, sequential)
+
+Tests small models (0.5B–7B) with multiple reference configurations to measure the impact of compact references and multi-pass error correction on generation quality.
+
+**Requires:** ollama installed and running locally.
+
+```bash
+# Run Phase D
+cargo run --manifest-path runner/Cargo.toml -- run --phases size
+
+# Specific models only
+cargo run --manifest-path runner/Cargo.toml -- run --phases size \
+  --size-models qwen2.5-coder:3b,qwen2.5-coder:7b
+
+# With verbose output
+cargo run --manifest-path runner/Cargo.toml -- run --phases size --repeats 3 -v
+```
+
+**Default models:** `qwen2.5-coder:0.5b`, `qwen2.5-coder:1.5b`, `qwen2.5-coder:3b`, `qwen2.5-coder:7b`
+
+**3 configurations per model:**
+
+| Config | Reference | Tokens | Multi-pass | Purpose |
+|--------|-----------|--------|------------|---------|
+| `baseline` | `docs/llm/synoema.md` | ~1800 | No | Control |
+| `compact` | `docs/llm/synoema-compact.md` | ~900 | No | Compact reference impact |
+| `multipass` | `docs/llm/synoema-compact.md` | ~900 | Yes (2 retries) | Error feedback impact |
+
+Multi-pass uses temperature decay (0.7 → 0.4 → 0.2) with `llm_hint` error feedback.
+
+**Metrics:** syntax rate, type rate, run rate (correctness), avg tokens.
+
 ## Tasks
 
 | Task | A | B | C | D | Tests |

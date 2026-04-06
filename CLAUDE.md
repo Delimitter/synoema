@@ -36,7 +36,7 @@ cargo run -p synoema-repl -- doc examples/quicksort.sno   # Генерация d
 |-----------|---------|-----------|
 | **Человек-пользователь** | `README.md` + `docs/LANGUAGE.md` | Quick Wins, справочник языка |
 | **Контрибьютор** | `CONTRIBUTING.md` | Build, architecture, how to contribute |
-| **LLM-пользователь** | `docs/llm/` | Quick reference ≤1800 токенов, таблицы, аксиомы |
+| **LLM-пользователь** | `docs/llm/` | Quick reference ≤1800 токенов, compact ref ~900 токенов, 5 task-specific templates |
 | **LLM-разработчик** (Claude agent) | `context/` | Rules, Architecture, Project State, Dev Guide |
 
 Подробнее: `context/RULES.md` → секция 7.
@@ -52,7 +52,9 @@ cargo run -p synoema-repl -- doc examples/quicksort.sno   # Генерация d
 | `context/DEVELOPMENT_GUIDE.md` | Как добавлять фичи, roadmap, паттерны кодирования |
 | `docs/LANGUAGE.md` | Справочник языка для пользователя |
 | `CONTRIBUTING.md` | Dev guide: architecture, build, tests, how to contribute |
-| `docs/llm/synoema.md` | Quick reference для LLM-генерации кода |
+| `docs/llm/synoema.md` | Quick reference для LLM-генерации кода (~1800 токенов) |
+| `docs/llm/synoema-compact.md` | Compact reference для малых моделей 4B–32B (~900 токенов) |
+| `docs/llm/templates/` | 5 task-specific prompt templates (arithmetic, lists, adt, records, string-io) |
 | `docs/specs/language_reference.md` | Формальная спецификация языка |
 | `docs/specs/compiler_roadmap.md` | Roadmap компилятора (фазы, архитектура) |
 | `docs/research/scientific_foundations.md` | 23 научных факта |
@@ -61,7 +63,7 @@ cargo run -p synoema-repl -- doc examples/quicksort.sno   # Генерация d
 | `docs/benchmarks.md` | Сравнительные бенчмарки: токены, runtime, LLM generation |
 | `docs/testing.md` | Тестирование: 702 теста, как запускать |
 | `docs/stress-server.md` | HTTP-дэшборд стресс-тестов |
-| `benchmarks/` | Benchmark suite: Rust runner + Python scripts + 16 задач × 5 языков |
+| `benchmarks/` | Benchmark suite: Rust runner + Python scripts + 30 задач × 5 языков + Phase D (small models) |
 | `lang/crates/` | Исходный код компилятора |
 
 ## Правила (кратко)
@@ -78,4 +80,4 @@ cargo run -p synoema-repl -- doc examples/quicksort.sno   # Генерация d
 - Prelude: `lang/prelude/prelude.sno` — Result type + комбинаторы (map_ok, unwrap, is_ok, and_then и др.)
 - `error : String -> a` builtin (interpreter + JIT)
 - Doc Extraction API: `synoema doc --format json` + MCP tool `doc_query`
-- Завершено: Phases 9.2–23 + TCO в JIT + String stdlib в JIT + Doc-as-Code + LLM Cost Reduction v1 + Region Inference + Doc Extraction API
+- Завершено: Phases 9.2–23 + TCO в JIT + String stdlib в JIT + Doc-as-Code + LLM Cost Reduction v1 + Region Inference + Doc Extraction API + Small Model Quality Stack Phase 1
