@@ -67,12 +67,16 @@ enum Command {
         /// Ollama model to use (default: qwen3:8b)
         #[arg(long, default_value = "qwen3:8b")]
         ollama_model: String,
+
+        /// Models for Phase D size benchmark (comma-separated ollama model tags)
+        #[arg(long, value_delimiter = ',')]
+        size_models: Option<Vec<String>>,
     },
 }
 
 fn resolve_phases(all: bool, phases: &Option<Vec<String>>) -> Vec<String> {
     if all {
-        return vec!["token".into(), "runtime".into(), "llm".into()];
+        return vec!["token".into(), "runtime".into(), "llm".into(), "size".into()];
     }
     if let Some(p) = phases {
         return p.clone();
@@ -118,6 +122,7 @@ fn main() {
             parallel,
             ollama,
             ollama_model,
+            size_models,
         } => {
             let bench_root = find_bench_root();
             let active_phases = resolve_phases(all, &phases);
@@ -204,6 +209,29 @@ fn main() {
                         "  Warning: Phase C skipped — no --openrouter-key or --ollama provided."
                     );
                     eprintln!("  Token and runtime benchmarks will still run.");
+                }
+            }
+
+            // Phase D: Model Size Reduction
+            if active_phases.contains(&"size".to_string()) {
+                telemetry::print_phase_start("D", "MODEL SIZE REDUCTION", "sequential");
+                let sm = size_models.clone().unwrap_or_default();
+                match phases::size::run(&bench_root, &task_list, &sm, repeats, verbose) {
+                    Ok(results) => {
+                        // Print summary
+                        eprintln!("\n  Phase D complete:");
+                        for mr in &results.models {
+                            for cr in &mr.configs {
+                                eprintln!(
+                                    "    {} / {}: syntax={:.0}% type={:.0}% run={:.0}%",
+                                    mr.model, cr.config,
+                                    cr.avg_syntax_pct, cr.avg_type_pct, cr.avg_run_pct,
+                                );
+                            }
+                        }
+                        all_results.size = Some(results);
+                    }
+                    Err(e) => eprintln!("  Phase D error: {e}"),
                 }
             }
 

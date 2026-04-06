@@ -1,0 +1,13 @@
+{
+  "lists": [1, 2, 3, 6],
+  "strings": [4, 7, 10],
+  "pattern_match": [1, 12],
+  "records": [11],
+  "adt": [12, 13],
+  "io": [5, 7],
+  "numbers": [5, 8],
+  "json": [11, 13],
+  "maps": [11],
+  "recursion": [5, 8],
+  "higher_order": [5, 6]
+}

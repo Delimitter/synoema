@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2025-present Synoema Contributors
 
-use crate::phases::{llm, runtime, tokens};
+use crate::phases::{llm, runtime, size, tokens};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::time::Duration;
@@ -11,6 +11,7 @@ pub struct AllResults {
     pub tokens: Option<tokens::TokenResults>,
     pub runtime: Option<runtime::RuntimeResults>,
     pub llm: Option<llm::LlmResults>,
+    pub size: Option<size::SizeResults>,
 }
 
 pub fn write_results(bench_root: &Path, results: &AllResults, elapsed: Duration) -> String {
@@ -127,6 +128,31 @@ fn build_summary(results: &AllResults, elapsed: Duration) -> String {
                 "{:12} {:>8.1}% {:>8.1}% {:>10.0} {:>9.4}\n",
                 lang, avg.syntax_pct, avg.correct_pct, avg.avg_tokens, avg.avg_cost
             ));
+        }
+        s.push('\n');
+    }
+
+    if let Some(ref sz) = results.size {
+        s.push_str("D. MODEL SIZE REDUCTION\n");
+        s.push_str(&"-".repeat(70));
+        s.push_str(&format!(
+            "\n{:24} {:>10} {:>9} {:>9} {:>9} {:>10}\n",
+            "Model / Config", "Syntax%", "Type%", "Run%", "Avg Tok", "Tasks"
+        ));
+
+        for mr in &sz.models {
+            for cr in &mr.configs {
+                let label = format!("{} / {}", mr.model, cr.config);
+                s.push_str(&format!(
+                    "{:24} {:>9.1}% {:>8.1}% {:>8.1}% {:>9.0} {:>10}\n",
+                    label,
+                    cr.avg_syntax_pct,
+                    cr.avg_type_pct,
+                    cr.avg_run_pct,
+                    cr.avg_tokens_out,
+                    cr.tasks.len(),
+                ));
+            }
         }
         s.push('\n');
     }
